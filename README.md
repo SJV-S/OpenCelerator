@@ -5,7 +5,7 @@ A Python implementation of the Standard Celeration Chart (SCC). The SCC is a ver
 - Tutorial: link
 - Contact: link
 
-# Features
+## Features
 - Data import and export
 - Direct data entry
 - Phase lines
