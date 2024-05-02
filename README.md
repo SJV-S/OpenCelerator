@@ -1,9 +1,12 @@
 # iChart
-Interface for the Standard Celeration Chart (graphing tool)
 
-A Python implementation of the SCC (Standard Celeration Chart), which allows for analyzing learning of a wide range of behaviors using rate of response. I'm currently working on cleaning the code and making it available for free to everyone on desktop. Images below. Download here. Tutorial here.
+A Python implementation of the Standard Celeration Chart (SCC). The SCC is a versatile graphing tool used in the field of Precision Teaching for analysis of response frequencies. I'm currently working on cleaning the code and fixing bugs. The goal is a simple and easy to use app for charting on desktop.
 
-Features:
+Tutorial: link
+Download: link
+Contact: link
+
+## Features:
 - Data import and export
 - Direct data entry
 - Phase lines
