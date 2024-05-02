@@ -13,6 +13,7 @@ A Python implementation of the Standard Celeration Chart (SCC). The SCC is a ver
 - Trend analysis
 - Selective viewing
 - Credit lines
+- Changable start date
 
 ![Default Chart](https://github.com/SJV-S/iChart/blob/main/default_chart.png?raw=true "Default Chart")
 
