@@ -19,3 +19,6 @@ A Python implementation of the Standard Celeration Chart (SCC). The SCC is a ver
 
 ![Demo Chart](https://github.com/SJV-S/iChart/blob/main/demo_chart.png?raw=true "Demo Chart")
 
+![Demo Chart 2](https://github.com/SJV-S/iChart/blob/main/demo_chart2.png?raw=true "Demo Chart 2")
+
+
