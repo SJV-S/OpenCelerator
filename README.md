@@ -10,12 +10,12 @@ A Python implementation of the Standard Celeration Chart (SCC). The SCC is a ver
 ## Features
 - Data import and export
 - Direct data entry
-  - Phase lines
-    Aim lines
-    Trend analysis
-    Selective viewing
-    Credit lines
-    Changeable start date
+- Phase lines
+- Aim lines
+- Trend analysis
+- Selective viewing
+- Credit lines
+- Changeable start date
 
 ## Installation
 
