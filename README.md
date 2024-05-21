@@ -7,7 +7,7 @@ A Python implementation of the Standard Celeration Chart (SCC). The SCC is a ver
     Installation
     Images
 
-# Features
+## Features
 - Data import and export
 - Direct data entry
   - Phase lines
@@ -17,7 +17,7 @@ A Python implementation of the Standard Celeration Chart (SCC). The SCC is a ver
     Credit lines
     Changeable start date
 
-Installation
+## Installation
 
 Extract content in your preferred directory. Launch by running iChart executable.
 
