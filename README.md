@@ -2,7 +2,7 @@
 
 A Python implementation of the Standard Celeration Chart (SCC). The SCC is a versatile data visualization tool used in the field of Precision Teaching for analysis of response frequencies. I'm currently working on cleaning the code and fixing bugs. The goal is a free and easy to use app for charting on desktop. Currently in alpha.
 
-Contact: ichart.wopak@simplelogin.com
+Contact: ichart.wopak@simplelogin.com<br>
 Installation
 
 ## Features
