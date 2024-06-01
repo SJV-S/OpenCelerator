@@ -1,15 +1,17 @@
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout, QPushButton, \
-    QGroupBox, QRadioButton, QVBoxLayout, QLineEdit, QLabel, QDateEdit, QListWidget, QFileDialog, QCheckBox, QButtonGroup, QDialog, QComboBox, QMessageBox, QGridLayout, QStackedWidget
-from PyQt5.QtGui import QDoubleValidator, QFont
+    QGroupBox, QRadioButton, QVBoxLayout, QLineEdit, QLabel, QDateEdit, QListWidget, QFileDialog, QCheckBox, QButtonGroup, QDialog, QComboBox, QMessageBox, QGridLayout, QStackedWidget, QSpinBox
+from PyQt5.QtGui import QDoubleValidator, QFont, QIcon
 from PyQt5.QtCore import Qt, QDate
 
 from support_classes import InputDialog
+from DataManager import DataManager
 
 
 class ModeWidget(QWidget):
     def __init__(self, figure_manager):
         super().__init__()
         self.figure_manager = figure_manager
+        self.data_manager = DataManager()
         self.layout = QVBoxLayout(self)
         self.init_ui()
 
@@ -71,8 +73,8 @@ class ViewModeWidget(ModeWidget):
         view_grid.addWidget(self.major_grid_check, 7, 0)
         view_grid.addWidget(self.timing_grid_check, 9, 0)
         view_grid.addWidget(self.aims_check, 7, 1)
-        view_grid.addWidget(self.timing_floor_check, 8, 1)
-        view_grid.addWidget(self.phase_lines_check, 9, 1)
+        view_grid.addWidget(self.timing_floor_check, 9, 1)
+        view_grid.addWidget(self.phase_lines_check, 8, 1)
 
         # Setting initial states of checkboxes
         for checkbox in [self.minor_grid_check, self.major_grid_check, self.dots_check, self.xs_check,
@@ -106,6 +108,9 @@ class ViewModeWidget(ModeWidget):
         self.layout.addLayout(view_grid)
         self.layout.addWidget(credit_lines_btn)
 
+        # Call the method to check the condition and update checkbox states
+        self.update_timing_checkboxes()
+
     def credit_lines_popup(self):
         if self.dialog.exec_() == QDialog.Accepted:  # Check if the dialog was accepted
             r1, r2, r3 = self.dialog.get_inputs()  # Retrieve the inputs
@@ -114,52 +119,60 @@ class ViewModeWidget(ModeWidget):
             self.dialog.credit_row3 = r3
             self.figure_manager.view_update_credit_lines(r1, r2, r3)
 
+    def update_timing_checkboxes(self):
+        # Replace the following condition with your actual condition
+        condition = 'Minute' in self.data_manager.user_preferences['chart_type']
+        self.timing_floor_check.setEnabled(condition)
+        self.timing_grid_check.setEnabled(condition)
 
-class ManualModeWidget(ModeWidget):
+
+class ManualModeTemplate(ModeWidget):
     def init_ui(self):
-        # Group box for radio buttons to select dot type
+        self.create_radio_buttons()
+        self.create_count_input()
+        self.additional_ui_elements()
+        self.create_date_input()
+        self.create_manual_buttons()
+        self.create_label_coordinates()
+        self.layout.addStretch()
+
+    def create_radio_buttons(self):
         radio_layout = QHBoxLayout()
         radio_dot = QRadioButton("Dots")
         radio_x = QRadioButton("Xs")
-        radio_dot.setChecked(True)  # Start with dot by default
+        radio_dot.setChecked(True)
 
         radio_layout.addWidget(radio_dot)
         radio_layout.addWidget(radio_x)
         self.layout.addLayout(radio_layout)
 
-        # Connect radio buttons to change point type in figure manager
         radio_dot.toggled.connect(lambda checked: setattr(self.figure_manager, 'point_type', True) if checked else None)
         radio_x.toggled.connect(lambda checked: setattr(self.figure_manager, 'point_type', False) if checked else None)
 
-        # Validators for input fields
+    def create_count_input(self):
         validator = QDoubleValidator(0.0, 9999.99, 2)
-
-        # Setup for Count input
         label_manual_count = QLabel('Count')
         count_input = QLineEdit('')
         count_input.setValidator(validator)
         self.layout.addWidget(label_manual_count)
         self.layout.addWidget(count_input)
+        self.count_input = count_input
 
-        # Setup for Date input
+    def additional_ui_elements(self):
+        # This method is meant to be overridden in subclasses to add additional UI elements.
+        pass
+
+    def create_date_input(self):
+        # To be called only in subclasses where a date input is needed
         date_input = QDateEdit()
         date_input.setDate(QDate.currentDate())
         date_input.setCalendarPopup(True)
         date_input.setDisplayFormat("dd-MM-yyyy")
         self.layout.addWidget(QLabel('Date'))
         self.layout.addWidget(date_input)
+        self.date_input = date_input
 
-        # Time input setup
-        time_input_layout = QHBoxLayout()
-        hour_input = self.create_time_input("Hour", validator)
-        min_input = self.create_time_input("Min", validator)
-        sec_input = self.create_time_input("Sec", validator)
-        time_input_layout.addLayout(hour_input)
-        time_input_layout.addLayout(min_input)
-        time_input_layout.addLayout(sec_input)
-        self.layout.addLayout(time_input_layout)
-
-        # Buttons for adding and undoing manual entries
+    def create_manual_buttons(self):
         manual_buttons_layout = QHBoxLayout()
         add_button = QPushButton('Add')
         undo_button = QPushButton('Undo')
@@ -167,25 +180,44 @@ class ManualModeWidget(ModeWidget):
         manual_buttons_layout.addWidget(undo_button)
         self.layout.addLayout(manual_buttons_layout)
 
-        # Connect buttons to figure manager methods
-        add_button.clicked.connect(lambda: self.figure_manager.manual_plot_from_form(
-            count_input.text(),
-            hour_input.itemAt(1).widget().text(),
-            min_input.itemAt(1).widget().text(),
-            sec_input.itemAt(1).widget().text(),
-            date_input.text()
-        ))
+        add_button.clicked.connect(self.add_entry)
         undo_button.clicked.connect(self.figure_manager.manual_undo_point)
+        self.add_button = add_button
+        self.undo_button = undo_button
 
-        # Label for displaying coordinates
+    def create_label_coordinates(self):
         label_xy_coordinates = QLabel('')
         self.layout.addWidget(label_xy_coordinates)
 
-        # Eliminate any extra vertical stretches
-        self.layout.addStretch()
+    def add_entry(self):
+        raise NotImplementedError("Subclasses should implement this method")
+
+
+class ManualModeWidgetDailyMinute(ManualModeTemplate):
+    def additional_ui_elements(self):
+        self.create_time_inputs()
+
+    def create_time_inputs(self):
+        validator = QDoubleValidator(0.0, 9999.99, 2)
+        time_input_layout = QHBoxLayout()
+        self.hour_input = self.create_time_input("Hour", validator)
+        self.min_input = self.create_time_input("Min", validator)
+        self.sec_input = self.create_time_input("Sec", validator)
+        time_input_layout.addLayout(self.hour_input)
+        time_input_layout.addLayout(self.min_input)
+        time_input_layout.addLayout(self.sec_input)
+        self.layout.addLayout(time_input_layout)
+
+    def add_entry(self):
+        self.figure_manager.manual_plot_form_minutes(
+            self.count_input.text(),
+            self.hour_input.itemAt(1).widget().text(),
+            self.min_input.itemAt(1).widget().text(),
+            self.sec_input.itemAt(1).widget().text(),
+            self.date_input.text()
+        )
 
     def create_time_input(self, label_text, validator):
-        """Helper method to create time input layouts."""
         layout = QVBoxLayout()
         label = QLabel(label_text)
         input_field = QLineEdit()
@@ -193,6 +225,235 @@ class ManualModeWidget(ModeWidget):
         layout.addWidget(label, 0, Qt.AlignCenter)
         layout.addWidget(input_field)
         return layout
+
+
+class ManualModeWidgetDaily(ManualModeTemplate):
+    def add_entry(self):
+        self.figure_manager.manual_plot_form_date(
+            self.count_input.text(),
+            self.date_input.text()
+        )
+
+
+class ManualModeWidgetWeekly(ManualModeTemplate):
+    def init_ui(self):
+        self.create_radio_buttons()
+        self.create_count_input()
+        self.create_date_navigation()
+        self.create_manual_buttons()
+        self.create_label_coordinates()
+        self.layout.addStretch()
+
+    def create_date_navigation(self):
+        date_layout = QHBoxLayout()
+        self.previous_button = QPushButton('<')
+        self.next_button = QPushButton('>')
+        self.date_label = QLabel()
+        self.current_sunday = self.get_nearest_sunday(QDate.currentDate())
+
+        self.update_date_label()
+
+        date_layout.addWidget(self.previous_button)
+        date_layout.addWidget(self.date_label)
+        date_layout.addWidget(self.next_button)
+        self.layout.addLayout(date_layout)
+
+        self.previous_button.clicked.connect(self.show_previous_sunday)
+        self.next_button.clicked.connect(self.show_next_sunday)
+
+    def get_nearest_sunday(self, current_date):
+        current_day_of_week = current_date.dayOfWeek()
+        return current_date.addDays(7 - current_day_of_week if current_day_of_week != 7 else 0)
+
+    def update_date_label(self):
+        week_number = self.current_sunday.weekNumber()[0]
+        month = self.current_sunday.toString("MMMM")
+        year = self.current_sunday.toString("yy")
+        self.date_label.setText(f"W {week_number}, {month}, {year}")
+
+    def show_previous_sunday(self):
+        self.current_sunday = self.current_sunday.addDays(-7)
+        self.update_date_label()
+
+    def show_next_sunday(self):
+        self.current_sunday = self.current_sunday.addDays(7)
+        self.update_date_label()
+
+    def add_entry(self):
+        self.figure_manager.manual_plot_form_date(
+            self.count_input.text(),
+            self.current_sunday.toString("dd-MM-yyyy")
+        )
+
+
+class ManualModeWidgetWeeklyMinute(ManualModeWidgetWeekly):
+    def init_ui(self):
+        self.create_radio_buttons()
+        self.create_count_input()
+        self.create_time_inputs()
+        self.create_date_navigation()
+        self.create_manual_buttons()
+        self.create_label_coordinates()
+        self.layout.addStretch()
+
+    def create_time_inputs(self):
+        validator = QDoubleValidator(0.0, 9999.99, 2)
+        time_input_layout = QHBoxLayout()
+        self.hour_input = self.create_time_input("Hour", validator)
+        self.min_input = self.create_time_input("Min", validator)
+        self.sec_input = self.create_time_input("Sec", validator)
+        time_input_layout.addLayout(self.hour_input)
+        time_input_layout.addLayout(self.min_input)
+        time_input_layout.addLayout(self.sec_input)
+        self.layout.addLayout(time_input_layout)
+
+    def add_entry(self):
+        self.figure_manager.manual_plot_form_minutes(
+            self.count_input.text(),
+            self.hour_input.itemAt(1).widget().text(),
+            self.min_input.itemAt(1).widget().text(),
+            self.sec_input.itemAt(1).widget().text(),
+            self.current_sunday.toString("dd-MM-yyyy")
+        )
+
+    def create_time_input(self, label_text, validator):
+        layout = QVBoxLayout()
+        label = QLabel(label_text)
+        input_field = QLineEdit()
+        input_field.setValidator(validator)
+        layout.addWidget(label, 0, Qt.AlignCenter)
+        layout.addWidget(input_field)
+        return layout
+
+
+class ManualModeWidgetMonthly(ManualModeTemplate):
+    def init_ui(self):
+        self.create_radio_buttons()
+        self.create_count_input()
+        self.create_date_navigation()
+        self.create_manual_buttons()
+        self.create_label_coordinates()
+        self.layout.addStretch()
+
+    def create_date_navigation(self):
+        date_layout = QHBoxLayout()
+        self.previous_button = QPushButton('<')
+        self.next_button = QPushButton('>')
+        self.date_label = QLabel()
+        self.current_date = self.get_last_day_of_month(QDate.currentDate())
+
+        self.update_date_label()
+
+        date_layout.addWidget(self.previous_button)
+        date_layout.addWidget(self.date_label)
+        date_layout.addWidget(self.next_button)
+        self.layout.addLayout(date_layout)
+
+        self.previous_button.clicked.connect(self.show_previous_month)
+        self.next_button.clicked.connect(self.show_next_month)
+
+    def get_last_day_of_month(self, date):
+        next_month = date.addMonths(1)
+        first_day_next_month = QDate(next_month.year(), next_month.month(), 1)
+        return first_day_next_month.addDays(-1)
+
+    def update_date_label(self):
+        month = self.current_date.toString("MM")
+        year = self.current_date.toString("yy")
+        self.date_label.setText(f"{month}, {year}")
+
+    def show_previous_month(self):
+        self.current_date = self.current_date.addMonths(-1)
+        self.current_date = self.get_last_day_of_month(self.current_date)
+        self.update_date_label()
+
+    def show_next_month(self):
+        self.current_date = self.current_date.addMonths(1)
+        self.current_date = self.get_last_day_of_month(self.current_date)
+        self.update_date_label()
+
+    def add_entry(self):
+        self.figure_manager.manual_plot_form_date(
+            self.count_input.text(),
+            self.current_date.toString("dd-MM-yyyy")
+        )
+
+
+class ManualModeWidgetMonthlyMinute(ManualModeTemplate):
+    def init_ui(self):
+        self.create_radio_buttons()
+        self.create_count_input()
+        self.create_time_inputs()
+        self.create_date_navigation()
+        self.create_manual_buttons()
+        self.create_label_coordinates()
+        self.layout.addStretch()
+
+    def create_date_navigation(self):
+        date_layout = QHBoxLayout()
+        self.previous_button = QPushButton('<')
+        self.next_button = QPushButton('>')
+        self.date_label = QLabel()
+        self.current_date = self.get_last_day_of_month(QDate.currentDate())
+
+        self.update_date_label()
+
+        date_layout.addWidget(self.previous_button)
+        date_layout.addWidget(self.date_label)
+        date_layout.addWidget(self.next_button)
+        self.layout.addLayout(date_layout)
+
+        self.previous_button.clicked.connect(self.show_previous_month)
+        self.next_button.clicked.connect(self.show_next_month)
+
+    def get_last_day_of_month(self, date):
+        next_month = date.addMonths(1)
+        first_day_next_month = QDate(next_month.year(), next_month.month(), 1)
+        return first_day_next_month.addDays(-1)
+
+    def update_date_label(self):
+        month = self.current_date.toString("MM")
+        year = self.current_date.toString("yy")
+        self.date_label.setText(f"{month}, {year}")
+
+    def show_previous_month(self):
+        self.current_date = self.current_date.addMonths(-1)
+        self.current_date = self.get_last_day_of_month(self.current_date)
+        self.update_date_label()
+
+    def show_next_month(self):
+        self.current_date = self.current_date.addMonths(1)
+        self.current_date = self.get_last_day_of_month(self.current_date)
+        self.update_date_label()
+
+    def create_time_inputs(self):
+        validator = QDoubleValidator(0.0, 9999.99, 2)
+        time_input_layout = QHBoxLayout()
+        self.hour_input = self.create_time_input("Hour", validator)
+        self.min_input = self.create_time_input("Min", validator)
+        self.sec_input = self.create_time_input("Sec", validator)
+        time_input_layout.addLayout(self.hour_input)
+        time_input_layout.addLayout(self.min_input)
+        time_input_layout.addLayout(self.sec_input)
+        self.layout.addLayout(time_input_layout)
+
+    def create_time_input(self, label_text, validator):
+        layout = QVBoxLayout()
+        label = QLabel(label_text)
+        input_field = QLineEdit()
+        input_field.setValidator(validator)
+        layout.addWidget(label, 0, Qt.AlignCenter)
+        layout.addWidget(input_field)
+        return layout
+
+    def add_entry(self):
+        self.figure_manager.manual_plot_form_minutes(
+            self.count_input.text(),
+            self.hour_input.itemAt(1).widget().text(),
+            self.min_input.itemAt(1).widget().text(),
+            self.sec_input.itemAt(1).widget().text(),
+            self.current_date.toString("dd-MM-yyyy")
+        )
 
 
 class PhaseModeWidget(ModeWidget):
@@ -358,6 +619,44 @@ class TrendModeWidget(ModeWidget):
         # Connect date changes to figure manager updates
         self.trend_start_date_input.dateChanged.connect(self.figure_manager.trend_date1_changed)
         self.trend_end_date_input.dateChanged.connect(self.figure_manager.trend_date2_changed)
+
+        # Create a combo box for selecting the trend calculation method
+        trend_method_group_layout = QVBoxLayout()
+        trend_method_label = QLabel("Fit method")
+        self.trend_method_combo = QComboBox()
+        self.trend_method_combo.addItem('Least-squares')
+        self.trend_method_combo.addItem('Quarter-intersect')
+        self.trend_method_combo.addItem('Split-middle-line')
+        self.trend_method_combo.setCurrentText(self.data_manager.user_preferences['fit_method'])
+        self.trend_method_combo.currentIndexChanged.connect(
+            lambda index: self.data_manager.user_preferences.update(
+                {'fit_method': self.trend_method_combo.currentText()})
+        )
+
+        # SpinBox for Forward Projection
+        forward_projection_label = QLabel("Forward projection")
+        self.forward_projection_spinbox = QSpinBox()
+        self.forward_projection_spinbox.setRange(0, 100)  # Set the range as required
+        self.forward_projection_spinbox.setValue(self.data_manager.user_preferences.get('forward_projection', 0))
+        self.forward_projection_spinbox.valueChanged.connect(
+            lambda value: self.data_manager.user_preferences.update(
+                {'forward_projection': value}
+            )
+        )
+
+        # Add the label and the combo box layout to the group layout
+        trend_method_group_layout.addWidget(trend_method_label)
+        trend_method_group_layout.addWidget(self.trend_method_combo)
+
+        # Add the forward projection label and spinbox to the group layout
+        trend_method_group_layout.addWidget(forward_projection_label)
+        trend_method_group_layout.addWidget(self.forward_projection_spinbox)
+
+        # Add the combo box group layout to the main layout
+        self.layout.addLayout(trend_method_group_layout)
+
+        # Apply style sheet for spacing to the entire group
+        trend_method_group_layout.setContentsMargins(0, 15, 0, 0)
 
         # Eliminate any extra vertical stretches
         self.layout.addStretch()
