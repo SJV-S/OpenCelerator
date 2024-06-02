@@ -28,10 +28,10 @@ On Windows, right click and select "Run as administrator". Windows Defender will
 
 Here are some useful things to know when importing raw data, using the "Import" button. You can import from csv, xls, xlsx, and ods files. iChart will only look at the sheet 1 if you have multiple sheets. It will also only look at the first 4 columns in the sheet. All other columns will be ignored. You can use these extra columns for notes and other stuff. iChart will only look at the first letter and ignore case when determining the data type. Subsequent letters can be added for human readabiliy. The order in which you had the columns does not matter either.
 
-1) Date column. Any column name starting with "d" will be interpreted as the date column. This column must contain full dates: day, month, and year.
-2) Dot column. Any column name starting with "c", "a", or "r" (corrects, accurate, right) are interpreted as the dot column. These are expected to be raw counts.
-3) X column. Any column name starting with "i", "e", or "w" (inaccurate, error, wrong) are interpreted as the dot column. These are expected to be raw counts.
-4) Minutes column. Any column starting with "m" will be interpreted as the timing floor column. This will also be used in the background to obtain frequency counts. All values are assumed to be specifically minutes. You can omit this column if you are not using the minute charts.
+1) Date column. Any column name starting with "d" will be interpreted as the date column. This column must contain full dates containing day, month, and year. iChart should be quite flexible with exactly how the date is formatted in the column – so long as they are complete dates. The separator, American vs. European date styles, etc should not matter. In the unlikely event you still get import errors or strange date behaviors, try this format: yyyy-mm-dd (for instance, 2024-04-19).
+3) Dot column. Any column name starting with "c", "a", or "r" (corrects, accurate, right) are interpreted as the dot column. These are expected to be raw counts.
+4) X column. Any column name starting with "i", "e", or "w" (inaccurate, error, wrong) are interpreted as the dot column. These are expected to be raw counts.
+5) Minute column. Any column starting with "m" will be interpreted as the timing floor column. This will also be used in the background to obtain frequency counts. All values are assumed to be specifically minutes. You can omit this column if you are not using the minute charts.
 
 Here is an [example.](https://github.com/SJV-S/iChart/blob/main/example_data.csv)
 
