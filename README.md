@@ -27,7 +27,7 @@ On Windows, right click and select "Run as administrator". Windows Defender will
 
 ## Import Formatting
 
-You can import from csv, xls, xlsx, and ods, files. iChart will only look at sheet 1 if you have multiple sheets. It will also only look at the first 6 columns. All subsequent columns will be ignored. You can use these extra columns for notes and other stuff. iChart will only look at the first letter and ignore case when determining the data type. Subsequent letters can be added for human readabiliy. Column order does not matter.
+You can import from csv, xls, xlsx, and ods, files. iChart will only look at sheet 1 if you have multiple sheets, and only the first 6 columns. All subsequent columns will be ignored. You can use these extra columns for notes and other stuff. iChart will only look at the first letter and ignore case when determining the data type. Subsequent letters can be added for human readabiliy. Column order does not matter.
 
 1) *Date column*. Any column name starting with "d" will be interpreted as the date column. This column must contain full dates – day, month, and year. iChart should be quite flexible with exactly how the date is formatted in the column, provided they are complete dates. The separator, American vs. European date styles, etc, should not matter. In the unlikely event you still get import errors or strange date behaviors, try this format: yyyy-mm-dd (for instance, 2024-04-19).
 2) *Dot column*. Any column name starting with "c" (corrects) are interpreted as the dot column. These are expected to be raw counts.
