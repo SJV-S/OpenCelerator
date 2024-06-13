@@ -1,7 +1,6 @@
 
 
 general_stylesheet = '''
-/* Global styles for all widgets adapta blue: #00bcd4 */
 QWidget {
     font-family: "Sans-serif";
     font-size: 12px;
@@ -13,7 +12,7 @@ QMainWindow {
 /* QPushButton styles */
 QPushButton {
     margin-top: 5px;
-    border: 1px solid #5a93cc;
+    border: 1px solid #191919;
     padding: 5px;
     background-color: white;
     border-radius: 5px;
@@ -28,6 +27,8 @@ QRadioButton {
 /* QLabel styles */
 QLabel {
     margin: 0px;
+    font-style: italic;
+    color: black;
 }
 /* QLineEdit styles */
 QLineEdit {
@@ -51,7 +52,7 @@ QGroupBox {
     border-radius: 5px;
     margin-top: 20px; /* Space above the group box */
     font-weight: bold;
-    color: #5a93cc;
+    color: #323232;
 }
 /* QGroupBox Title styles */
 QGroupBox::title {
@@ -61,7 +62,7 @@ QGroupBox::title {
 }
 /* QTabWidget styles */
 QTabWidget::pane {
-    border: 2px solid #5a93cc;
+    border: 1px solid black;
     margin-top: 0px;
     border-bottom-left-radius: 20px;
     border-bottom-right-radius: 20px;
@@ -78,19 +79,19 @@ QTabBar::tab {
 /* Styling for the first tab */
 QTabBar::tab:first {
     border-top-left-radius: 10px;  /* Rounds the top left corner of the first tab */
-    border-top: 2px solid #5a93cc;
-    border-left: 2px solid #5a93cc;
-    border-right: 1px solid #5a93cc;
+    border-top: 1px solid black;
+    border-left: 1px solid black;
+    border-right: 1px solid black;
 }
 /* Styling for the last tab */
 QTabBar::tab:second {
-    border-top: 2px solid #5a93cc;
+    border-top: 1px solid black;
 }
 /* Styling for the last tab */
 QTabBar::tab:last {
-    border-top: 2px solid #5a93cc;
-    border-left: 1px solid #5a93cc;
-    border-right: 2px solid #5a93cc;
+    border-top: 1px solid black;
+    border-left: 1px solid black;
+    border-right: 1px solid black;
     border-top-right-radius: 10px;  /* Rounds the top right corner of the last tab */
 }
 /* Styling for selected and hovered tabs */

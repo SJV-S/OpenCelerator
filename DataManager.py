@@ -7,7 +7,7 @@ from datetime import datetime
 
 
 class DataManager:
-    _instance = None  # Private class variable to hold the singleton instance
+    _instance = None
 
     def __new__(cls, *args, **kwargs):
         if not cls._instance:
@@ -47,96 +47,176 @@ class DataManager:
                 }
             }
 
+            self.default_phase_style = {
+                'date': None,
+                'y': None,
+                'text': None,
+                'font_size': 8,
+                'font_color': '#000000',
+                'bg_color': '#FFFFFF',
+                'edge_color': '#000000',
+                'line_color': '#000000',
+                'linewidth': 1,
+                'linestyle': '-',
+            }
+
+            self.default_aim_style = {
+                'date1': None,
+                'date2': None,
+                'y': None,
+                'text': None,
+                'font_size': 8,
+                'font_color': '#000000',
+                'bg_color': '#FFFFFF',
+                'edge_color': '#000000',
+                'line_color': '#000000',
+                'linewidth': 1,
+                'linestyle': '-',
+            }
+
+            self.default_corr_trend_style = {
+                'date1': None,
+                'date2': None,
+                'y': None,
+                'text': None,
+                'text_y': None,
+                'text_date': None,
+                'font_size': 10,
+                'font_color': '#008000',
+                'bg_color': '#FFFFFF',
+                'edge_color': '#000000',
+                'line_color': '#008000',
+                'linewidth': 1,
+                'linestyle': '-',
+            }
+
+            self.default_err_trend_style = {
+                'date1': None,
+                'date2': None,
+                'y': None,
+                'text': None,
+                'text_y': None,
+                'text_date': None,
+                'font_size': 10,
+                'font_color': '#EE4B2B',
+                'bg_color': '#FFFFFF',
+                'edge_color': '#000000',
+                'line_color': '#EE4B2B',
+                'linewidth': 1,
+                'linestyle': '-',
+            }
+
             self.user_preferences = {
                 'place_below_floor': False,
                 'chart_data_agg': 'sum',
                 'chart_type': 'DailyMinute',
-                'chart_font_color': '#5a93cc',
-                'chart_grid_color': '#71B8FF',
+                'chart_font_color': '#05c3de',
+                'chart_grid_color': '#6ad1e3',
                 'width': 9,
                 'fit_method': 'Least-squares',
                 'forward_projection': 0,
-                'home_folder': os.path.expanduser("~")
+                'cel_slope_multiple': 7,
+                'home_folder': os.path.expanduser("~"),
+                'phase_style': self.default_phase_style,
+                'aim_style': self.default_aim_style,
+                'trend_corr_style': self.default_corr_trend_style,
+                'trend_err_style': self.default_err_trend_style
             }
 
             # Support classes
             self.trend_fitter = TrendFitter(self)
 
+            # Control variables
             self.initialized = True  # Set this attribute after initializing
             self.chart_data_default = copy.deepcopy(self.chart_data)
+            self.mask_zero_counts = None  # Boolean array for preventing trendlines to be affected by zero counts
+            self.standard_date_string = '%Y-%m-%d'
 
             # Apply settings
             self.get_user_preferences()
 
+    def find_closest_date(self, date_str, date_to_pos, date_format=None):
+        if date_format is None:
+            date_format = self.standard_date_string
+
+        date = pd.to_datetime(date_str, format=date_format)
+        min_date = min(date_to_pos.keys())
+        max_date = max(date_to_pos.keys())
+
+        if date in date_to_pos:
+            return date
+        elif min_date <= date <= max_date:
+            closest_date = min(date_to_pos.keys(), key=lambda d: abs(d - date))
+            return closest_date
+        else:
+            return None
+
     def get_replot_points(self, date_to_x, kind):
         df = copy.deepcopy(self.chart_data['raw_df'])
-
         chart_type = self.user_preferences['chart_type']
-        if chart_type == 'DailyMinute':
-            x, y = self.get_daily_minute_points(df, kind, date_to_x)
-        elif chart_type == 'Daily':
-            x, y = self.get_daily_points(df, kind, date_to_x)
-        elif chart_type == 'Weekly':
-            x, y = self.get_weekly_points(df, kind, date_to_x)
-        elif chart_type == 'WeeklyMinute':
-            x, y = self.get_weekly_minute_points(df, kind, date_to_x)
-        elif chart_type == 'MonthlyMinute':
-            x, y = self.get_monthly_minute_points(df, kind, date_to_x)
-        elif chart_type == 'Monthly':
-            x, y = self.get_monthly_minute_points(df, kind, date_to_x)
+
+        if any(period in chart_type for period in ('Weekly', 'Monthly', 'Yearly')):
+            agg_type = chart_type[0]
+            df['d'] = pd.to_datetime(df.d)
+            df.set_index('d', inplace=True)
+            df = df.resample(agg_type).agg(self.user_preferences['chart_data_agg']).reset_index()  # Will pad missing dates with zeros
+            df = df[~((df['m'] == 0) & (df['c'] == 0) & (df['i'] == 0))]  # Drop padded dates
+
+        x = pd.to_datetime(df['d']).map(date_to_x)  # Convert date to x position
+        if kind == 'm' and 'Minute' in chart_type:
+            y = 1 / df[kind]  # Get timing floor
+        else:
+            y = self.handle_zero_counts_minutes(df, kind)
 
         return x, y
 
-    def get_replot_phase(self, date_to_x,):
-        phase_lines = []
-        for phase in self.chart_data['phase']:
-            date, y, text = phase
-            if date in date_to_x.keys():
-                x = date_to_x[date]
-                phase_lines.append((x, y, text))
-        return phase_lines
-    
-    def get_replot_aims(self, date_to_x):
-        all_aims = []
-        for aim in self.chart_data['aim']:
-            # Maybe make it so that date order doesn't matter?
-            start, deadline, target, note = aim
-            if all(date in date_to_x.keys() for date in (start, deadline)):
-                xmin = date_to_x[start]
-                xmax = date_to_x[deadline]
-                all_aims.append((xmin, xmax, target, note))
-        
-        return all_aims
-
-    def data_import_data(self, file_path, date_format):
-        # Determine how to read the file based on its extension
+    def data_import_data(self, file_path):
+        data_cols = ['m', 'h', 's', 'c', 'i', 'd']
+        # Determine file type
         if file_path.endswith('.csv'):
-            df = pd.read_csv(file_path, usecols=[0, 1, 2, 3])  # Only look at the first 4 columns
-            df.columns = [col.lower()[0] for col in df.columns]  # Make it all lower case, and only look at the first letter
-            df['d'] = pd.to_datetime(df['d'])
-
-            # If user wrote "errors" or "wrong" instead of incorrects
-            for alt in ['e', 'w']:
-                if alt in df.columns:
-                    df = df.rename(columns={alt: 'i'})
-
-            # If user wrote "accurate" or "right" instead of corrects
-            for alt in ['a', 'r']:
-                if alt in df.columns:
-                    df = df.rename(columns={alt: 'c'})
-
+            df = pd.read_csv(file_path)
         elif file_path.endswith('.xls') or file_path.endswith('.xlsx') or file_path.endswith('.ods'):
             df = pd.read_excel(file_path)
-            df.columns = [col.lower() for col in df.columns]
-            # df['d'] = df['d'].astype(str)  # Ensure date column is treated as a string
-        else:
-            return  # Exit function if wrong file type
 
-        # Average entries if stacked on the same date
-        df['d'] = pd.to_datetime(df['d']).dt.normalize()
-        df['c'] = pd.to_numeric(df['c'], errors='coerce').apply(lambda x: max(x, 0) if pd.notnull(x) else 0)
-        df['i'] = pd.to_numeric(df['i'], errors='coerce').apply(lambda x: max(x, 0) if pd.notnull(x) else 0)
-        df['m'] = pd.to_numeric(df['m'], errors='coerce').apply(lambda x: max(x, 1) if pd.notnull(x) else 1)
+        df = df[df.columns[:6]]  # Only first 6 columns
+        df.columns = [col.lower()[0] for col in df.columns]  # Lower case, first letter
+        filtered_cols = [col for col in df.columns if col in data_cols]  # Filter columns
+        df = df[filtered_cols]
+
+        # Loop over each column and add it with zeros if it's not present
+        for col in ['s', 'm', 'h', 'c', 'i']:
+            if col not in df.columns:
+                df[col] = 0  # Add the column with zeros
+
+        # Clean up any malformed entries
+        df['c'] = pd.to_numeric(df['c'], errors='coerce').fillna(0)
+        df['i'] = pd.to_numeric(df['i'], errors='coerce').fillna(0)
+        df['s'] = pd.to_numeric(df['s'], errors='coerce').fillna(1)
+        df['m'] = pd.to_numeric(df['m'], errors='coerce').fillna(1)
+        df['h'] = pd.to_numeric(df['h'], errors='coerce').fillna(1)
+
+        # Set negative values to zero
+        df['c'] = df['c'].apply(lambda x: x if x >= 0 else 0)
+        df['i'] = df['i'].apply(lambda x: x if x >= 0 else 0)
+        df['s'] = df['s'].apply(lambda x: x if x >= 0 else 1)
+        df['m'] = df['m'].apply(lambda x: x if x >= 0 else 1)
+        df['h'] = df['h'].apply(lambda x: x if x >= 0 else 1)
+
+        # Get total amount of minutes
+        df['m'] = (df['s'] / 60) + df['m'] + (df['h'] * 60)
+        # Handling if there was no timing columns of any kind
+        has_zeros = (df['m'] == 0).any()
+        if has_zeros:
+            df['m'] = 1  # Add 'm' column with all values set to 1
+
+        # Discard hour and second columns
+        df.drop(columns=['h', 's'], inplace=True)
+
+        # Convert 'd' column to datetime if not already in datetime format
+        if not pd.api.types.is_datetime64_any_dtype(df['d']):
+            df['d'] = pd.to_datetime(df['d']).dt.normalize()
+
+        # # Average entries if stacked on the same date
         df = df.groupby('d', as_index=False).mean()
 
         # Store imported raw data (also clears any previous data points)
@@ -151,7 +231,7 @@ class DataManager:
         if not file_path.endswith('.csv'):
             file_path += '.csv'
 
-        full_names = {'c': 'Corrects', 'i': 'Errors', 'm': 'Minutes', 'd': 'Dates'}
+        full_names = {'c': 'Corrects', 'i': 'Incorrects', 'm': 'Minutes', 'd': 'Dates'}
         df.rename(columns=full_names, inplace=True)
         df.to_csv(file_path, index=False)
 
@@ -168,7 +248,7 @@ class DataManager:
         other_kind = 'i' if kind == 'c' else 'c'
 
         # Create a mask for existing date
-        mask = df['d'] == date
+        mask = df['d'] == date.strftime(self.standard_date_string)
 
         if mask.any():
             # Update the values for the existing row with the matching date
@@ -179,7 +259,10 @@ class DataManager:
             new_data = {'d': [date], kind: [count], 'm': [total_minutes], other_kind: [0]}
             new_row = pd.DataFrame(new_data)
             new_row = new_row.reindex(columns=df.columns, fill_value=0).astype(df.dtypes.to_dict())
-            self.chart_data['raw_df'] = pd.concat([df, new_row], ignore_index=True)
+            df = pd.concat([df, new_row], ignore_index=True)
+            df['d'] = pd.to_datetime(df['d'])
+            df['d'] = df['d'].dt.strftime(self.standard_date_string)
+            self.chart_data['raw_df'] = df
 
     def set_chart_type(self, new_type):
         if self.chart_data['type'] != new_type:
@@ -193,6 +276,9 @@ class DataManager:
             json.dump(self.user_preferences, f, indent=4)
 
     def handle_zero_counts_unit(self, y):
+        # Store bool array for any necessary trend filtering
+        self.mask_zero_counts = y != 0
+
         # Handling for zero counts
         if self.user_preferences['place_below_floor']:
             # Place below timing floor
@@ -205,6 +291,10 @@ class DataManager:
     def handle_zero_counts_minutes(self, df, kind):
         # Handling for zero counts for minute charts
         y = df[kind] / df['m']  # Get frequency for kind
+
+        # Store bool array for any necessary trend filtering
+        self.mask_zero_counts = y != 0
+
         if self.user_preferences['place_below_floor']:
             # Place below timing floor
             m_safe = df['m'].replace(0, np.nan)  # Replace 0 in 'm' with NaN for safety
@@ -238,84 +328,35 @@ class DataManager:
             with open(os.path.join(run_dir, filename), 'w') as f:
                 json.dump(self.user_preferences, f, indent=4)
 
-    def get_daily_minute_points(self, df, kind, date_to_x):
-        x = df['d'].map(date_to_x)  # Convert date to x position
-
-        if kind == 'm':
-            y = 1 / df[kind]  # Get timing floor
-        else:
-            y = self.handle_zero_counts_minutes(df, kind)
-
-        return x, y
-
-    def get_daily_points(self, df, kind, date_to_x):
-        x = df['d'].map(date_to_x)  # Convert date to x position
-        y = self.handle_zero_counts_unit(df[kind])
-
-        return x, y
-
-    def get_weekly_points(self, df, kind, date_to_x):
-        # Aggregate daily entries
-        df['d'] = pd.to_datetime(df.d)
-        df.set_index('d', inplace=True)
-        df = df.resample('W').agg(self.user_preferences['chart_data_agg']).reset_index()
-
-        x = df['d'].map(date_to_x)  # Convert date to x position
-        y = self.handle_zero_counts_unit(df[kind])
-
-        return x, y
-
-    def get_weekly_minute_points(self, df, kind, date_to_x):
-        # Aggregate daily entries
-        df['d'] = pd.to_datetime(df.d)
-        df.set_index('d', inplace=True)
-        df = df.resample('W').agg(self.user_preferences['chart_data_agg']).reset_index()
-
-        x = df['d'].map(date_to_x)  # Convert date to x position
-        if kind == 'm':
-            y = 1 / df[kind]  # Get timing floor
-        else:
-            y = self.handle_zero_counts_minutes(df, kind)
-
-        return x, y
-
-    def get_monthly_points(self, df, kind, date_to_x):
-        # Aggregate daily entries
-        df['d'] = pd.to_datetime(df.d)
-        df.set_index('d', inplace=True)
-        df = df.resample('ME').agg(self.user_preferences['chart_data_agg']).reset_index()
-
-        x = df['d'].map(date_to_x)  # Convert date to x position
-        y = self.handle_zero_counts_unit(df[kind])
-
-        return x, y
-
-    def get_monthly_minute_points(self, df, kind, date_to_x):
-        # Aggregate daily entries
-        df['d'] = pd.to_datetime(df.d)
-        df.set_index('d', inplace=True)
-        df = df.resample('ME').agg(self.user_preferences['chart_data_agg']).reset_index()
-
-        x = df['d'].map(date_to_x)  # Convert date to x position
-        if kind == 'm':
-            y = 1 / df[kind]  # Get timing floor
-        else:
-            y = self.handle_zero_counts_minutes(df, kind)
-
-        return x, y
+    def save_plot_item(self, item, item_type):
+        if item_type == 'phase':
+            item['date'] = item['date'].strftime(self.standard_date_string)
+            self.chart_data['phase'].append(item)
+        elif item_type == 'aim':
+            item['date1'] = item['date1'].strftime(self.standard_date_string)
+            item['date2'] = item['date2'].strftime(self.standard_date_string)
+            self.chart_data['aim'].append(item)
+        elif 'trend' in item_type:
+            item['date1'] = item['date1'].strftime(self.standard_date_string)
+            item['date2'] = item['date2'].strftime(self.standard_date_string)
+            item['text_date'] = item['text_date'].strftime(self.standard_date_string)
+            self.chart_data[item_type].append(item)
 
     def save_chart(self, full_path, start_date):
         # Ensure the file has a .pkl extension
         if not full_path.endswith('.json'):
             full_path += '.json'
 
+        # Ensure that the current chart type is saved
+        self.chart_data['type'] = self.user_preferences['chart_type']
+
         # Save current start date in ISO format
-        self.chart_data['start_date'] = start_date.isoformat() if isinstance(start_date, datetime) else start_date
+        self.chart_data['start_date'] = start_date.strftime(self.standard_date_string) if isinstance(start_date, datetime) else start_date
 
         # Convert df date column to iso format and update raw_data dictionary
         df = copy.deepcopy(self.chart_data['raw_df'])
         if pd.api.types.is_datetime64_any_dtype(df['d']):
-            df['d'] = df['d'].dt.strftime('%Y-%m-%d')
+            df['d'] = df['d'].dt.strftime(self.standard_date_string)
 
         self.chart_data['raw_data'] = df.to_dict()
 
@@ -332,14 +373,13 @@ class TrendFitter:
         self.data_manager = data_manager
 
     def filter_zero_counts_and_below_floor(self, x, y):
-        # Haven't added handling for below floor yet
-        nan_mask = ~np.isnan(y)
-        y = y[nan_mask]
-        x = x[nan_mask]
+        # Prevents trends from being pulled by zero counts
+        y = y[self.data_manager.mask_zero_counts]
+        x = x[self.data_manager.mask_zero_counts]
         return x, y
 
     def get_trend_label(self, slope):
-        cel_unit = 7  # Change to specific chart type variable?
+        cel_unit = self.data_manager.user_preferences['cel_slope_multiple']
         cel_label = np.power(10, slope * cel_unit)
 
         if cel_label < 1:
@@ -402,7 +442,11 @@ class TrendFitter:
         x = np.array(x)
         y = np.array(y)
 
-        x, y = self.filter_zero_counts_and_below_floor(x, y)
+        # Sort x and y based on the values of x
+        sorted_indices = np.argsort(x)
+        x = x[sorted_indices]
+        y = y[sorted_indices]
+
         extended_x = np.arange(x[0], x[-1] + self.data_manager.user_preferences['forward_projection'] + 1)
 
         fit_method = self.data_manager.user_preferences['fit_method']
@@ -428,8 +472,8 @@ class TrendFitter:
         kind = 'c' if corr else 'i'
 
         x, y = self.data_manager.get_replot_points(date_to_x, kind)
+        x, y = self.filter_zero_counts_and_below_floor(x, y)
         point_dict = {x_i: y_i for x_i, y_i in zip(x, y)}
-
         selected_range_set = set(np.arange(min_x, max_x + 1))  # Create a set from the range
         keys_set = set(x)  # Get keys from dictionary as a set
 
@@ -438,7 +482,6 @@ class TrendFitter:
             y_slice = [point_dict[x_i] for x_i in x_slice]
         else:
             return
-
         if len(y_slice) >= min_sample:
             trend_vals, cel_est, extended_x = self.extract_trend(x_slice, y_slice)
 

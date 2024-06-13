@@ -1,49 +1,63 @@
+# Set up logging to a file
+# Uncomment before packaging as executable
+import logging_config
+
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QTabWidget, QHBoxLayout, QPushButton, QGroupBox,
+                             QRadioButton, QVBoxLayout, QLabel, QFileDialog, QCheckBox, QComboBox, QMessageBox,
+                             QStackedWidget, QDialog, QSpacerItem, QSizePolicy, QStyle, QSpinBox, QColorDialog,
+                             QGridLayout)
+from PyQt5.QtCore import Qt, QDate, QDir, QPoint
+from PyQt5.QtGui import QPainter, QColor, QPen, QFontMetrics
 
 import sys
 import os
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QTabWidget, QHBoxLayout, QPushButton, \
-    QGroupBox, QRadioButton, QVBoxLayout, QLabel, QDateEdit, QFileDialog, QCheckBox, QComboBox, QMessageBox, QStackedWidget, QDialog, QSpacerItem, QSizePolicy, QStyle, QSpinBox, QColorDialog
-from PyQt5.QtCore import Qt, QDate, QDir
-from PyQt5.QtGui import QPainter, QColor, QPen, QFontMetrics
-
 from FigureManager import FigureManager
 from DataManager import DataManager
-from support_classes import SaveImageDialog
+from Popups import SaveImageDialog, StartDateDialog, SupportDevDialog
 import styles
 import Modes as chart_mode
+
+import warnings
+# I had to use Y and M instead of YE and ME because the executable won't currently run with YE and ME
+warnings.filterwarnings(action='ignore', category=FutureWarning, message=".*'Y' is deprecated.*")
+warnings.filterwarnings(action='ignore', category=FutureWarning, message=".*'M' is deprecated.*")
 
 
 class TopPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         left_layout = QHBoxLayout()
-        self.left_label = QLabel('iChart – Tester Version 0.2.0')
-        self.left_label.setStyleSheet("color: #5a93cc; font-weight: bold;")
+        self.left_label = QLabel('iChart v0.2.0 – You are running a tester version.')
+        self.left_label.setStyleSheet("font-style: normal")
         self.left_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         left_layout.addWidget(self.left_label)
-        left_layout.setContentsMargins(10, 0, 5, 0)
-        layout.addLayout(left_layout)
+        left_layout.setContentsMargins(10, 5, 0, 10)
+        layout.addLayout(left_layout, 1)  # Assign stretch factor to layouts
 
         center_layout = QHBoxLayout()
-        self.center_label = QLabel('Unnamed')
-        self.center_label.setStyleSheet("color: #5a93cc; font-weight: bold;")
+        self.center_label = QLabel('')
+        self.center_label.setStyleSheet("font-style: normal")
         self.center_label.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
         center_layout.addStretch()
         center_layout.addWidget(self.center_label)
         center_layout.addStretch()
-        layout.addLayout(center_layout)
+        center_layout.setContentsMargins(0, 5, 0, 10)
+        layout.addLayout(center_layout, 2)
 
         right_layout = QHBoxLayout()
-        self.right_label = QLabel('Test version')
-        self.right_label.setStyleSheet("color: #5a93cc; font-weight: bold;")
-        self.right_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        right_layout.addWidget(self.right_label)
-        right_layout.setContentsMargins(5, 0, 10, 0)  # Add margins around the right label
-        layout.addLayout(right_layout)
+        self.right_dev_btn = QPushButton('Support the developer')
+        self.right_dev_btn.setFixedSize(150, 25)
+        self.right_dev_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.right_dev_btn.clicked.connect(self.support_dev_btn_clicked)
+        self.right_dev_btn.setStyleSheet("margin-top: 0px; margin-bottom: 0px;")
+        right_layout.addWidget(self.right_dev_btn, alignment=Qt.AlignTop)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(right_layout, 1)
 
-        layout.setContentsMargins(5, 5, 5, 5)
         self.setLayout(layout)
 
     def paintEvent(self, event):
@@ -52,17 +66,23 @@ class TopPanel(QWidget):
 
         # Draw bottom border
         rect = self.rect()
-        painter.setPen(QPen(QColor('#5a93cc'), 2))
-        painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+        painter.setPen(QPen(QColor('black'), 1))
+        offset = 0  # Distance from the bottom edge
+        line_y_position = rect.bottom() - offset
+        painter.drawLine(QPoint(rect.left(), line_y_position), QPoint(rect.right(), line_y_position))
 
     def update_left_label(self, text):
         self.left_label.setText(text)
 
-    def update_center_label(self, text):
-        self.center_label.setText(text)
+    def update_center_label(self, chart_name, chart_type):
+        self.center_label.setText(f'{chart_type}: {chart_name}')
 
     def update_right_label(self, text):
         self.right_label.setText(text)
+
+    def support_dev_btn_clicked(self):
+        dialog = SupportDevDialog()
+        dialog.exec_()
 
 
 class ChartApp(QMainWindow):
@@ -149,7 +169,7 @@ class ChartApp(QMainWindow):
         self.xy_coord = None
 
         # Test
-        self.top_panel.update_right_label(self.data_manager.user_preferences['chart_type'])
+        self.top_panel.update_center_label('nameless', self.data_manager.user_preferences['chart_type'])
 
     def handleManualKeyPress(self, event):
         if event.key() in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
@@ -167,7 +187,7 @@ class ChartApp(QMainWindow):
         pass
 
     def change_mode(self, index):
-        """Change the currently visible widget in the stack."""
+        # Change the currently visible widget in the stack.
         self.previous_mode = self.stacked_widget.currentIndex()
         self.stacked_widget.setCurrentIndex(index)
         self.set_interaction_mode()
@@ -353,7 +373,6 @@ class ChartApp(QMainWindow):
         preferences_group_layout.addWidget(self.settings_data_agg)
         self.settings_data_agg.currentIndexChanged.connect(self.event_handlers.on_agg_current_index_changed)
 
-
         # Add button below the start date dropdown
         path_label = QLabel('Default folder')
         preferences_group_layout.addWidget(path_label)
@@ -363,18 +382,13 @@ class ChartApp(QMainWindow):
         self.settings_folder_btn.clicked.connect(self.event_handlers.set_data_folder)
         preferences_group_layout.addWidget(self.settings_folder_btn)
 
-        # Create a group for Other settings
-        other_settings_group = QGroupBox("Other")
-        other_settings_layout = QVBoxLayout()
-        other_settings_group.setLayout(other_settings_layout)
-        settings_test_angle_check = QCheckBox('Test angle')
-        other_settings_layout.addWidget(settings_test_angle_check)
-        settings_test_angle_check.stateChanged.connect(self.event_handlers.test_angle)
-
         # Create group for Chart types
         chart_type_settings_group = QGroupBox('Chart')
         chart_type_settings_layout = QVBoxLayout()
         chart_type_settings_group.setLayout(chart_type_settings_layout)
+
+        chart_type_label = QLabel("Type")
+        chart_type_settings_layout.addWidget(chart_type_label)
         self.chart_type_settings_dropdown = QComboBox()
         self.chart_type_settings_dropdown.addItem('DailyMinute', 'DailyMinute')  # Adding item with data
         self.chart_type_settings_dropdown.addItem('Daily', 'Daily')
@@ -382,6 +396,8 @@ class ChartApp(QMainWindow):
         self.chart_type_settings_dropdown.addItem('Weekly', 'Weekly')
         self.chart_type_settings_dropdown.addItem('MonthlyMinute', 'MonthlyMinute')
         self.chart_type_settings_dropdown.addItem('Monthly', 'Monthly')
+        self.chart_type_settings_dropdown.addItem('YearlyMinute', 'YearlyMinute')
+        self.chart_type_settings_dropdown.addItem('Yearly', 'Yearly')
         chart_type_settings_layout.addWidget(self.chart_type_settings_dropdown)
 
         # Load chart preference
@@ -391,17 +407,6 @@ class ChartApp(QMainWindow):
             self.chart_type_settings_dropdown.setCurrentIndex(index)
         self.chart_type_settings_dropdown.currentIndexChanged.connect(self.event_handlers.change_chart_type)
         settings_layout.addWidget(chart_type_settings_group)
-
-        # Set start date
-        start_date_label = QLabel('Set start date')
-        chart_type_settings_layout.addWidget(start_date_label)
-        self.start_date_input = QDateEdit()
-        self.start_date_input.setDate(QDate.currentDate())
-        self.start_date_input.setCalendarPopup(True)
-        self.start_date_input.setDisplayFormat("dd-MM-yyyy")  # Custom format
-        self.start_date_input.dateChanged.connect(self.event_handlers.change_start_date)
-        chart_type_settings_layout.addWidget(self.start_date_input)
-        settings_layout.addWidget(other_settings_group)
 
         # SpinBox for chart size
         chart_size_label = QLabel("Width (6 - 12)")
@@ -413,17 +418,29 @@ class ChartApp(QMainWindow):
         chart_type_settings_layout.addWidget(chart_size_label)
         chart_type_settings_layout.addWidget(self.chart_size_spinbox)
 
+        # Change start date
+        self.change_start_date_btn = QPushButton('Start Date', self)
+        self.change_start_date_btn.clicked.connect(self.event_handlers.show_date_dialog)
+        chart_type_settings_layout.addWidget(self.change_start_date_btn)
+
         # Label for the font color button
-        chart_font_color_label = QLabel("Colors")
-        chart_type_settings_layout.addWidget(chart_font_color_label)
-        self.chart_font_color_button = QPushButton("Font")
+        self.chart_font_color_button = QPushButton("Font Color")
         chart_type_settings_layout.addWidget(self.chart_font_color_button)
         self.chart_font_color_button.clicked.connect(lambda: self.event_handlers.choose_color(color_category='chart_font_color'))
 
         # Label for the font color button
-        self.chart_grid_color_button = QPushButton("Grid")
+        self.chart_grid_color_button = QPushButton("Grid Color")
         chart_type_settings_layout.addWidget(self.chart_grid_color_button)
         self.chart_grid_color_button.clicked.connect(lambda: self.event_handlers.choose_color(color_category='chart_grid_color'))
+
+        # Create a group for Other settings
+        other_settings_group = QGroupBox("Other")
+        other_settings_layout = QVBoxLayout()
+        other_settings_group.setLayout(other_settings_layout)
+        settings_test_angle_check = QCheckBox('Test angle')
+        other_settings_layout.addWidget(settings_test_angle_check)
+        settings_test_angle_check.stateChanged.connect(self.event_handlers.test_angle)
+        settings_layout.addWidget(other_settings_group)
 
         # Push everything to the top
         settings_layout.addStretch()
@@ -483,11 +500,13 @@ class ChartApp(QMainWindow):
             self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.aim_click)
 
     def trend_adjust_dates(self):
-        date, order = self.figure_manager.trend_adjust_dates()
-        if order == 'first':
-            self.trend_mode_widget.trend_start_date_input.setDate(QDate(date.year, date.month, date.day))
-        elif order == 'second':
-            self.trend_mode_widget.trend_end_date_input.setDate(QDate(date.year, date.month, date.day))
+        result = self.figure_manager.trend_adjust_dates()
+        if result:
+            date, order = result
+            if order == 'first':
+                self.trend_mode_widget.trend_start_date_input.setDate(QDate(date.year, date.month, date.day))
+            elif order == 'second':
+                self.trend_mode_widget.trend_end_date_input.setDate(QDate(date.year, date.month, date.day))
 
     def sync_view_settings(self):
         # Set checkboxes (will only run here if there's a change, so unreliable)
@@ -552,14 +571,10 @@ class ChartApp(QMainWindow):
             event.accept()  # Proceed with the window close if no chart is loaded
 
     def set_manual_mode_widget(self):
-        """Change the manual mode widget to a new instance of the specified class."""
+        # Always rebuild the widget
         if self.manual_mode_widget is not None:
             # Remove the current widget from the stacked widget
-            index = self.stacked_widget.indexOf(self.manual_mode_widget)
-            if index != -1:
-                self.stacked_widget.removeWidget(self.manual_mode_widget)
-        else:
-            index = 1  # Assuming the manual mode widget is the second widget in the stack
+            self.stacked_widget.removeWidget(self.manual_mode_widget)
 
         # Create a new instance of the specified class
         chart_type = self.data_manager.user_preferences['chart_type']
@@ -575,15 +590,30 @@ class ChartApp(QMainWindow):
             self.manual_mode_widget = chart_mode.ManualModeWidgetMonthly(self.figure_manager)
         elif chart_type == 'MonthlyMinute':
             self.manual_mode_widget = chart_mode.ManualModeWidgetMonthlyMinute(self.figure_manager)
+        elif chart_type == 'YearlyMinute':
+            self.manual_mode_widget = chart_mode.ManualModeWidgetYearlyMinute(self.figure_manager)
+        elif chart_type == 'Yearly':
+            self.manual_mode_widget = chart_mode.ManualModeWidgetYearly(self.figure_manager)
         else:
             print('Unable to find chart type')
             self.manual_mode_widget = chart_mode.ManualModeWidgetDailyMinute(self.figure_manager)
 
         # Add the new widget to the stacked widget
+        index = 1  # Assuming manual mode widget is the second widget in the stack
         self.stacked_widget.insertWidget(index, self.manual_mode_widget)
+
+        # Safely disconnect the radio button if it is connected
+        try:
+            self.radio_manual.toggled.disconnect()
+        except TypeError:
+            pass  # No connection to disconnect
 
         # Reconnect the radio button to the new widget
         self.radio_manual.toggled.connect(lambda checked: self.change_mode(index) if checked else None)
+
+        # Force an update if manual mode is already selected
+        if self.radio_manual.isChecked():
+            self.change_mode(index)
 
     def set_dynamic_tab_width(self):
         font_metrics = QFontMetrics(self.tabs.font())
@@ -597,9 +627,10 @@ class ChartApp(QMainWindow):
 
         # Add padding for the overall tab widget
         total_width += self.tabs.style().pixelMetric(QStyle.PM_TabBarTabHSpace)
-        total_width -= 23
+        total_width -= 25
 
         self.tabs.setFixedWidth(total_width)
+
 
 class EventHandlers:
     def __init__(self, chart_app, figure_manager, data_manager, top_panel):
@@ -608,28 +639,43 @@ class EventHandlers:
         self.data_manager = data_manager
         self.top_panel = top_panel  # Accept the TopPanel instance
 
-    def change_mode(self, index):
-        pass
+    def show_date_dialog(self):
+        dialog = StartDateDialog(self.chart_app)
+        if dialog.exec_() == QDialog.Accepted:
+            new_start_date = dialog.get_date()
+            self.figure_manager.settings_change_start_date(new_start_date)
+            self.chart_app.set_interaction_mode()
 
     def import_data(self, delete_data):
         # Open file dialog with support for CSV and Excel files
-        file_path, _ = QFileDialog.getOpenFileName(self.chart_app, 'Select file', self.data_manager.user_preferences['home_folder'], 'CSV files (*.csv);;Excel files (*.xls *.xlsx);;ODS files (*.ods);;All files (*.*)')
+        file_path, _ = QFileDialog.getOpenFileName(self.chart_app, 'Select file',
+                                                   self.data_manager.user_preferences['home_folder'],
+                                                   'CSV, Excel, ODS files (*.csv *.xls *.xlsx *.ods)')
+
         if file_path:
-            self.figure_manager.fig_import_data(file_path)
-            self.chart_app.set_interaction_mode()  # Make sure current mode is enabled for key handling
+            try:
+                self.figure_manager.fig_import_data(file_path)
+            except:
+                msg_box = QMessageBox()
+                msg_box.setWindowTitle('Failed to import data')
+                msg_box.setIcon(QMessageBox.Warning)
+                msg_box.setText('Likely reason: The data sheet is incorrectly formatted.')
+                msg_box.setInformativeText("Solution: Check out formatting instructions on <a href='https://github.com/SJV-S/iChart/blob/main/README.md#import-formatting'>https://github.com/SJV-S/iChart/blob/main/README.md#import-formatting</a>.")
+                msg_box.setStandardButtons(QMessageBox.Ok)
+                msg_box.setStyleSheet("QLabel{ font-style: normal; }")
+                msg_box.exec_()
+
+        self.chart_app.set_interaction_mode()  # Make sure current mode is enabled for key handling
 
         # Display name of file imported
         file_name = os.path.basename(file_path)
-        self.top_panel.update_center_label(file_name)
+        self.top_panel.update_center_label(file_name, self.data_manager.user_preferences['chart_type'])
 
     def export_data(self):
         file_path, _ = QFileDialog.getSaveFileName(self.chart_app, 'Save file', self.data_manager.user_preferences['home_folder'],
                                                    'CSV files (*.csv);;Excel files (*.xls *.xlsx);;ODS files (*.ods);;All files (*.*)')
         if file_path:
             self.data_manager.create_export_file(file_path)
-
-    def files_show_dialog(self):
-        pass
 
     def save_image(self):
         dialog = SaveImageDialog(self.chart_app)
@@ -651,7 +697,7 @@ class EventHandlers:
 
         # Display name of chart saved
         file_name = os.path.basename(file_path)
-        self.top_panel.update_center_label(file_name)
+        self.top_panel.update_center_label(file_name, self.data_manager.user_preferences['chart_type'])
 
     def load_chart(self):
         file_path, _ = QFileDialog.getOpenFileName(self.chart_app, 'Open file',
@@ -661,13 +707,22 @@ class EventHandlers:
             self.chart_app.loaded_chart_path = file_path
             self.figure_manager.fig_load_chart(file_path)
 
+            # Update the chart type dropdown to reflect the loaded chart type
+            chart_type = self.data_manager.chart_data['type']
+            index = self.chart_app.chart_type_settings_dropdown.findData(chart_type)
+            if index != -1:
+                self.chart_app.chart_type_settings_dropdown.setCurrentIndex(index)
+
+            self.chart_app.set_interaction_mode()  # Make sure current mode is enabled for key handling
+
         # Display name of chart imported
         file_name = os.path.basename(file_path)
-        self.top_panel.update_center_label(file_name)
+        self.top_panel.update_center_label(file_name, self.data_manager.user_preferences['chart_type'])
 
     def update_zero_count_handling(self, bool_type):
         self.data_manager.user_preferences['place_below_floor'] = bool_type
         self.figure_manager.new_chart(self.data_manager.chart_data['start_date'])
+        self.chart_app.set_interaction_mode()  # Make sure current mode is enabled for key handling
 
     def set_data_folder(self):
         folder_path = QFileDialog.getExistingDirectory(self.chart_app, "Select Folder", QDir.homePath())
@@ -679,25 +734,24 @@ class EventHandlers:
     def on_agg_current_index_changed(self, index):
         self.data_manager.user_preferences.update({'chart_data_agg': self.chart_app.settings_data_agg.itemData(index)})
         self.figure_manager.change_chart_type(self.data_manager.chart_data['type'])
-
-    def settings_test_angle(self, state):
-        pass
+        self.chart_app.set_interaction_mode()  # Make sure current mode is enabled for key handling
 
     def change_chart_type(self, index):
         self.figure_manager.change_chart_type(self.chart_app.chart_type_settings_dropdown.itemData(index)),
         self.chart_app.set_manual_mode_widget()
+        
         # Update top panel with chart type
-        self.top_panel.update_right_label(self.data_manager.user_preferences['chart_type'])
+        if self.chart_app.loaded_chart_path:
+            file_name = os.path.basename(self.chart_app.loaded_chart_path)
+        else:
+            file_name = 'nameless'
+        self.top_panel.update_center_label(file_name, self.data_manager.chart_data['type'])
 
         # Make sure current mode is enabled for key handling
         self.chart_app.set_interaction_mode()
 
         # Update timing and floor checkboxes
         self.chart_app.view_mode_widget.update_timing_checkboxes()
-
-    def change_start_date(self, new_date):
-        self.figure_manager.settings_change_start_date(new_date)
-        self.chart_app.set_interaction_mode()
 
     def change_width(self, new_width):
         self.data_manager.user_preferences['width'] = new_width
@@ -732,9 +786,11 @@ class EventHandlers:
     def choose_color(self, color_category):
         # Convert the stored color code to a QColor object
         initial_color = QColor(self.data_manager.user_preferences[color_category])
-        QColorDialog.setCustomColor(0, QColor('#5ac9e2'))  # Behavior & Research Company hex
-        QColorDialog.setCustomColor(1, QColor('#71B8FF'))
-        QColorDialog.setCustomColor(2, QColor('#5a93cc'))
+        QColorDialog.setCustomColor(0, QColor('#5ac9e2'))  # Behavior & Research Company hex extracted
+        QColorDialog.setCustomColor(1, QColor('#6ad1e3'))  # Behavior & Research Company hex from website (1)
+        QColorDialog.setCustomColor(2, QColor('#05c3de'))  # Behavior & Research Company hex from website (2)
+        QColorDialog.setCustomColor(3, QColor('#71B8FF'))  # My original choice of font color
+        QColorDialog.setCustomColor(4, QColor('#5a93cc'))  # My original choice of grid color
         color = QColorDialog.getColor(initial_color)
 
         if color.isValid():

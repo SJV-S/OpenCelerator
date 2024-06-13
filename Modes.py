@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QTabWidget, QVBo
 from PyQt5.QtGui import QDoubleValidator, QFont, QIcon
 from PyQt5.QtCore import Qt, QDate
 
-from support_classes import InputDialog
+from Popups import InputDialog, ConfigurePhaseLinesDialog, ConfigureAimLinesDialog, ConfigureTrendLinesDialog
 from DataManager import DataManager
 
 
@@ -13,6 +13,7 @@ class ModeWidget(QWidget):
         self.figure_manager = figure_manager
         self.data_manager = DataManager()
         self.layout = QVBoxLayout(self)
+        self.layout.setAlignment(Qt.AlignTop)
         self.init_ui()
 
     def init_ui(self):
@@ -28,11 +29,12 @@ class ViewModeWidget(ModeWidget):
 
         # Headings for Dot and X settings
         font = QFont()
-        font.setBold(True)
         dot_heading = QLabel("Dot")
         dot_heading.setFont(font)
+        dot_heading.setAlignment(Qt.AlignBottom)  # Align label to the bottom of its grid cell
         x_heading = QLabel("X")
         x_heading.setFont(font)
+        x_heading.setAlignment(Qt.AlignBottom)
         grid_heading = QLabel("\nGrid")
         grid_heading.setFont(font)
         other_heading = QLabel("\nOther")
@@ -56,7 +58,7 @@ class ViewModeWidget(ModeWidget):
         self.minor_grid_check = QCheckBox('Minor')
         self.major_grid_check = QCheckBox('Major')
         self.timing_floor_check = QCheckBox('Floor')
-        self.timing_grid_check = QCheckBox('Timing')
+        self.timing_grid_check = QCheckBox('Time')
         self.phase_lines_check = QCheckBox('Phase')
         self.aims_check = QCheckBox('Aim')
 
@@ -75,6 +77,9 @@ class ViewModeWidget(ModeWidget):
         view_grid.addWidget(self.aims_check, 7, 1)
         view_grid.addWidget(self.timing_floor_check, 9, 1)
         view_grid.addWidget(self.phase_lines_check, 8, 1)
+
+        # # Set spacing between rows
+        view_grid.setSpacing(10)
 
         # Setting initial states of checkboxes
         for checkbox in [self.minor_grid_check, self.major_grid_check, self.dots_check, self.xs_check,
@@ -456,6 +461,151 @@ class ManualModeWidgetMonthlyMinute(ManualModeTemplate):
         )
 
 
+class ManualModeWidgetYearlyMinute(ManualModeTemplate):
+    def init_ui(self):
+        self.create_radio_buttons()
+        self.create_count_input()
+        self.create_time_inputs()
+        self.create_date_navigation()
+        self.create_manual_buttons()
+        self.create_label_coordinates()
+        self.layout.addStretch()
+
+    def create_date_navigation(self):
+        date_layout = QHBoxLayout()
+        self.previous_button = QPushButton('<')
+        self.next_button = QPushButton('>')
+        self.date_label = QLabel()
+        self.current_date = self.get_last_day_of_year(QDate.currentDate())
+
+        self.update_date_label()
+
+        # Set fixed width for the arrow buttons
+        self.previous_button.setFixedWidth(40)
+        self.next_button.setFixedWidth(40)
+
+        # Add the previous button
+        date_layout.addWidget(self.previous_button)
+
+        # Add a stretchable space
+        date_layout.addStretch()
+
+        # Add the date label
+        date_layout.addWidget(self.date_label, alignment=Qt.AlignCenter)
+
+        # Add a stretchable space
+        date_layout.addStretch()
+
+        # Add the next button
+        date_layout.addWidget(self.next_button)
+
+        self.layout.addLayout(date_layout)
+
+        self.previous_button.clicked.connect(self.show_previous_year)
+        self.next_button.clicked.connect(self.show_next_year)
+
+    def get_last_day_of_year(self, date):
+        year = date.year()
+        return QDate(year, 12, 31)
+
+    def update_date_label(self):
+        year = self.current_date.toString("yyyy")
+        self.date_label.setText(year)
+
+    def show_previous_year(self):
+        self.current_date = self.current_date.addYears(-1)
+        self.update_date_label()
+
+    def show_next_year(self):
+        self.current_date = self.current_date.addYears(1)
+        self.update_date_label()
+
+    def create_time_inputs(self):
+        validator = QDoubleValidator(0.0, 9999.99, 2)
+        time_input_layout = QHBoxLayout()
+        self.hour_input = self.create_time_input("Hour", validator)
+        self.min_input = self.create_time_input("Min", validator)
+        self.sec_input = self.create_time_input("Sec", validator)
+        time_input_layout.addLayout(self.hour_input)
+        time_input_layout.addLayout(self.min_input)
+        time_input_layout.addLayout(self.sec_input)
+        self.layout.addLayout(time_input_layout)
+
+    def create_time_input(self, label_text, validator):
+        layout = QVBoxLayout()
+        label = QLabel(label_text)
+        input_field = QLineEdit()
+        input_field.setValidator(validator)
+        layout.addWidget(label, 0, Qt.AlignCenter)
+        layout.addWidget(input_field)
+        return layout
+
+    def add_entry(self):
+        self.figure_manager.manual_plot_form_minutes(
+            self.count_input.text(),
+            self.hour_input.itemAt(1).widget().text(),
+            self.min_input.itemAt(1).widget().text(),
+            self.sec_input.itemAt(1).widget().text(),
+            self.current_date.toString("dd-MM-yyyy")
+        )
+
+
+class ManualModeWidgetYearly(ManualModeTemplate):
+    def init_ui(self):
+        self.create_radio_buttons()
+        self.create_count_input()
+        self.create_date_navigation()
+        self.create_manual_buttons()
+        self.create_label_coordinates()
+        self.layout.addStretch()
+
+    def create_date_navigation(self):
+        date_layout = QHBoxLayout()
+        self.previous_button = QPushButton('<')
+        self.next_button = QPushButton('>')
+        self.date_label = QLabel()
+        self.current_date = self.get_last_day_of_year(QDate.currentDate())
+
+        self.update_date_label()
+
+        # Set fixed width for the arrow buttons
+        self.previous_button.setFixedWidth(40)
+        self.next_button.setFixedWidth(40)
+
+        # Add the previous button
+        date_layout.addWidget(self.previous_button)
+        date_layout.addStretch()
+        date_layout.addWidget(self.date_label, alignment=Qt.AlignCenter)
+        date_layout.addStretch()
+        date_layout.addWidget(self.next_button)
+        self.layout.addLayout(date_layout)
+
+        self.previous_button.clicked.connect(self.show_previous_year)
+        self.next_button.clicked.connect(self.show_next_year)
+
+    def get_last_day_of_year(self, date):
+        year = date.year()
+        return QDate(year, 12, 31)
+
+    def update_date_label(self):
+        year = self.current_date.toString("yyyy")
+        self.date_label.setText(year)
+
+    def show_previous_year(self):
+        self.current_date = self.current_date.addYears(-1)
+        self.update_date_label()
+
+    def show_next_year(self):
+        self.current_date = self.current_date.addYears(1)
+        self.update_date_label()
+
+    def add_entry(self):
+        self.figure_manager.manual_plot_form_date(
+            self.count_input.text(),
+            self.current_date.toString("dd-MM-yyyy")
+        )
+
+
 class PhaseModeWidget(ModeWidget):
     def init_ui(self):
         # Creating label and input for phase change description
@@ -497,51 +647,87 @@ class PhaseModeWidget(ModeWidget):
         ))
         undo_phase_line_btn.clicked.connect(self.figure_manager.phase_undo_line)
 
+        # Button for additional configuration
+        configure_btn = QPushButton('Configure')
+        configure_btn.clicked.connect(self.configure_phase_lines)
+        self.layout.addWidget(configure_btn)
+
         # Eliminate any extra vertical stretches
         self.layout.addStretch()
+
+    def configure_phase_lines(self):
+        dialog = ConfigurePhaseLinesDialog(self.figure_manager, self)
+        dialog.exec_()
 
 
 class AimModeWidget(ModeWidget):
     def init_ui(self):
+        # Create a QGridLayout
+        grid_layout = QGridLayout()
+        grid_layout.setSpacing(0)
+        grid_layout.setContentsMargins(0, 0, 0, 0)
 
         # Note input for aim
         aim_target_label = QLabel('Note')
+        aim_target_label.setStyleSheet("margin-top: 10px; margin-bottom: 5px;")
         self.aim_target_input = QLineEdit('')
-        self.layout.addWidget(aim_target_label)
-        self.layout.addWidget(self.aim_target_input)
 
         # Y-value input for targeting
         aim_label_y = QLabel('Target')
+        aim_label_y.setStyleSheet("margin-top: 10px; margin-bottom: 5px;")
         self.aim_y_input = QLineEdit('')
         self.aim_y_input.setValidator(QDoubleValidator(0.0, 9999.99, 4))
-        self.layout.addWidget(aim_label_y)
-        self.layout.addWidget(self.aim_y_input)
 
         # Start date input
         aim_label_start_date = QLabel('Start')
+        aim_label_start_date.setStyleSheet("margin-top: 10px; margin-bottom: 5px;")
         self.aim_start_date_input = QDateEdit()
         self.aim_start_date_input.setDate(QDate.currentDate())
         self.aim_start_date_input.setCalendarPopup(True)
         self.aim_start_date_input.setDisplayFormat("dd-MM-yyyy")
-        self.layout.addWidget(aim_label_start_date)
-        self.layout.addWidget(self.aim_start_date_input)
 
         # Deadline date input
         aim_label_end_date = QLabel('Deadline')
+        aim_label_end_date.setStyleSheet("margin-top: 10px; margin-bottom: 5px;")
         self.aim_end_date_input = QDateEdit()
         self.aim_end_date_input.setDate(QDate.currentDate())
         self.aim_end_date_input.setCalendarPopup(True)
         self.aim_end_date_input.setDisplayFormat("dd-MM-yyyy")
-        self.layout.addWidget(aim_label_end_date)
-        self.layout.addWidget(self.aim_end_date_input)
 
         # Add and Undo buttons for setting aims
-        aim_line_button_layout = QHBoxLayout()
         add_aim_line_btn = QPushButton('Add')
+        add_aim_line_btn.setStyleSheet("margin-right: 5px; margin-top: 15px")
         undo_aim_line_btn = QPushButton('Undo')
+        undo_aim_line_btn.setStyleSheet("margin-left: 5px; margin-top: 15px")
+
+        # Add widgets to the grid layout
+        grid_layout.addWidget(aim_target_label, 0, 0)
+        grid_layout.addWidget(self.aim_target_input, 1, 0)
+        grid_layout.addWidget(aim_label_y, 2, 0)
+        grid_layout.addWidget(self.aim_y_input, 3, 0)
+        grid_layout.addWidget(aim_label_start_date, 4, 0)
+        grid_layout.addWidget(self.aim_start_date_input, 5, 0)
+        grid_layout.addWidget(aim_label_end_date, 6, 0)
+        grid_layout.addWidget(self.aim_end_date_input, 7, 0)
+
+        # Add buttons to a horizontal layout
+        aim_line_button_layout = QHBoxLayout()
         aim_line_button_layout.addWidget(add_aim_line_btn)
         aim_line_button_layout.addWidget(undo_aim_line_btn)
-        self.layout.addLayout(aim_line_button_layout)
+
+        # Add the button layout to the grid layout
+        grid_layout.addLayout(aim_line_button_layout, 8, 0, 1, 1)
+
+        # Create a container widget to hold the grid layout
+        container_widget = QWidget()
+        container_layout = QVBoxLayout(container_widget)
+        container_layout.addLayout(grid_layout)
+        container_layout.addStretch()  # Add a stretch to push everything to the top
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+
+        # Add the container widget to the existing layout
+        self.layout.addWidget(container_widget)
 
         # Connect buttons to figure manager methods
         add_aim_line_btn.clicked.connect(lambda: self.figure_manager.aim_from_form(
@@ -551,6 +737,16 @@ class AimModeWidget(ModeWidget):
             self.aim_end_date_input.text()
         ))
         undo_aim_line_btn.clicked.connect(self.figure_manager.aim_undo)
+
+        # Add configure button
+        configure_aim_btn = QPushButton('Configure')
+        configure_aim_btn.clicked.connect(self.configure_aim_lines)
+        configure_aim_btn.setStyleSheet("margin-top: 15px;")
+        grid_layout.addWidget(configure_aim_btn, 9, 0)
+
+    def configure_aim_lines(self):
+        dialog = ConfigureAimLinesDialog(self.figure_manager, self)
+        dialog.exec_()
 
 
 class TrendModeWidget(ModeWidget):
@@ -633,24 +829,31 @@ class TrendModeWidget(ModeWidget):
                 {'fit_method': self.trend_method_combo.currentText()})
         )
 
+        trend_configure_btn = QPushButton('Configure')
+        trend_configure_btn.clicked.connect(self.configure_trends)
+        self.layout.addWidget(trend_configure_btn)
+
         # SpinBox for Forward Projection
         forward_projection_label = QLabel("Forward projection")
         self.forward_projection_spinbox = QSpinBox()
         self.forward_projection_spinbox.setRange(0, 100)  # Set the range as required
         self.forward_projection_spinbox.setValue(self.data_manager.user_preferences.get('forward_projection', 0))
-        self.forward_projection_spinbox.valueChanged.connect(
-            lambda value: self.data_manager.user_preferences.update(
-                {'forward_projection': value}
-            )
-        )
+        self.forward_projection_spinbox.valueChanged.connect(lambda value: self.data_manager.user_preferences.update({'forward_projection': value}))
 
-        # Add the label and the combo box layout to the group layout
+        # SpinBox for Forward Projection
+        slope_multiple_label = QLabel("Slope unit multiple")
+        self.slope_multiple_spinbox = QSpinBox()
+        self.slope_multiple_spinbox.setRange(1, 10)  # Set the range as required
+        self.slope_multiple_spinbox.setValue(self.data_manager.user_preferences.get('cel_slope_multiple', 1))
+        self.slope_multiple_spinbox.valueChanged.connect(lambda value: self.data_manager.user_preferences.update({'cel_slope_multiple': value}))
+
+        # Add labels and spinboxes to layout
         trend_method_group_layout.addWidget(trend_method_label)
         trend_method_group_layout.addWidget(self.trend_method_combo)
-
-        # Add the forward projection label and spinbox to the group layout
         trend_method_group_layout.addWidget(forward_projection_label)
         trend_method_group_layout.addWidget(self.forward_projection_spinbox)
+        trend_method_group_layout.addWidget(slope_multiple_label)
+        trend_method_group_layout.addWidget(self.slope_multiple_spinbox)
 
         # Add the combo box group layout to the main layout
         self.layout.addLayout(trend_method_group_layout)
@@ -664,3 +867,9 @@ class TrendModeWidget(ModeWidget):
     def handle_fit_button(self):
         self.figure_manager.trend_fit(self.trend_radio_dot.isChecked())
         self.setFocus()  # Set focus back to the main window
+
+    def configure_trends(self):
+        dialog = ConfigureTrendLinesDialog(self.trend_radio_dot.isChecked(), self.figure_manager, self)
+        dialog.exec_()
+
+
