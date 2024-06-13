@@ -37,7 +37,7 @@ You can import from csv, xls, xlsx, and ods, files. iChart will only look at she
 Here is an [example.](https://github.com/SJV-S/iChart/blob/main/example_data.csv)
 
 
-![Default Chart](Images/default_chart.png)
+![Default Chart](images/default_chart.png)
 
-![Example Chart](Images/example_chart.png)
+![Example Chart](images/example_chart.png)
 
