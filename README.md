@@ -23,11 +23,11 @@ Contact: ichart.wopak@simplelogin.com<br>
 
 Extract content in your preferred directory. Launch by running iChart executable.
 
-### Windows
+#### Windows
 
 On Windows, right click and select "Run as administrator". Windows Defender will then raise a warning. To proceed, click on "More info" and then click "Run anyway". In the unlikely event that this does not work, you may need to manually add an [exception](https://support.microsoft.com/en-us/windows/add-an-exclusion-to-windows-security-811816c0-4dfd-af4a-47e4-c301afe13b26).
 
-### Linux
+#### Linux
 
 Make the AppImage executable by right clicking and checking the "Allow file to run as program" in the Permissions tab. Or, run "chmod +x iChart-linux-x86_64.AppImage" in the terminal.
 
