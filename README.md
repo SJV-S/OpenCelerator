@@ -29,7 +29,7 @@ You are going to have to deal with the paternalistic Windows Defender. When runn
 
 #### Linux
 
-Make the AppImage executable by right clicking and checking the "Allow file to run as program" in the Permissions tab. Or, run "chmod +x iChart-linux-x86_64.AppImage" in the terminal.
+Make the AppImage executable by right clicking, going into Properties, and check the "Allow file to run as program" in the Permissions tab (exact wording may vary). Or, run "chmod +x iChart-linux-x86_64.AppImage" in the terminal.
 
 If the AppImage does not run, ensure that FUSE is installed.
 - Ubuntu/Debian: sudo apt install fuse
