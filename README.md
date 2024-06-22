@@ -28,8 +28,8 @@ Extract content in your preferred directory. Launch by running iChart executable
 #### Windows
 
 Windows is very paternalistic. To be able to run the app (without Windows deleting the file without asking) you need to either
-- 1) Turn off realtime protection.
-- 2) Add an [exception](https://support.microsoft.com/en-us/windows/add-an-exclusion-to-windows-security-811816c0-4dfd-af4a-47e4-c301afe13b26) to the folder in which you will be running iChart.
+1) Turn off realtime protection.
+2) Add an [exception](https://support.microsoft.com/en-us/windows/add-an-exclusion-to-windows-security-811816c0-4dfd-af4a-47e4-c301afe13b26) to the folder in which you will be running iChart.
 
 When running the app the first time, right click and select "Run as administrator". Windows Defender will then raise a warning. To proceed, click on "More info" and then click "Run anyway". In the unlikely event that this does not work, you may need to manually add an [exception](https://support.microsoft.com/en-us/windows/add-an-exclusion-to-windows-security-811816c0-4dfd-af4a-47e4-c301afe13b26).
 
