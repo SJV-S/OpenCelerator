@@ -23,7 +23,7 @@ Contact: ichart.wopak@simplelogin.com<br>
 
 ## Installation
 
-Extract content in your preferred directory. Launch by running iChart executable. Packages on older platforms should work on newer ones, but not the reverse. For example, the Windows 10 version should work on 11, Ventura should work on Sonoma, and so on.
+Extract content in your preferred directory. Launch by running iChart executable. Packages on older platforms should work on newer ones, but not the reverse. For example, the Windows 10 version should work on 11, the Ventura version should work on Sonoma, and so on.
 
 #### Mac
 
