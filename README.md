@@ -25,6 +25,10 @@ Contact: ichart.wopak@simplelogin.com<br>
 
 Extract content in your preferred directory. Launch by running iChart executable. Packages on older platforms should work on newer ones, but not the reverse. For example, the Windows 10 version should work on 11.
 
+#### Mac
+
+A [warning](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac) will be raised when running the app the first time.
+
 #### Windows
 
 Windows is very paternalistic. To run the app (without Windows deleting the file without asking) you need to *either*:
