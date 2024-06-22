@@ -50,7 +50,7 @@ You can import data from csv, xls, xlsx, and ods, files. iChart will only look a
 Here is an [example.](https://github.com/SJV-S/iChart/blob/main/example_data.csv)
 
 
-![Default Chart](images/default_chart2.png)
+![Default Chart](images/default_chart3.png)
 
 ![Example Chart](images/example_chart.png)
 
