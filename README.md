@@ -29,7 +29,7 @@ Windows is very paternalistic. When running the app the first time, right click 
 
 #### Linux
 
-Make the AppImage executable by right clicking, going into Properties, and check the "Allow file to run as program" in the Permissions tab (exact wording may vary). Or, run "chmod +x iChart-linux-x86_64.AppImage" in the terminal.
+Make the AppImage executable by right clicking, going into Properties, and check the "Allow file to run as program" in the Permissions tab (exact wording may vary). Or, run "chmod +x iChart-linux-x86_64.AppImage" in the terminal. Do not place the AppImage in privileged directories.
 
 If the AppImage does not run, ensure that FUSE is installed.
 - Ubuntu/Debian: sudo apt install fuse
