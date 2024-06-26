@@ -30,7 +30,7 @@ Extract content in your preferred directory. Launch by running iChart executable
 
 #### Mac
 
-When running the app the first time: Once downloaded, double click on the zip file to extract it, then right click on the extracted file, and select “Open”. Your system will then ask you to grant the app permission to run. After that you should just be able to launch the app by double clicking like any other app. A [warning](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac) will be raised when running the app the first time.
+When running the app the first time: Once downloaded, double click on the zip file to extract it, then right click on the extracted file, and select “Open”. Your system will then ask you to grant the app [permission](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac) to run. After that you should just be able to launch the app by double clicking like any other app
 
 #### Windows
 
