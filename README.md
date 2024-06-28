@@ -6,7 +6,7 @@ Contact: ichart.wopak@simplelogin.com<br>
 
 
 ## Instructions
-- [Installation](#installation)
+- [Download & Installation](## Download-&-Installation)
 - [Import Formatting](#import-formatting)
 
 ## Features
@@ -21,7 +21,7 @@ Contact: ichart.wopak@simplelogin.com<br>
 - Supports multiple chart types
 
 
-## Installation
+## Download & Installation
 
 Extract content in your preferred directory. Launch by running iChart executable.
 
