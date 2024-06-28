@@ -25,6 +25,7 @@ Contact: ichart.wopak@simplelogin.com<br>
 
 The latest version can be [downloaded here](https://github.com/SJV-S/iChart/releases/tag/0.3.0). Extract content in your preferred directory. Launch by running iChart executable.
 
+#### FAQ
 - “Which file(s) should I download?”. To run the app, you only need one file with the name of your operating system. Ignore the source code files.
 - “Which version do I need?” Packages on older versions should work on newer versions, but not the reverse. For example, the Windows 10 version should work on 11, the Ventura version should work on Sonoma, and so on.
 
