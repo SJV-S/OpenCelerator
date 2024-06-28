@@ -6,7 +6,7 @@ Contact: ichart.wopak@simplelogin.com<br>
 
 
 ## Instructions
-- [Download & Installation](#dwnload-Installation)
+- [Download & Installation](#dwnload--installation)
 - [Import Formatting](#import-formatting)
 
 ## Features
