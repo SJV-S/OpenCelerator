@@ -5,9 +5,10 @@ iChart is a Python implementation of the Standard Celeration Chart (SCC). The SC
 Contact: ichart.wopak@simplelogin.com<br>
 
 
-## Instructions
+## Content
 - [Download & Installation](#download--installation)
 - [Import Formatting](#import-formatting)
+- [Images](#images)
 
 ## Features
 - Data import and export
