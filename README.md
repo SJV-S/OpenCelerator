@@ -18,7 +18,7 @@ Contact: ichart.wopak@simplelogin.com<br>
 - Celeration and bounce lines
 - Selective visibility of chart objects
 - Credit lines
-- Changeable start date
+- Dynamic start date
 - Supports the entire family of standard celeration charts
 
 
