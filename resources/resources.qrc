@@ -1,0 +1,17 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource>
+        <file>../images/patreon_logo.png</file>
+        <file>../images/bitcoin_logo.png</file>
+        <file>../images/lightning_qr.png</file>
+        <file>../images/base_chain_qr.png</file>
+        <file>../images/crosshairs-solid.svg</file>
+        <file>../images/eye-regular.svg</file>
+        <file>../images/pen-to-square-regular.svg</file>
+        <file>../images/flag-regular.svg</file>
+        <file>../images/plus-solid.svg</file>
+        <file>../images/minus-solid.svg</file>
+        <file>../images/gear-solid.svg</file>
+        <file>../images/celeration.svg</file>
+    </qresource>
+</RCC>
