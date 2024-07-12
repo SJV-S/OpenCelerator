@@ -15,7 +15,7 @@ Contact: ichart.wopak@simplelogin.com<br>
 - Direct data entry
 - Phase lines
 - Aim lines
-- Trend analysis
+- Celeration and bounce lines
 - Selective viewing
 - Credit lines
 - Changeable start date
