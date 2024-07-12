@@ -26,7 +26,7 @@ Contact: ichart.wopak@simplelogin.com<br>
 
 ## Download & Installation
 
-The latest version can be [downloaded here](https://github.com/SJV-S/iChart/releases/tag/0.3.0). Extract content in your preferred directory. Launch by running iChart executable.
+The latest version can be [downloaded here](https://github.com/SJV-S/iChart/releases/tag/0.4.0). Extract content in your preferred directory. Launch by running iChart executable.
 
 #### FAQ
 - “Which file(s) should I download?” To run the app, you only need one file with the name of your operating system. Ignore the source code files.
