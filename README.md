@@ -19,7 +19,7 @@ Contact: ichart.wopak@simplelogin.com<br>
 - Selective viewing
 - Credit lines
 - Changeable start date
-- Supports multiple chart types
+- Supports the entire family of standard celeration charts
 
 
 ## Download & Installation
