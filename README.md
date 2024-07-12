@@ -16,7 +16,7 @@ Contact: ichart.wopak@simplelogin.com<br>
 - Phase lines
 - Aim lines
 - Celeration and bounce lines
-- Selective viewing
+- Selective visibility of chart objects
 - Credit lines
 - Changeable start date
 - Supports the entire family of standard celeration charts
