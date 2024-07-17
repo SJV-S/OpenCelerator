@@ -40,7 +40,7 @@ Once downloaded, double click on the zip file to extract it, then right click on
 
 Windows is very paternalistic. To run the app (and prevent Windows from deleting the file without asking) you need to *either*:
 - Option 1: Turn off [real-time protection](https://support.microsoft.com/en-us/windows/turn-off-defender-antivirus-protection-in-windows-security-99e6004f-c54c-8509-773c-a4d776b77960).
-- Option 2: Add an [exclusion](https://support.microsoft.com/en-us/windows/add-an-exclusion-to-windows-security-811816c0-4dfd-af4a-47e4-c301afe13b26) to the folder in which you will be running iChart. Click [here](https://youtu.be/1r93NtwZt4o) to see how to do it on Windows 10, and [here](https://youtu.be/j2XGZCLL-Is) for Windows 11.
+- Option 2: Add an [exclusion](https://support.microsoft.com/en-us/windows/add-an-exclusion-to-windows-security-811816c0-4dfd-af4a-47e4-c301afe13b26) to the folder in which you will be running iChart. Click [here](https://youtu.be/1r93NtwZt4o) to see how to do it on Windows 10, or [here](https://youtu.be/j2XGZCLL-Is) for Windows 11.
 
 When running the app the first time, right click and select "Run as administrator". Windows Defender might raise a warning. To proceed, click on "More info" and then click "Run anyway".
 
