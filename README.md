@@ -21,6 +21,7 @@ Contact: ichart.wopak@simplelogin.com<br>
 - Selective visibility of chart objects
 - Credit lines
 - Dynamic start date
+- Selective customization of data points
 - Supports the entire family of standard celeration charts
 
 
