@@ -6,6 +6,8 @@ Tutorial: https://www.youtube.com/playlist?list=PLAU5et__-B6HCHmlgyxgPPDJ2rHgZ1P
 
 Contact: ichart.wopak@simplelogin.com<br>
 
+"What's Precision Teaching?". Here's an excellent intro: https://www.youtube.com/watch?v=PjwWZP726Ko&list=PLuQRRtTr10Mm1QycJLUjowBFugi7lg0c7&index=5&t=0s
+
 
 ## Content
 - [Download & Installation](#download--installation)
