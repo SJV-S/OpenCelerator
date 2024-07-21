@@ -70,7 +70,7 @@ You can import data from csv, xls, xlsx, and ods, files. iChart will only look a
 
 ## Images
 
-![Default Chart](images/default_chart.png)
+![Default Chart](/images/Charts/default_chart.png)
 
-![Example Chart](images/example_chart.png)
+![Example Chart](images/Charts/example_chart.png)
 
