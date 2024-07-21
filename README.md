@@ -4,7 +4,7 @@ OpenCelerator (formerly named iChart) is a Python implementation of the Standard
 
 OpenCelerator tutorial: https://www.youtube.com/playlist?list=PLAU5et__-B6HCHmlgyxgPPDJ2rHgZ1PY4
 
-Contact: ichart.wopak@simplelogin.com<br>
+Contact: opencelerator.9qpel@simplelogin.com<br>
 
 "What is Precision Teaching?". Here is an excellent intro by Carl Binder: https://www.youtube.com/watch?v=PjwWZP726Ko&list=PLuQRRtTr10Mm1QycJLUjowBFugi7lg0c7&index=5&t=0s
 
