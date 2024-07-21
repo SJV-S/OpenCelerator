@@ -48,15 +48,18 @@ class DataManager:
 
             self.default_phase_style = {
                 'date': None,
-                'y': None,
+                'y_line': None,
+                'y_text': None,
                 'text': None,
-                'font_size': 8,
+                'font_size': 12,
                 'font_color': '#000000',
                 'bg_color': '#FFFFFF',
                 'edge_color': '#000000',
                 'line_color': '#000000',
                 'linewidth': 1,
                 'linestyle': '-',
+                'text_mode': None,
+                'text_position': None,
             }
 
             self.default_aim_style = {
@@ -76,9 +79,7 @@ class DataManager:
             self.default_corr_trend_style = {
                 'date1': None,
                 'date2': None,
-                'y': None,
                 'text': None,
-                'text_y': None,
                 'text_date': None,
                 'font_size': 10,
                 'font_color': '#008000',
@@ -112,15 +113,19 @@ class DataManager:
                 'chart_font_color': '#05c3de',
                 'chart_grid_color': '#6ad1e3',
                 'width': 9,
+                'phase_text_type': 'Flag',
+                'phase_text_position': 'Top',
                 'fit_method': 'Least-squares',
                 'bounce_envelope': 'None',
+                'celeration_unit': 'Weekly (standard)',
                 'forward_projection': 0,
-                'cel_slope_multiple': 7,
                 'home_folder': os.path.expanduser("~"),
                 'phase_style': self.default_phase_style,
                 'aim_style': self.default_aim_style,
                 'trend_corr_style': self.default_corr_trend_style,
                 'trend_err_style': self.default_err_trend_style,
+                'recent_imports': [],
+                'recent_charts': [],
             }
 
             self.chart_data = {
@@ -131,8 +136,6 @@ class DataManager:
                 'aim': [],
                 'trend_corr': [],
                 'trend_err': [],
-                'bounce_corr': [],
-                'bounce_err': [],
                 'credit': ('SUPERVISOR: ________________    DIVISION: ________________       TIMER: ________________     COUNTED: ________________',
                            'ORGANIZATION: ________________     MANAGER: ________________     COUNTER: ________________     CHARTER: ________________',
                            'ADVISOR: ________________        ROOM: ________________   PERFORMER: ________________        NOTE: ________________'),
@@ -154,6 +157,13 @@ class DataManager:
                     'phase_lines': True,
                     'aims': True}
             }
+
+            # Celeration unit dictionary
+            self.cel_unit_dict = {'Daily': 1,
+                                  'Weekly (standard)': 7,
+                                  'Monthly (Weekly x4)': 28,
+                                  'Yearly (Weekly x52)': 365,
+                                  }
 
             # Support classes
             self.trend_fitter = TrendFitter(self)
@@ -203,17 +213,16 @@ class DataManager:
         if not pd.api.types.is_datetime64_any_dtype(df['d']):
             df['d'] = pd.to_datetime(df['d'])
 
-        # Filter data points based on current date range / chart window
-        df = df[df['d'].isin(date_to_x.keys())]
-
         chart_type = self.user_preferences['chart_type']
-
         if any(period in chart_type for period in ('Weekly', 'Monthly', 'Yearly')):
             agg_type = chart_type[0]
             df['d'] = pd.to_datetime(df.d)
             df.set_index('d', inplace=True)
             df = df.resample(agg_type).agg(self.user_preferences['chart_data_agg']).reset_index()  # Will pad missing dates with zeros
-            df = df[~((df['m'] == 0) & (df['c'] == 0) & (df['i'] == 0))]  # Drop padded dates
+            df = df.loc[~((df['m'] == 0) & (df['c'] == 0) & (df['i'] == 0))]  # Drop padded dates
+
+        # Filter data points based on current date range / chart window
+        df = df[df['d'].isin(date_to_x.keys())]
 
         x = pd.to_datetime(df['d']).map(date_to_x)  # Convert date to x position
         if kind == 'm' and 'Minute' in chart_type:
@@ -249,11 +258,11 @@ class DataManager:
         df['h'] = pd.to_numeric(df['h'], errors='coerce').fillna(1)
 
         # Set negative values to zero
-        df['c'] = df['c'].apply(lambda x: x if x >= 0 else 0)
-        df['i'] = df['i'].apply(lambda x: x if x >= 0 else 0)
-        df['s'] = df['s'].apply(lambda x: x if x >= 0 else 1)
-        df['m'] = df['m'].apply(lambda x: x if x >= 0 else 1)
-        df['h'] = df['h'].apply(lambda x: x if x >= 0 else 1)
+        df.loc[:, 'c'] = df['c'].apply(lambda x: x if x >= 0 else 0)
+        df.loc[:, 'i'] = df['i'].apply(lambda x: x if x >= 0 else 0)
+        df.loc[:, 's'] = df['s'].apply(lambda x: x if x >= 0 else 1)
+        df.loc[:, 'm'] = df['m'].apply(lambda x: x if x >= 0 else 1)
+        df.loc[:, 'h'] = df['h'].apply(lambda x: x if x >= 0 else 1)
 
         # Get total amount of minutes
         df['m'] = (df['s'] / 60) + df['m'] + (df['h'] * 60)
@@ -270,8 +279,8 @@ class DataManager:
             df['d'] = pd.to_datetime(df['d']).dt.date
         df['d'] = pd.to_datetime(df['d'])  # Convert back to a datetime column with no time or timezone information
 
-        # # Average entries if stacked on the same date
-        df = df.groupby('d', as_index=False).mean()
+        # # Sum entries if stacked on the same date
+        df = df.groupby('d', as_index=False).sum()
 
         # Store imported raw data (also clears any previous data points)
         self.chart_data['raw_df'] = df
@@ -342,6 +351,23 @@ class DataManager:
         filepath = os.path.join(config_dir, filename)
         with open(filepath, 'w') as f:
             json.dump(self.user_preferences, f, indent=4)
+
+    def delete_user_preferences(self):
+        system = platform.system()
+        home_dir = os.path.expanduser("~")
+
+        if system == "Linux" or system == "Darwin":  # Darwin is macOS
+            config_dir = os.path.join(home_dir, '.config', 'iChart')
+        elif system == "Windows":
+            config_dir = os.path.join(home_dir, 'AppData', 'Local', 'iChart')
+        else:
+            raise OSError("Unsupported operating system")
+
+        filename = 'preferences.json'
+        filepath = os.path.join(config_dir, filename)
+
+        if os.path.exists(filepath):
+            os.remove(filepath)
 
     def handle_zero_counts(self, df, kind, chart_type):
         if 'Minute' in chart_type:
@@ -454,15 +480,15 @@ class TrendFitter:
         return x, y
 
     def get_trend_label(self, slope):
-        # cel_unit = self.data_manager.user_preferences['cel_slope_multiple']
-        cel_unit = 7  # Gets weekly celeration since everything is converted to days
-        cel_label = np.power(10, slope * cel_unit)
+        unit = self.data_manager.user_preferences['celeration_unit']
+        unit_case = unit[0].lower()  # First letter of unit
+        day_unit_multiple = self.data_manager.cel_unit_dict[unit]
+        cel = np.power(10, slope * day_unit_multiple)
 
-        if cel_label < 1:
-            cel_label = f'÷{cel_label:.2f}c'
-        else:
-            cel_label = f'x{cel_label:.2f}c'
+        if unit_case == 'm':
+            unit_case = '4w'
 
+        cel_label = f'c = x{cel:.2f} / {unit_case}'
         return cel_label
 
     def quarter_intersect_fit(self, x, y):
@@ -577,7 +603,7 @@ class TrendFitter:
                 lower_bounce = np.power(10, log_lower_bound)
 
             bounce_ratio = upper_bounce[0] / lower_bounce[0]
-            bounce_est_label = f'x{bounce_ratio:.2f}b'
+            bounce_est_label = f'b = x{bounce_ratio:.2f}'
             celeration_slope_label = celeration_slope_label + ', ' + bounce_est_label
 
         else:

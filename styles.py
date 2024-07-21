@@ -3,6 +3,7 @@ general_stylesheet = '''
 QWidget {
     font-family: "Sans-serif";
     font-size: 12px;
+    color: black;
 }
 /* QMainWindow styles */
 QMainWindow {
@@ -19,14 +20,46 @@ QPushButton {
 QPushButton:hover {
     background-color: #e7efff;
 }
-/* QRadioButton styles */
+
+
 QRadioButton {
     margin: 5px;
+    color: black;
 }
+
 QRadioButton::indicator {
     width: 20px;
     height: 20px;
 }
+
+QRadioButton::indicator:unchecked {
+    image: url(:/images/circle-regular.svg);
+}
+
+QRadioButton::indicator:checked {
+    image: url(:/images/circle-dot-regular.svg);
+}
+
+QRadioButton:disabled {
+    color: gray; /* Text color when disabled */
+}
+
+QRadioButton::indicator:disabled {
+    color: gray;
+}
+
+
+QRadioButton::indicator:unchecked:disabled {
+    image: url(:/images/circle-regular-disabled.svg);
+}
+
+QRadioButton::indicator:checked:disabled {
+    image: url(:/images/circle-dot-regular-disabled.svg);
+}
+
+
+
+
 /* QLabel styles */
 QLabel {
     margin: 0px;
@@ -35,6 +68,8 @@ QLabel {
 }
 /* QLineEdit styles */
 QLineEdit {
+    color: black;
+    background-color: white;
     border: 1px solid gray;
     padding: 4px;
     margin 0px;
@@ -42,13 +77,30 @@ QLineEdit {
 
 QCheckBox {
     margin: 5px;
+    background-color: white;
 }
+
 QCheckBox::indicator {
+    background-color: white; 
+    border: 1px solid black; 
 }
+
+QCheckBox::indicator:checked {
+    background-color: white; /* Background color when checked */
+    border: 1px solid black; /* Border color when checked */
+    image: url(:/images/check-solid.svg);
+    width: 14px;
+    height: 14px;
+}
+
 QCheckBox::indicator:unchecked {
+    background-color: white;
+    border: 1px solid black;
+    width: 14px;
+    height: 14px;
 }
-QCheckBox::indicator:checked { 
-}
+
+
 /* QGroupBox styles */
 QGroupBox {
     border: 1px solid silver;
@@ -121,23 +173,55 @@ QTabBar::tab:hover {
 
 /* QDateEdit styles */
 QDateEdit {
+    color: black;
+    background-color: white;
     border: 1px solid gray;
     padding: 3px;
 }
+
+QCalendarWidget QToolButton {
+    color: black; /* Text color for the header */
+    background-color: lightgray;
+}
+QCalendarWidget QWidget#qt_calendar_navigationbar {
+    background-color: lightgray;
+}
+QCalendarWidget QAbstractItemView {
+    background-color: white;
+    color: black;
+}
+QCalendarWidget QTableView {
+    background-color: white;
+}
+
+
 /* QListWidget styles */
 QListWidget {
     border: 1px solid gray;
     padding: 5px;
+    color: black;
+     background-color: white;
+}
+QListWidget::item {
+    color: black;
+    background-color: white;
+}
+QListWidget::item:selected {
+    background-color: #d3d3d3; /* Slightly darker background color for selected items */
 }
 /* QDialog styles */
 QDialog {
     background-color: #f0f0f0;
 }
-/* QComboBox styles */
 QComboBox {
-    border: 1px solid gray;
-    padding: 3px;
+    color: black;
+    background-color: #ececec;
 }
+QComboBox QAbstractItemView {
+    color: black;
+    background-color: white;
+}
+
 /* QFileDialog styles */
 QFileDialog {
     background-color: #f0f0f0;
@@ -146,4 +230,25 @@ QFileDialog {
 QMessageBox {
     background-color: #f0f0f0;
 }
+
+QSpinBox {
+    color: black;
+    background-color: white;
+}
+
+QDoubleSpinBox {
+    color: black;
+    background-color: white;
+}
+
+QDialog {
+    background-color: #f9f9f9;
+    color: black;
+}
+
+QScrollArea QWidget {
+    background-color: #f9f9f9;
+    color: black;
+}
+
 '''

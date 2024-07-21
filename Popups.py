@@ -1,9 +1,10 @@
 from resources.resources_rc import *
 
-from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QRadioButton, QDialogButtonBox, QGroupBox, QHBoxLayout, QLineEdit, QLabel, QPushButton, QGridLayout, QSpinBox, QScrollArea, QComboBox, QListWidget,
-                             QColorDialog, QListWidgetItem, QDoubleSpinBox, QApplication, QFrame, QStackedLayout)
-from PyQt5.QtCore import Qt, QUrl, QTimer
-from PyQt5.QtGui import QIcon, QDesktopServices, QPixmap, QClipboard
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QRadioButton, QDialogButtonBox, QGroupBox, QHBoxLayout, QLineEdit, QLabel, QPushButton, QGridLayout, QSpinBox, QScrollArea, QComboBox, QListWidget,
+                               QColorDialog, QListWidgetItem, QDoubleSpinBox, QApplication, QFrame, QStackedLayout)
+from PySide6.QtCore import Qt, QUrl, QTimer
+from PySide6.QtGui import QIcon, QDesktopServices, QPixmap, QClipboard
+
 from DataManager import DataManager
 import calendar
 
@@ -101,7 +102,7 @@ class SaveImageDialog(QDialog):
         resolution_group.setLayout(resolution_layout)
 
         # Dialog buttons
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, self)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel, self)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
@@ -343,7 +344,7 @@ class ConfigureTemplateDialog(QDialog):
 
     def populate_fields(self, current):
         if current:
-            item_data = current.data(Qt.UserRole)
+            item_data = current.data(Qt.ItemDataRole.UserRole)
             self.font_size_spinbox.setValue(item_data.get('font_size', 12))
             self.line_text.setText(item_data.get('text', ''))
             self.set_color_button_style(self.font_color_button, item_data.get('font_color', '#000000'))
@@ -461,9 +462,9 @@ class ConfigurePhaseLinesDialog(ConfigureTemplateDialog):
     def refresh_list_box(self):
         self.list_widget.clear()
         for item in self.items:
-            to_display = f"{item['text']}, {item['date']}, {item['y']}"
+            to_display = f"{item['text']}, {item['date']}"
             list_item = QListWidgetItem(to_display)
-            list_item.setData(Qt.UserRole, item)
+            list_item.setData(Qt.ItemDataRole.UserRole, item)
             self.list_widget.addItem(list_item)
 
 
@@ -503,7 +504,7 @@ class ConfigureAimLinesDialog(ConfigureTemplateDialog):
         for item in self.items:
             to_display = f"{item['text']}, {item['date1']}, {item['date2']}, {item['y']}"
             list_item = QListWidgetItem(to_display)
-            list_item.setData(Qt.UserRole, item)
+            list_item.setData(Qt.ItemDataRole.UserRole, item)
             self.list_widget.addItem(list_item)
 
 
@@ -625,7 +626,7 @@ class ConfigureTrendLinesDialog(ConfigureTemplateDialog):
         for item in self.items:
             to_display = f"{item['text']}, {item['date1']} -- {item['date2']}"
             list_item = QListWidgetItem(to_display)
-            list_item.setData(Qt.UserRole, item)
+            list_item.setData(Qt.ItemDataRole.UserRole, item)
             self.list_widget.addItem(list_item)
 
     def choose_font_color(self):
@@ -644,7 +645,7 @@ class ConfigureTrendLinesDialog(ConfigureTemplateDialog):
 
     def populate_fields(self, current):
         if current:
-            item_data = current.data(Qt.UserRole)
+            item_data = current.data(Qt.ItemDataRole.UserRole)
             self.font_size_spinbox.setValue(item_data.get('font_size', 12))
             self.line_text.setText(item_data.get('text', ''))
             self.set_color_button_style(self.font_color_button, item_data.get('font_color', '#000000'))
@@ -690,8 +691,8 @@ class SupportDevDialog(QDialog):
         scrollArea.setWidgetResizable(True)
         contentWidget = QLabel()
         contentWidget.setWordWrap(True)
-        contentWidget.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-        contentWidget.setTextFormat(Qt.RichText)
+        contentWidget.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        contentWidget.setTextFormat(Qt.TextFormat.RichText)
         # Adding margins around the text
         contentWidget.setStyleSheet("padding: 20px;")
         contentWidget.setText(
@@ -742,13 +743,14 @@ class SupportDevDialog(QDialog):
         self.setWindowTitle('Support iChart')
 
     def patreon_btn_clicked(self):
-        QDesktopServices.openUrl(QUrl('https://www.patreon.com/johanpigeon/membership'))
-        self.accept()
+        url = QUrl('https://www.patreon.com/johanpigeon/membership')
+        if not QDesktopServices.openUrl(url):
+            print("Failed to open URL")
 
     def bitcoin_btn_clicked(self):
         self.close()
         popup = BitcoinDonationPopup(self)
-        popup.exec_()  # Use exec_() to show the dialog modally
+        popup.exec()  # Use exec_() to show the dialog modally
 
     def exit_btn_clicked(self):
         self.accept()  # Closes the dialog
@@ -773,13 +775,13 @@ class BitcoinDonationPopup(QDialog):
 
         # First layout (Base chain)
         self.first_frame = QFrame(self)
-        self.first_frame.setFrameShape(QFrame.StyledPanel)
+        self.first_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self.first_layout = QVBoxLayout(self.first_frame)
         self.first_layout.setContentsMargins(0, 0, 0, 0)  # Reduce padding around the label and image
         self.first_layout.setSpacing(5)  # Minimal spacing between widgets
 
         first_label = QLabel("Bitcoin (Base chain)", self)
-        first_label.setAlignment(Qt.AlignCenter)  # Center the label horizontally
+        first_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         first_label.setStyleSheet(
             "font: normal 10pt Arial; margin: 0; padding: 0; font-size: 15px")  # Ensure the font is not italic
         self.first_layout.addWidget(first_label)
@@ -797,13 +799,13 @@ class BitcoinDonationPopup(QDialog):
 
         # Second layout (Lightning)
         self.second_frame = QFrame(self)
-        self.second_frame.setFrameShape(QFrame.StyledPanel)
+        self.second_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self.second_layout = QVBoxLayout(self.second_frame)
         self.second_layout.setContentsMargins(0, 0, 0, 0)  # Reduce padding around the label and image
         self.second_layout.setSpacing(5)  # Minimal spacing between widgets
 
         second_label = QLabel("Lightning (LNURL)", self)
-        second_label.setAlignment(Qt.AlignCenter)  # Center the label horizontally
+        second_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         second_label.setStyleSheet("font: normal 10pt Arial; margin: 0; padding: 0; font-size: 15px")
         self.second_layout.addWidget(second_label)
 

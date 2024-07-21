@@ -1,9 +1,11 @@
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QTabWidget, QHBoxLayout, QPushButton, QGroupBox,
-                             QRadioButton, QVBoxLayout, QLabel, QFileDialog, QCheckBox, QComboBox, QMessageBox,
-                             QStackedWidget, QDialog, QSpacerItem, QSizePolicy, QStyle, QSpinBox, QColorDialog,
-                             QGridLayout, QTabBar)
-from PyQt5.QtCore import Qt, QDate, QDir, QPoint, QSize, QRect
-from PyQt5.QtGui import QPainter, QColor, QPen, QIcon, QPixmap
+from PySide6 import QtCore  # Must be at the top of the script
+
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QTabWidget, QHBoxLayout, QPushButton, QGroupBox,
+                               QVBoxLayout, QLabel, QFileDialog, QCheckBox, QComboBox, QMessageBox,
+                               QStackedWidget, QDialog, QSpacerItem, QSizePolicy, QSpinBox, QColorDialog, QListWidget,
+                               QListWidgetItem)
+from PySide6.QtCore import Qt, QDate, QDir
+from PySide6.QtGui import QPainter, QColor, QIcon, QPixmap
 
 import sys
 import os
@@ -12,8 +14,24 @@ from DataManager import DataManager
 from Popups import SaveImageDialog, StartDateDialog, SupportDevDialog
 import styles
 import Modes as chart_mode
-
 import warnings
+
+# For generating error reports
+import error_logging
+logger = error_logging.logger
+
+# Only uncomment for Windows splash screen
+# import tempfile
+# if "NUITKA_ONEFILE_PARENT" in os.environ:
+#     splash_filename = os.path.join(
+#         tempfile.gettempdir(),
+#         "onefile_%d_splash_feedback.tmp" % int(os.environ["NUITKA_ONEFILE_PARENT"]),
+#     )
+#     if os.path.exists(splash_filename):
+#         os.unlink(splash_filename)
+# print("Splash Screen has been removed")
+
+
 # I had to use Y and M instead of YE and ME because the executable won't currently run with YE and ME
 warnings.filterwarnings(action='ignore', category=FutureWarning, message=".*'Y' is deprecated.*")
 warnings.filterwarnings(action='ignore', category=FutureWarning, message=".*'M' is deprecated.*")
@@ -22,6 +40,8 @@ warnings.filterwarnings(action='ignore', category=FutureWarning, message=".*'M' 
 class ChartApp(QMainWindow):
     def __init__(self):
         super().__init__()
+        # Define a custom data role
+        self.FullFilePathRole = Qt.ItemDataRole.UserRole
 
         # Initialize and add the Matplotlib widget to the right panel
         self.data_manager = DataManager()
@@ -32,11 +52,11 @@ class ChartApp(QMainWindow):
         self.previous_mode = None
         self.loaded_chart_path = None
         self.manual_mode_widget = None
-
         # Initialize the main window properties
-        self.window_title_str = 'iChart v0.4.0'
+        self.window_title_str = 'iChart v0.6.0'
         self.setWindowTitle(self.window_title_str)
-
+        self.setWindowIcon(QIcon(':/images/ichart_logo_no_text.svg'))
+        
         # Create and set the central widget and layout
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -80,29 +100,30 @@ class ChartApp(QMainWindow):
         # Define the key press handling methods for different modes
         self.keyHandlers = {
             'view': self.handleViewKeyPress,
-            'manual': self.handleManualKeyPress,
+            # 'manual': self.handleManualKeyPress,
             'phase': self.handlePhaseKeyPress
         }
         self.currentMode = 'view'  # Start in Manual mode by default
 
         # Enable key event handling
-        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setFocus()  # Set focus to the main window
 
         # Control variables
         self.current_connection = None
         self.xy_coord = None
+        self.save_preferences_upon_close = True
 
     def support_dev_btn_clicked(self):
         dialog = SupportDevDialog()
-        dialog.exec_()
+        dialog.exec()
 
-    def handleManualKeyPress(self, event):
-        if event.key() in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
-            self.manual.handle_key_press(event)
-            self.manual_update_xy_pos_label()
-        elif event.key() == Qt.Key_Return:
-            self.manual.finalize_point()
+    # def handleManualKeyPress(self, event):
+    #     if event.key() in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
+    #         self.manual.handle_key_press(event)
+    #         self.manual_update_xy_pos_label()
+    #     elif event.key() == Qt.Key_Return:
+    #         self.manual.finalize_point()
 
     def handlePhaseKeyPress(self, event):
         # Implement specific key handling for Phase mode if needed
@@ -168,31 +189,32 @@ class ChartApp(QMainWindow):
         mode_selection_layout.setContentsMargins(0, 0, 0, 0)
 
         # Helper function to create a button with an icon above the text
+
         def create_icon_text_button(icon_path, text, color='black'):
             button = QPushButton()
             layout = QHBoxLayout()
 
             icon_pixmap = QPixmap(icon_path)  # Create QPixmap from icon path
             colored_pixmap = QPixmap(icon_pixmap.size())  # Create a new pixmap with the same size
-            colored_pixmap.fill(Qt.transparent)  # Fill it with transparency
+            colored_pixmap.fill(Qt.GlobalColor.transparent)  # Fill it with transparency
 
             painter = QPainter(colored_pixmap)  # Start QPainter to draw on the new pixmap
-            painter.setCompositionMode(QPainter.CompositionMode_Source)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
             painter.drawPixmap(0, 0, icon_pixmap)  # Draw the original icon
-            painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
             painter.setBrush(QColor(color))  # Set brush color
             painter.setPen(QColor(color))  # Set pen color
             painter.drawRect(colored_pixmap.rect())  # Draw a rectangle with the color
             painter.end()  # End QPainter
 
             icon_label = QLabel()
-            icon_label.setPixmap(
-                colored_pixmap.scaled(16, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation))  # Use the colored QPixmap
-            icon_label.setAlignment(Qt.AlignCenter)
+            icon_label.setPixmap(colored_pixmap.scaled(16, 16, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                                                       QtCore.Qt.TransformationMode.SmoothTransformation))  # Use the colored QPixmap
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
             text_label = QLabel(text)
             text_label.setStyleSheet(f"font-style: normal; color: {color};")
-            text_label.setAlignment(Qt.AlignCenter)
+            text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
             layout.addWidget(text_label)
             layout.addWidget(icon_label)
@@ -204,7 +226,7 @@ class ChartApp(QMainWindow):
             button_layout = QVBoxLayout(button)
             button_layout.addWidget(container)
             button_layout.setContentsMargins(0, 0, 0, 0)
-            button_layout.setAlignment(Qt.AlignCenter)
+            button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             button.setLayout(button_layout)
 
             button.setFixedHeight(50)  # Adjust height as needed
@@ -283,7 +305,6 @@ class ChartApp(QMainWindow):
         btn_export = QPushButton("Export")
         btn_export.setToolTip('Export data as csv')
         layout_data.addWidget(btn_import_delete)
-
         layout_data.addWidget(btn_export)
         group_box_data.setLayout(layout_data)
         files_layout.addWidget(group_box_data)
@@ -301,33 +322,104 @@ class ChartApp(QMainWindow):
         layout_chart.addWidget(btn_new)
         layout_chart.addWidget(btn_load)
         layout_chart.addWidget(btn_save)
-        layout_chart.addWidget((btn_image))
+        layout_chart.addWidget(btn_image)
         group_box_chart.setLayout(layout_chart)
         files_layout.addWidget(group_box_chart)
 
+        spacer = QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        files_layout.addItem(spacer)
+
+        # Recent Data Imports ListBox
+        lbl_recent_data_imports = QLabel("Recent Imports")
+        lbl_recent_data_imports.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_recent_data_imports.setStyleSheet("font-weight: bold; font-style: normal;")
+        self.lst_recent_data_imports = QListWidget()
+        self.lst_recent_data_imports.setFixedHeight(150)
+        files_layout.addWidget(lbl_recent_data_imports)
+        files_layout.addWidget(self.lst_recent_data_imports)
+
+        spacer = QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        files_layout.addItem(spacer)
+
+        # Recent Charts ListBox
+        lbl_recent_charts = QLabel("Recent Charts")
+        lbl_recent_charts.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_recent_charts.setStyleSheet("font-weight: bold; font-style: normal;")
+        self.lst_recent_charts = QListWidget()
+        self.lst_recent_charts.setFixedHeight(150)
+        files_layout.addWidget(lbl_recent_charts)
+        files_layout.addWidget(self.lst_recent_charts)
+
+        # Populate recents for listboxes
+        self.refresh_recent_data_imports_list()
+        self.refresh_recent_charts_list()
+
         # Button connections
-        btn_import_delete.clicked.connect(self.event_handlers.import_data)
+        btn_import_delete.clicked.connect(lambda: self.event_handlers.import_data(None))
         btn_export.clicked.connect(self.event_handlers.export_data)
-        # btn_new.clicked.connect(self.figure_manager.back_to_default)
         btn_new.clicked.connect(self.files_show_dialog)
         btn_image.clicked.connect(self.event_handlers.save_image)
         btn_save.clicked.connect(self.event_handlers.save_chart)
-        btn_load.clicked.connect(self.event_handlers.load_chart)
+        btn_load.clicked.connect(lambda: self.event_handlers.load_chart(None))
+
+        # Double-click connections for list items
+        self.lst_recent_data_imports.itemDoubleClicked.connect(self.handle_import_double_click)
+        self.lst_recent_charts.itemDoubleClicked.connect(self.handle_chart_double_click)
 
         files_layout.addStretch()  # Prevents the buttons from vertically filling the whole panel
+
+    def refresh_recent_data_imports_list(self):
+        self.lst_recent_data_imports.clear()
+        recent_imports = self.data_manager.user_preferences.get('recent_imports', [])
+        for file_path in recent_imports:
+            if os.path.isfile(file_path):
+                name = os.path.splitext(os.path.basename(file_path))[0]
+                item = QListWidgetItem(name)
+                item.setData(self.FullFilePathRole, file_path)
+                self.lst_recent_data_imports.addItem(item)
+            else:
+                self.data_manager.user_preferences['recent_imports'].remove(file_path)
+
+    def refresh_recent_charts_list(self):
+        self.lst_recent_charts.clear()
+        recent_charts = self.data_manager.user_preferences.get('recent_charts', [])
+        for chart_path in recent_charts:
+            if os.path.isfile(chart_path):
+                name = os.path.splitext(os.path.basename(chart_path))[0]
+                item = QListWidgetItem(name)
+                item.setData(self.FullFilePathRole, chart_path)
+                self.lst_recent_charts.addItem(item)
+            else:
+                self.data_manager.user_preferences['recent_charts'].remove(chart_path)
+
+    def handle_import_double_click(self, item):
+        file_path = item.data(self.FullFilePathRole)
+        if os.path.isfile(file_path):
+            self.event_handlers.import_data(file_path)
+        else:
+            self.data_manager.user_preferences['recent_imports'].remove(file_path)
+        self.refresh_recent_data_imports_list()
+
+    def handle_chart_double_click(self, item):
+        chart_path = item.data(self.FullFilePathRole)
+        if os.path.isfile(chart_path):
+            self.event_handlers.load_chart(chart_path)
+        else:
+            self.data_manager.user_preferences['recent_charts'].remove(chart_path)
+        self.refresh_recent_charts_list()
 
     def files_show_dialog(self):
         # Create a QMessageBox
         msg_box = QMessageBox()
         msg_box.setWindowTitle("New chart")
         msg_box.setText("Remove current chart?")
-        msg_box.setIcon(QMessageBox.Question)
-        msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.Cancel)
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
 
         # Execute the message box and get the response
-        response = msg_box.exec_()
+        response = msg_box.exec()
 
-        if response == QMessageBox.Yes:
+        if response == QMessageBox.StandardButton.Yes:
             self.loaded_chart_path = None  # Prevents from accidentally saving default chart
             self.figure_manager.back_to_default()
 
@@ -392,6 +484,11 @@ class ChartApp(QMainWindow):
         self.settings_folder_btn.clicked.connect(self.event_handlers.set_data_folder)
         preferences_group_layout.addWidget(self.settings_folder_btn)
 
+        # Reset preferences to default
+        self.reset_preferences_btn = QPushButton('Reset')
+        self.reset_preferences_btn.clicked.connect(self.reset_preferences_msg)
+        preferences_group_layout.addWidget(self.reset_preferences_btn)
+
         # Create group for Chart types
         chart_type_settings_group = QGroupBox('Chart')
         chart_type_settings_layout = QVBoxLayout()
@@ -453,43 +550,59 @@ class ChartApp(QMainWindow):
         settings_layout.addWidget(other_settings_group)
 
         self.right_dev_btn = QPushButton('Support developer')
+        self.right_dev_btn.setStyleSheet("font-weight: bold; background-color: #96deeb; font-size: 10pt;")
         other_settings_layout.addWidget((self.right_dev_btn))
         self.right_dev_btn.clicked.connect(self.support_dev_btn_clicked)
 
         # Push everything to the top
         settings_layout.addStretch()
 
+    def reset_preferences_msg(self):
+        msg_box = QMessageBox()
+        msg_box.setWindowTitle('Reset preferences')
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+        msg_box.setText("Everything will go back to default. A manual reboot of iChart is required. Are you sure?")
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        msg_box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+
+        reply = msg_box.exec()
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.save_preferences_upon_close = False
+            self.data_manager.delete_user_preferences()
+            QApplication.instance().quit()
+
     def keyPressEvent(self, event):
         # Check if the manual mode is active
-        if self.currentMode == 'manual':
-            # Optionally, log all key presses for debugging
-            # print("Key pressed in manual mode:", event.key(), "Modifiers:", int(event.modifiers()))
-
-            # Handle specific keys like Ctrl+Z for undo
-            if event.modifiers() & Qt.ControlModifier and event.key() == Qt.Key_Z:
-                self.figure_manager.undo_point()
-                event.accept()  # Mark the event as handled
-            else:
-                # Consume all other key events to prevent any other key handling
-                event.accept()  # This prevents the event from propagating further
-            return  # Exit the function to stop any further key event processing
+        # if self.currentMode == 'manual':
+        #     # Optionally, log all key presses for debugging
+        #     # print("Key pressed in manual mode:", event.key(), "Modifiers:", int(event.modifiers()))
+        #
+        #     # Handle specific keys like Ctrl+Z for undo
+        #     if event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Z:
+        #         self.figure_manager.undo_point()
+        #         event.accept()  # Mark the event as handled
+        #     else:
+        #         # Consume all other key events to prevent any other key handling
+        #         event.accept()  # This prevents the event from propagating further
+        #     return  # Exit the function to stop any further key event processing
 
         # Handle other keys as usual in other modes
         super().keyPressEvent(event)
 
         if self.currentMode == 'trend':
         # Check if space was pressed
-            if event.key() == Qt.Key_Left:
+            if event.key() == Qt.Key.Key_Left:
                 self.figure_manager.trend_move_temp_marker('left')
                 self.trend_adjust_dates()
                 self.figure_manager.trend_move_temp_est_with_arrows('left')
-            elif event.key() == Qt.Key_Right:
+            elif event.key() == Qt.Key.Key_Right:
                 self.figure_manager.trend_move_temp_marker('right')
                 self.trend_adjust_dates()
                 self.figure_manager.trend_move_temp_est_with_arrows('right')
-            elif event.key() == Qt.Key_Up:
+            elif event.key() == Qt.Key.Key_Up:
                 self.figure_manager.trend_move_temp_est_with_arrows('up')
-            elif event.key() == Qt.Key_Down:
+            elif event.key() == Qt.Key.Key_Down:
                 self.figure_manager.trend_move_temp_est_with_arrows('down')
 
         # Use existing key handling
@@ -562,8 +675,10 @@ class ChartApp(QMainWindow):
 
     def closeEvent(self, event):
         # Stuff to do before closing application
+
         # Save current preferences
-        self.data_manager.save_user_preferences()
+        if self.save_preferences_upon_close:
+            self.data_manager.save_user_preferences()
 
         # Handle the window closing event to check if the chart needs to be saved. Overrides built-in function
         if self.loaded_chart_path:
@@ -573,14 +688,14 @@ class ChartApp(QMainWindow):
             # Create a message box to confirm if the user wants to save the chart
             reply = QMessageBox.question(self, 'Save Chart',
                                          f"Save {file_name} before closing?",
-                                         QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-                                         QMessageBox.Cancel)
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                                         QMessageBox.StandardButton.Cancel)
 
-            if reply == QMessageBox.Yes:
+            if reply == QMessageBox.StandardButton.Yes:
                 # Save the chart to the loaded path before closing
                 self.event_handlers.save_chart(self.loaded_chart_path)
                 event.accept()  # Proceed with the window close
-            elif reply == QMessageBox.No:
+            elif reply == QMessageBox.StandardButton.No:
                 event.accept()  # Proceed with the window close without saving
             else:
                 event.ignore()  # Ignore the close event
@@ -623,11 +738,11 @@ class ChartApp(QMainWindow):
         index = 1  # Assuming manual mode widget is the second widget in the stack
         self.stacked_widget.insertWidget(index, self.manual_mode_widget)
 
-        # Safely disconnect the button if it is connected
-        try:
-            self.button_manual.clicked.disconnect()
-        except TypeError:
-            pass  # No connection to disconnect
+        # # Safely disconnect the button if it is connected
+        # try:
+        #     self.button_manual.clicked.disconnect()
+        # except TypeError:
+        #     pass  # No connection to disconnect
 
         # Reconnect the button to the new widget
         self.button_manual.clicked.connect(lambda: self.change_mode(index))
@@ -645,29 +760,41 @@ class EventHandlers:
 
     def show_date_dialog(self):
         dialog = StartDateDialog(self.chart_app)
-        if dialog.exec_() == QDialog.Accepted:
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             new_start_date = dialog.get_date()
             self.figure_manager.settings_change_start_date(new_start_date)
             self.chart_app.set_interaction_mode()
 
-    def import_data(self, delete_data):
-        # Open file dialog with support for CSV and Excel files
-        file_path, _ = QFileDialog.getOpenFileName(self.chart_app, 'Select file',
-                                                   self.data_manager.user_preferences['home_folder'],
-                                                   'CSV, Excel, ODS files (*.csv *.xls *.xlsx *.ods)')
+    def save_recent(self, file_path, recent_type):
+        if file_path in self.data_manager.user_preferences[recent_type]:
+            self.data_manager.user_preferences[recent_type].remove(file_path)
+        self.data_manager.user_preferences[recent_type].insert(0, file_path)
+        self.data_manager.user_preferences[recent_type] = self.data_manager.user_preferences[recent_type][:7]
+
+    def import_data(self, file_path):
+        if file_path is None:
+            # Open file dialog with support for CSV and Excel files
+            file_path, _ = QFileDialog.getOpenFileName(self.chart_app, 'Select file',
+                                                       self.data_manager.user_preferences['home_folder'],
+                                                       'CSV, Excel, ODS files (*.csv *.xls *.xlsx *.ods)')
 
         if file_path:
             try:
-                self.figure_manager.fig_import_data(file_path)
+                self.figure_manager.fig_import_data(file_path, self.chart_app.loaded_chart_path)
+
+                # Save to recents and refresh list
+                self.save_recent(file_path, 'recent_imports')
+                self.chart_app.refresh_recent_data_imports_list()
+
             except:
                 msg_box = QMessageBox()
                 msg_box.setWindowTitle('Failed to import data')
-                msg_box.setIcon(QMessageBox.Warning)
+                msg_box.setIcon(QMessageBox.Icon.Warning)
                 msg_box.setText('Likely reason: The data sheet is incorrectly formatted.')
                 msg_box.setInformativeText("Solution: Check out formatting instructions on <a href='https://github.com/SJV-S/iChart/blob/main/README.md#import-formatting'>https://github.com/SJV-S/iChart/blob/main/README.md#import-formatting</a>.")
-                msg_box.setStandardButtons(QMessageBox.Ok)
+                msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
                 msg_box.setStyleSheet("QLabel{ font-style: normal; }")
-                msg_box.exec_()
+                msg_box.exec()
 
         self.chart_app.set_interaction_mode()  # Make sure current mode is enabled for key handling
 
@@ -683,7 +810,7 @@ class EventHandlers:
 
     def save_image(self):
         dialog = SaveImageDialog(self.chart_app)
-        if dialog.exec_() == QDialog.Accepted:
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             format_selected, resolution_selected = dialog.get_selected_options()
             options = f"{format_selected.upper()} files (*.{format_selected});;All files (*.*)"
             file_path, _ = QFileDialog.getSaveFileName(self.chart_app, 'Save file', self.data_manager.user_preferences['home_folder'], options)
@@ -703,19 +830,27 @@ class EventHandlers:
         file_name = os.path.basename(file_path)
         self.chart_app.setWindowTitle(f'{self.chart_app.window_title_str} – {file_name}')
 
-    def load_chart(self):
-        file_path, _ = QFileDialog.getOpenFileName(self.chart_app, 'Open file',
-                                                   self.data_manager.user_preferences['home_folder'],
-                                                   'JSON files (*.json);;All files (*.*)')
+    def load_chart(self, file_path):
+        if file_path is None:
+            file_path, _ = QFileDialog.getOpenFileName(self.chart_app, 'Open file',
+                                                       self.data_manager.user_preferences['home_folder'],
+                                                       'JSON files (*.json);;All files (*.*)')
         if file_path:
             self.chart_app.loaded_chart_path = file_path
             self.figure_manager.fig_load_chart(file_path)
+
+            # Save to recents and refresh list
+            self.save_recent(file_path, 'recent_charts')
+            self.chart_app.refresh_recent_charts_list()
 
             # Update the chart type dropdown to reflect the loaded chart type
             chart_type = self.data_manager.chart_data['type']
             index = self.chart_app.chart_type_settings_dropdown.findData(chart_type)
             if index != -1:
-                self.chart_app.chart_type_settings_dropdown.setCurrentIndex(index)
+                # Update chart dropdown without double creation of the canvas
+                self.chart_app.chart_type_settings_dropdown.blockSignals(True)
+                self.chart_app.chart_type_settings_dropdown.setCurrentIndex(index)  # Normally, this would also create a new canvas because the chart type was changed
+                self.chart_app.chart_type_settings_dropdown.blockSignals(False)
 
             self.chart_app.set_interaction_mode()  # Make sure current mode is enabled for key handling
 
@@ -761,7 +896,7 @@ class EventHandlers:
         if coordinates:  # In case the user clicked outside the graph
             x, y = coordinates
             if x in self.figure_manager.x_to_date.keys():
-                self.chart_app.phase_mode_widget.phase_y_input.setText(str(y))
+                # self.chart_app.phase_mode_widget.phase_y_input.setText(str(y))
                 date = self.figure_manager.x_to_date[x]
                 date_qt = QDate(date.year, date.month, date.day)
                 self.chart_app.phase_mode_widget.phase_date_input.setDate(date_qt)
@@ -804,6 +939,5 @@ app = QApplication(sys.argv)
 app.setStyleSheet(styles.general_stylesheet)
 window = ChartApp()
 window.show()
-sys.exit(app.exec_())
-
+sys.exit(app.exec())
 

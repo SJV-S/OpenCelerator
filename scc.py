@@ -118,7 +118,7 @@ class DailyTemplate(Chart):
         self.x = np.arange(self.xmin, self.xmax)
         self.y = self.a * pow(self.b, self.x / self.c)
         self.space_top = 0.86
-        self.space_left = 0.1
+        self.space_left = 0.12
         self.space_right = 0.9
         self.space_bottom = 0.21
         self.relative_width = self.space_right - self.space_left
@@ -321,7 +321,7 @@ class WeeklyTemplate(Chart):
         self.x = np.arange(self.xmin, self.xmax)
         self.y = self.a * pow(self.b, self.x / self.c)
         self.space_top = 0.86
-        self.space_left = 0.12
+        self.space_left = 0.13
         self.space_right = 0.9
         self.space_bottom = 0.25
         self.relative_width = self.space_right - self.space_left
@@ -556,7 +556,7 @@ class MonthlyTemplate(Chart):
         self.x = np.arange(self.xmin, self.xmax)
         self.y = self.a * pow(self.b, self.x / self.c)
         self.space_top = 0.86
-        self.space_left = 0.12
+        self.space_left = 0.13
         self.space_right = 0.9
         self.space_bottom = 0.25
         self.relative_width = self.space_right - self.space_left
@@ -771,7 +771,7 @@ class YearlyTemplate(Chart):
         self.x = np.arange(self.xmin, self.xmax)
         self.y = self.a * pow(self.b, self.x / self.c)
         self.space_top = 0.86
-        self.space_left = 0.12
+        self.space_left = 0.13
         self.space_right = 0.9
         self.space_bottom = 0.25
         self.relative_width = self.space_right - self.space_left

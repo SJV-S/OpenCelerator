@@ -1,7 +1,9 @@
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout, QPushButton, \
-    QGroupBox, QRadioButton, QVBoxLayout, QLineEdit, QLabel, QDateEdit, QListWidget, QFileDialog, QCheckBox, QButtonGroup, QDialog, QComboBox, QMessageBox, QGridLayout, QStackedWidget, QSpinBox
-from PyQt5.QtGui import QDoubleValidator, QFont, QIcon
-from PyQt5.QtCore import Qt, QDate
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+                               QGroupBox, QRadioButton, QLineEdit, QLabel, QDateEdit, QListWidget, QFileDialog, QCheckBox,
+                               QButtonGroup, QDialog, QComboBox, QMessageBox, QGridLayout, QStackedWidget, QSpinBox,
+                               QSpacerItem, QSizePolicy)
+from PySide6.QtGui import QDoubleValidator, QFont, QIcon
+from PySide6.QtCore import Qt, QDate
 
 from Popups import InputDialog, ConfigurePhaseLinesDialog, ConfigureAimLinesDialog, ConfigureTrendLinesDialog, ConfigureDataPointsDialog
 from DataManager import DataManager
@@ -13,7 +15,7 @@ class ModeWidget(QWidget):
         self.figure_manager = figure_manager
         self.data_manager = DataManager()
         self.layout = QVBoxLayout(self)
-        self.layout.setAlignment(Qt.AlignTop)
+        self.layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.init_ui()
 
     def init_ui(self):
@@ -31,10 +33,10 @@ class ViewModeWidget(ModeWidget):
         font = QFont()
         dot_heading = QLabel("Dot")
         dot_heading.setFont(font)
-        dot_heading.setAlignment(Qt.AlignBottom)  # Align label to the bottom of its grid cell
+        dot_heading.setAlignment(Qt.AlignmentFlag.AlignBottom)  # Align label to the bottom of its grid cell
         x_heading = QLabel("X")
         x_heading.setFont(font)
-        x_heading.setAlignment(Qt.AlignBottom)
+        x_heading.setAlignment(Qt.AlignmentFlag.AlignBottom)
         grid_heading = QLabel("\nGrid")
         grid_heading.setFont(font)
         other_heading = QLabel("\nOther")
@@ -117,7 +119,7 @@ class ViewModeWidget(ModeWidget):
         self.update_timing_checkboxes()
 
     def credit_lines_popup(self):
-        if self.dialog.exec_() == QDialog.Accepted:  # Check if the dialog was accepted
+        if self.dialog.exec() == QDialog.DialogCode.Accepted:  # Check if the dialog was accepted
             r1, r2, r3 = self.dialog.get_inputs()  # Retrieve the inputs
             self.dialog.credit_row1 = r1
             self.dialog.credit_row2 = r2
@@ -209,7 +211,7 @@ class ManualModeTemplate(ModeWidget):
 
     def configure_data_points(self):
         dialog = ConfigureDataPointsDialog(self.figure_manager, self)
-        dialog.exec_()
+        dialog.exec()
 
 
 class ManualModeWidgetDailyMinute(ManualModeTemplate):
@@ -241,7 +243,7 @@ class ManualModeWidgetDailyMinute(ManualModeTemplate):
         label = QLabel(label_text)
         input_field = QLineEdit()
         input_field.setValidator(validator)
-        layout.addWidget(label, 0, Qt.AlignCenter)
+        layout.addWidget(label, 0, Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(input_field)
         return layout
 
@@ -340,7 +342,7 @@ class ManualModeWidgetWeeklyMinute(ManualModeWidgetWeekly):
         label = QLabel(label_text)
         input_field = QLineEdit()
         input_field.setValidator(validator)
-        layout.addWidget(label, 0, Qt.AlignCenter)
+        layout.addWidget(label, 0, Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(input_field)
         return layout
 
@@ -461,7 +463,7 @@ class ManualModeWidgetMonthlyMinute(ManualModeTemplate):
         label = QLabel(label_text)
         input_field = QLineEdit()
         input_field.setValidator(validator)
-        layout.addWidget(label, 0, Qt.AlignCenter)
+        layout.addWidget(label, 0, Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(input_field)
         return layout
 
@@ -505,7 +507,7 @@ class ManualModeWidgetYearlyMinute(ManualModeTemplate):
         date_layout.addStretch()
 
         # Add the date label
-        date_layout.addWidget(self.date_label, alignment=Qt.AlignCenter)
+        date_layout.addWidget(self.date_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Add a stretchable space
         date_layout.addStretch()
@@ -550,7 +552,7 @@ class ManualModeWidgetYearlyMinute(ManualModeTemplate):
         label = QLabel(label_text)
         input_field = QLineEdit()
         input_field.setValidator(validator)
-        layout.addWidget(label, 0, Qt.AlignCenter)
+        layout.addWidget(label, 0, Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(input_field)
         return layout
 
@@ -589,7 +591,7 @@ class ManualModeWidgetYearly(ManualModeTemplate):
         # Add the previous button
         date_layout.addWidget(self.previous_button)
         date_layout.addStretch()
-        date_layout.addWidget(self.date_label, alignment=Qt.AlignCenter)
+        date_layout.addWidget(self.date_label, alignment=Qt.AlignmentFlag.AlignCenter)
         date_layout.addStretch()
         date_layout.addWidget(self.next_button)
         self.layout.addLayout(date_layout)
@@ -623,18 +625,13 @@ class ManualModeWidgetYearly(ManualModeTemplate):
 class PhaseModeWidget(ModeWidget):
     def init_ui(self):
         # Creating label and input for phase change description
-        phase_change_label = QLabel('Change')
+        phase_change_label = QLabel('Text')
         self.phase_change_input = QLineEdit('')
         self.layout.addWidget(phase_change_label)
         self.layout.addWidget(self.phase_change_input)
 
-        # Y-value input
-        phase_label_y = QLabel('Y-value')
-        self.phase_y_input = QLineEdit('500')  # Default value set to 500
-        validator = QDoubleValidator(0.0, 9999.99, 4)
-        self.phase_y_input.setValidator(validator)
-        self.layout.addWidget(phase_label_y)
-        self.layout.addWidget(self.phase_y_input)
+        # Connect phase_change_input to enable/disable radio buttons
+        self.phase_change_input.textChanged.connect(self.toggle_radio_buttons)
 
         # Date input setup
         phase_label_date = QLabel('Date')
@@ -663,19 +660,100 @@ class PhaseModeWidget(ModeWidget):
 
         # Connect buttons to figure manager methods
         add_phase_line_btn.clicked.connect(lambda: self.figure_manager.phase_line_from_form(
-            self.phase_y_input.text(),
             self.phase_change_input.text(),
             self.phase_date_input.text()
         ))
         undo_phase_line_btn.clicked.connect(self.figure_manager.phase_undo_line)
         config_btn.clicked.connect(self.configure_phase_lines)
 
+        # Add vertical spacing before the radio buttons
+        spacer = QSpacerItem(20, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        self.layout.addItem(spacer)
+
+        # Create a horizontal layout for the radio buttons
+        radio_buttons_layout = QGridLayout()
+
+        # Phase type radio buttons
+        phase_type_label = QLabel('Text type')
+        self.phase_type_group = QButtonGroup(self)
+        self.phase_type_flag = QRadioButton('Flag')
+        self.phase_type_banner = QRadioButton('Banner')
+
+        # Set the phase type based on user preferences
+        phase_text_type = self.data_manager.user_preferences.get('phase_text_type', 'Flag')
+        self.phase_type_flag.setChecked(phase_text_type == 'Flag')
+        self.phase_type_banner.setChecked(phase_text_type == 'Banner')
+
+        self.phase_type_group.addButton(self.phase_type_flag)
+        self.phase_type_group.addButton(self.phase_type_banner)
+
+        # Position radio buttons
+        position_label = QLabel('Text position')
+        self.position_group = QButtonGroup(self)
+        self.position_top = QRadioButton('Top')
+        self.position_center = QRadioButton('Center')
+        self.position_bottom = QRadioButton('Bottom')
+
+        # Set the position based on user preferences
+        phase_text_position = self.data_manager.user_preferences.get('phase_text_position', 'Top')
+        self.position_top.setChecked(phase_text_position == 'Top')
+        self.position_center.setChecked(phase_text_position == 'Center')
+        self.position_bottom.setChecked(phase_text_position == 'Bottom')
+
+        self.position_group.addButton(self.position_top)
+        self.position_group.addButton(self.position_center)
+        self.position_group.addButton(self.position_bottom)
+
+        # Add labels and radio buttons to the grid layout
+        radio_buttons_layout.addWidget(phase_type_label, 0, 0)
+        radio_buttons_layout.addWidget(self.phase_type_flag, 1, 0)
+        radio_buttons_layout.addWidget(self.phase_type_banner, 2, 0)
+        radio_buttons_layout.addWidget(position_label, 0, 1)
+        radio_buttons_layout.addWidget(self.position_top, 1, 1)
+        radio_buttons_layout.addWidget(self.position_center, 2, 1)
+        radio_buttons_layout.addWidget(self.position_bottom, 3, 1)
+
+        # Add the grid layout with the radio buttons to the main layout
+        self.layout.addLayout(radio_buttons_layout)
+
+        # Add vertical spacing after the radio buttons
+        spacer = QSpacerItem(20, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        self.layout.addItem(spacer)
+
         # Eliminate any extra vertical stretches
         self.layout.addStretch()
 
+        # Connect the radio buttons to the method to enable/disable based on text input
+        self.phase_type_flag.toggled.connect(self.update_preferences)
+        self.phase_type_banner.toggled.connect(self.update_preferences)
+
+        # Connect text position buttons
+        self.position_top.clicked.connect(lambda: self.update_position_preference('Top'))
+        self.position_center.clicked.connect(lambda: self.update_position_preference('Center'))
+        self.position_bottom.clicked.connect(lambda: self.update_position_preference('Bottom'))
+
+        # Initial state of radio buttons
+        self.toggle_radio_buttons()
+
     def configure_phase_lines(self):
         dialog = ConfigurePhaseLinesDialog(self.figure_manager, self)
-        dialog.exec_()
+        dialog.exec()
+
+    def toggle_radio_buttons(self):
+        state = bool(self.phase_change_input.text())
+        for button in [self.phase_type_flag, self.phase_type_banner, self.position_top, self.position_center,
+                       self.position_bottom]:
+            button.setEnabled(state)
+
+    def update_preferences(self):
+        phase_text_type = 'Flag' if self.phase_type_flag.isChecked() else 'Banner'
+        self.data_manager.user_preferences['phase_text_type'] = phase_text_type
+
+    def update_position_preference(self, position):
+        if getattr(self, f'position_{position.lower()}').isChecked():
+            self.data_manager.user_preferences['phase_text_position'] = position
+
+
 
 
 class AimModeWidget(ModeWidget):
@@ -767,7 +845,7 @@ class AimModeWidget(ModeWidget):
 
     def configure_aim_lines(self):
         dialog = ConfigureAimLinesDialog(self.figure_manager, self)
-        dialog.exec_()
+        dialog.exec()
 
 
 class TrendModeWidget(ModeWidget):
@@ -862,6 +940,16 @@ class TrendModeWidget(ModeWidget):
         self.envelope_method_combo.setCurrentText(self.data_manager.user_preferences.get('bounce_envelope', 'None'))
         self.envelope_method_combo.currentIndexChanged.connect(lambda index: self.data_manager.user_preferences.update({'bounce_envelope': self.envelope_method_combo.currentText()}))
 
+        # Combo box for celeraiton unit
+        celeration_unit_label = QLabel("Celeration unit")
+        self.celeration_unit_combo = QComboBox()
+        self.celeration_unit_combo.addItem('Daily')
+        self.celeration_unit_combo.addItem('Weekly (standard)')
+        self.celeration_unit_combo.addItem('Monthly (Weekly x4)')
+        self.celeration_unit_combo.addItem('Yearly (Weekly x52)')
+        self.celeration_unit_combo.setCurrentText(self.data_manager.user_preferences.get('celeration_unit', 'Weekly (standard)'))
+        self.celeration_unit_combo.currentIndexChanged.connect(lambda index: self.data_manager.user_preferences.update({'celeration_unit': self.celeration_unit_combo.currentText()}))
+
         # Add components to the main layout
         self.layout.addWidget(trend_method_label)
         self.layout.addWidget(self.trend_method_combo)
@@ -869,6 +957,8 @@ class TrendModeWidget(ModeWidget):
         self.layout.addWidget(self.forward_projection_spinbox)
         self.layout.addWidget(envelope_method_label)
         self.layout.addWidget(self.envelope_method_combo)
+        self.layout.addWidget(celeration_unit_label)
+        self.layout.addWidget(self.celeration_unit_combo)
 
         # Eliminate any extra vertical stretches
         self.layout.addStretch()
@@ -893,4 +983,4 @@ class TrendModeWidget(ModeWidget):
 
     def configure_trends(self):
         dialog = ConfigureTrendLinesDialog(self.trend_radio_dot.isChecked(), self.figure_manager, self)
-        dialog.exec_()
+        dialog.exec()

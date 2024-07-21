@@ -5,13 +5,22 @@
         <file>../images/bitcoin_logo.png</file>
         <file>../images/lightning_qr.png</file>
         <file>../images/base_chain_qr.png</file>
+        <file>../images/bullseye-solid.svg</file>
         <file>../images/crosshairs-solid.svg</file>
         <file>../images/eye-regular.svg</file>
         <file>../images/pen-to-square-regular.svg</file>
         <file>../images/flag-regular.svg</file>
         <file>../images/plus-solid.svg</file>
         <file>../images/minus-solid.svg</file>
+        <file>../images/up-down-solid.svg</file>
         <file>../images/gear-solid.svg</file>
         <file>../images/celeration.svg</file>
+        <file>../images/ichart_logo.svg</file>
+        <file>../images/ichart_logo_no_text.svg</file>
+        <file>../images/check-solid.svg</file>
+        <file>../images/circle-dot-regular.svg</file>
+        <file>../images/circle-regular.svg</file>
+        <file>../images/circle-dot-regular-disabled.svg</file>
+        <file>../images/circle-regular-disabled.svg</file>
     </qresource>
 </RCC>

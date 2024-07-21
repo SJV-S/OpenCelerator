@@ -4,7 +4,7 @@ from matplotlib.markers import MarkerStyle
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from PyQt5.QtWidgets import QWidget, QVBoxLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 import scc
 from DataManager import DataManager
 import copy
@@ -120,18 +120,15 @@ class FigureManager(QWidget):
         self.point_type = True  # Dots if True, else X
 
     def setup_layout(self):
-        # Clear existing canvas if it exists
-        if hasattr(self, 'canvas'):
-            self.layout.removeWidget(self.canvas)
-            self.canvas.deleteLater()
-            self.canvas = None
+        # Clear existing canvas
+        self.layout.removeWidget(self.canvas)
+        self.canvas.setParent(None)  # Disconnect from the layout
+        self.canvas.close()  # Close the canvas
+        self.canvas.deleteLater()  # Schedule for deletion
+        self.canvas = None
 
         # Create a new canvas and add it to the layout
         self.canvas = FigureCanvas(self.figure)
-        if not hasattr(self, 'layout'):
-            self.layout = QVBoxLayout()
-            self.setLayout(self.layout)
-
         self.layout.addWidget(self.canvas)
 
         fig_width, fig_height = self.figure.get_size_inches()
@@ -471,22 +468,46 @@ class FigureManager(QWidget):
         date = self.data_manager.find_closest_date(phase['date'], self.Chart.date_to_pos)
         if date:
             x_i = self.Chart.date_to_pos[date]
+
+            # Set y text position:
+            ymin = self.Chart.ymin
+            ymax = self.Chart.ymax
+            if phase['text_position'] == 'Top':
+                y_text_pos = ymax / 2
+            elif phase['text_position'] == 'Center':
+                y_text_pos = (ymin * ymax) ** 0.5
+            elif phase['text_position'] == 'Bottom':
+                y_text_pos = ymin * 2
+
             phase_line = self.ax.vlines(x_i,
-                                        ymax=phase['y'],
+                                        ymax=ymax,
                                         ymin=0,
                                         color=phase['line_color'],
                                         linestyle=phase['linestyle'],
                                         linewidth=phase['linewidth'])
-            phase_text = self.ax.text(x_i,
-                                      phase['y'],
+
+            # Add phase line text
+            if phase['text_mode'] == 'Flag':
+                bbox = {'facecolor': phase['bg_color'], 'edgecolor': phase['edge_color'], 'linestyle': '-', 'linewidth': 1.5}
+                va = 'bottom'
+                rotation = 0
+            elif phase['text_mode'] == 'Banner':
+                bbox = None
+                va = phase['text_position'].lower()
+                rotation = 90
+
+            phase_text = self.ax.text(x_i + 1,
+                                      y_text_pos,
                                       phase['text'],
-                                      bbox=dict(facecolor=phase['bg_color'], edgecolor=phase['edge_color']),
+                                      bbox=bbox,
                                       ha="left",
-                                      va="bottom",
+                                      va=va,
+                                      rotation=rotation,
                                       fontsize=phase['font_size'],
                                       color=phase['font_color'])
 
             self.chart_objects['phase_obj'].append((phase_line, phase_text))
+
 
     def aim_replot(self, aim):
         date1 = self.data_manager.find_closest_date(aim['date1'], self.Chart.date_to_pos)
@@ -622,8 +643,8 @@ class FigureManager(QWidget):
     def manual_undo_point(self):
         self.manual_manager.manual_undo_point()
 
-    def phase_line_from_form(self, y, text, date):
-        self.phase_manager.phase_line_from_form(y, text, date)
+    def phase_line_from_form(self, text, date):
+        self.phase_manager.phase_line_from_form(text, date)
 
     def phase_line_handle_click(self, event, text):
         return self.phase_manager.phase_line_handle_click(event, text)
@@ -769,10 +790,18 @@ class FigureManager(QWidget):
     def settings_change_chart_width(self):
         self.new_chart(start_date=self.Chart.start_date)
 
-    def fig_import_data(self, file_path, date_format='%m-%d-%y'):
+    def fig_import_data(self, file_path, keep_current_start_date=False):
         self.data_manager.data_import_data(file_path)
-        initial_date = self.data_manager.chart_data['raw_df']['d'].min()
-        self.new_chart(start_date=initial_date)
+
+        if keep_current_start_date:
+            start_date = self.data_manager.chart_data['start_date']
+        else:
+            start_date = self.data_manager.chart_data['raw_df']['d'].min()
+
+        self.new_chart(start_date=start_date)
+
+
+
 
     def back_to_default(self):
         self.data_manager.chart_data = copy.deepcopy(self.data_manager.chart_data_default)
@@ -786,6 +815,10 @@ class FigureManager(QWidget):
     def fig_load_chart(self, full_path):
         with open(full_path, 'r') as file:
             self.data_manager.chart_data = json.load(file)
+
+        # Handling for ensuring backwards compatibility with older chart files that might be missing certain keys
+        # Delete incompatible phase lines
+        self.data_manager.chart_data['phase'] = [phase for phase in self.data_manager.chart_data['phase'] if 'y' not in phase.keys()]
 
         # Handling for setting the start date
         start_date = self.data_manager.chart_data['start_date']
@@ -817,9 +850,9 @@ class PhaseManager:
         self.figure_manager = figure_manager
         self.temp_phase_line = None
         self.temp_phase_line_text = None
+        self.y_text_pos = None
 
-    def phase_line_from_form(self, y, text, date):
-        y_i = float(y)
+    def phase_line_from_form(self, text, date):
         date = pd.to_datetime(date, format='%d-%m-%Y')
 
         date = self.figure_manager.data_manager.find_closest_date(date, self.figure_manager.Chart.date_to_pos)
@@ -831,9 +864,11 @@ class PhaseManager:
                 self.temp_phase_line_text = None
 
             phase = copy.deepcopy(self.figure_manager.data_manager.user_preferences['phase_style'])
+            phase['text_mode'] = self.figure_manager.data_manager.user_preferences['phase_text_type']
+            phase['text_position'] = self.figure_manager.data_manager.user_preferences['phase_text_position']
             phase['date'] = date
-            phase['y'] = y_i
             phase['text'] = text
+
             self.figure_manager.phase_replot(phase)
 
             # Save phase data
@@ -855,17 +890,40 @@ class PhaseManager:
                     self.temp_phase_line = None
                     self.temp_phase_line_text = None
 
-                self.temp_phase_line = self.figure_manager.ax.vlines(x, ymax=y, ymin=0, color='magenta', linestyle="--", linewidth=1.5)
-                self.temp_phase_line_text = self.figure_manager.ax.text(x,
-                                                                        y,
+                phase_text_type = self.figure_manager.data_manager.user_preferences['phase_text_type']
+                phase_text_position = self.figure_manager.data_manager.user_preferences['phase_text_position']
+
+                # Set y text position:
+                ymin = self.figure_manager.Chart.ymin
+                ymax = self.figure_manager.Chart.ymax
+                if phase_text_position == 'Top':
+                    self.y_text_pos = ymax / 2
+                elif phase_text_position == 'Center':
+                    self.y_text_pos = (ymin * ymax) ** 0.5
+                elif phase_text_position == 'Bottom':
+                    self.y_text_pos = ymin * 2
+
+                # Draw temporary phase line
+                self.temp_phase_line = self.figure_manager.ax.vlines(x, ymax=ymax, ymin=0, color='magenta', linestyle="--", linewidth=1.5)
+
+                if phase_text_type == 'Flag':
+                    bbox = {'facecolor': 'white', 'edgecolor': 'magenta', 'linestyle': '--', 'linewidth': 1.5}
+                    va = 'bottom'
+                    rotation = 0
+                elif phase_text_type == 'Banner':
+                    bbox = None
+                    va = phase_text_position.lower()
+                    rotation = 90
+
+                self.temp_phase_line_text = self.figure_manager.ax.text(x + 1,
+                                                                        self.y_text_pos,
                                                                         text,
-                                                                        bbox=dict(facecolor='white',
-                                                                                  edgecolor='magenta',
-                                                                                  linestyle='--',
-                                                                                  linewidth=1.5),
+                                                                        bbox=bbox,
                                                                         ha="left",
-                                                                        va="bottom",
+                                                                        va=va,
+                                                                        rotation=rotation,
                                                                         fontsize=self.figure_manager.data_manager.user_preferences['phase_style']['font_size'])
+
                 self.figure_manager.refresh()
 
                 return x, y
@@ -1005,10 +1063,11 @@ class TrendManager:
         self.trend_temp_line = None
         self.upper_bounce_temp_line = None
         self.lower_bounce_temp_line = None
+        self.trend_temp_fit_on = False
 
     def trend_on_click(self, event):
         # Handling for Weekly
-        if event is not None:
+        if event.xdata is not None:
             x = self.figure_manager.data_manager.find_closest_x(int(event.xdata), self.figure_manager.Chart.date_to_pos)
             if x is not None:
                 if self.trend_first_click_x is None:
@@ -1018,10 +1077,15 @@ class TrendManager:
                     self.trend_first_click_x = None
                     self.trend_second_click_x = x
 
-            if self.trend_first_click_x is not None and self.trend_second_click_x is None:
-                self.plot_trend_temp_first_marker(self.trend_first_click_x)
-            elif self.trend_second_click_x is not None:
-                self.plot_trend_temp_second_marker(self.trend_second_click_x)
+            if self.trend_temp_fit_on:
+                y = event.ydata
+                self.trend_temp_est.set_position((x, y))
+                self.figure_manager.refresh()
+            else:
+                if self.trend_first_click_x is not None and self.trend_second_click_x is None:
+                    self.plot_trend_temp_first_marker(self.trend_first_click_x)
+                elif self.trend_second_click_x is not None:
+                    self.plot_trend_temp_second_marker(self.trend_second_click_x)
 
     def plot_trend_line(self, x_slice, trend_vals, color):
         self.trend_temp_line, = self.figure_manager.ax.plot(x_slice, trend_vals, linestyle="-", linewidth=1, color=color)
@@ -1109,6 +1173,9 @@ class TrendManager:
 
     def trend_fit(self, corr):
         if self.trend_temp_first_marker and self.trend_temp_second_marker and self.trend_temp_line is None:
+
+            self.trend_temp_fit_on = True
+
             x1 = self.trend_temp_first_marker.get_xdata()[0]
             x2 = self.trend_temp_second_marker.get_xdata()[0]
 
@@ -1229,6 +1296,7 @@ class TrendManager:
         self.trend_temp_first_marker = None
         self.trend_temp_second_marker = None
         self.trend_current_temp_marker = None
+        self.trend_temp_fit_on = False
 
         self.figure_manager.refresh()
 
