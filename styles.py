@@ -99,7 +99,19 @@ QCheckBox::indicator:unchecked {
     width: 14px;
     height: 14px;
 }
-
+QCheckBox::indicator:unchecked:disabled {
+    background-color: lightgray;
+    color: lightgray;
+    border: 1px solid darkgray;
+}
+QCheckBox::indicator:checked:disabled {
+    background-color: lightgray;
+    color: lightgray;
+    border: 1px solid darkgray;
+}
+QCheckBox:disabled {
+    color: gray;
+}
 
 /* QGroupBox styles */
 QGroupBox {

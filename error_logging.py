@@ -10,9 +10,9 @@ def get_error_report_path():
     home_dir = os.path.expanduser("~")
 
     if system == "Linux" or system == "Darwin":  # Darwin is macOS
-        config_dir = os.path.join(home_dir, '.config', 'iChart')
+        config_dir = os.path.join(home_dir, '.config', 'OpenCelerator')
     elif system == "Windows":
-        config_dir = os.path.join(home_dir, 'AppData', 'Local', 'iChart')
+        config_dir = os.path.join(home_dir, 'AppData', 'Local', 'OpenCelerator')
     else:
         raise OSError("Unsupported operating system")
 
@@ -47,7 +47,7 @@ def log_uncaught_exceptions(exctype, value, tb):
     logger.addHandler(file_handler)
 
     logger.error("Uncaught exception", exc_info=(exctype, value, tb))
-    QMessageBox.critical(None, "An error occurred", f"An unexpected error occurred. Please share the log file placed in {error_report_path} with the developer.")
+    QMessageBox.critical(None, "An error occurred", f"An unexpected error occurred. A report has been generated here: {error_report_path}. Please share it with the developer.")
 
     # Remove file handler to avoid duplicate logs in the future
     logger.removeHandler(file_handler)

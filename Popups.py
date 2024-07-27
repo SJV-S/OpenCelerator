@@ -701,18 +701,18 @@ class SupportDevDialog(QDialog):
             "li { margin-bottom: 10px; }"
             "p.center { text-align: center; }"
             "</style>"
-            "<p class='center'><b>iChart will forever remain free and open-source </b></p>"
+            "<p class='center'><b>OpenCelerator will forever remain free and open-source </b></p>"
             "<p> Months of work have gone into this project. There is no team or funding behind it. Just me. "
-            "If you find iChart useful and would like to see its development continue, please consider donating.</p>"
+            "If you find the app useful and would like to see its development continue, please consider donating.</p>"
             "<p>Other ways to contribute:</p>"
             "<ul>"
-            "<li>Provide feedback. Let me know what you like, and what can be improved, report bugs, do testing, and so on. The software is still in alpha. </li>"
+            "<li>Provide feedback. Let me know what you like, what can be improved, report bugs, do testing, and so on. The software is still in alpha. </li>"
             "<li>Share this tool with others who might find it useful.</li>"
             "<li>If you use this in an official capacity, please acknowledge by linking to my GitHub: "
-            "<a href='https://github.com/SJV-S/iChart'>https://github.com/SJV-S/iChart</a></li>"
+            "<a href='https://github.com/SJV-S/OpenCelerator'>https://github.com/SJV-S/OpenCelerator</a></li>"
             "</ul>"
             "<p>I am also looking for work! I have a PhD in behavior analysis and obviously know a little bit about coding. Will share CV upon request. Contact: "
-            "<a href='mailto:ichart.wopak@simplelogin.com'>ichart.wopak@simplelogin.com</a></p>"
+            "<a href='mailto:opencelerator.9qpel@simplelogin.com'>opencelerator.9qpel@simplelogin.com</a></p>"
         )
 
         scrollArea.setWidget(contentWidget)
@@ -740,7 +740,7 @@ class SupportDevDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self.setLayout(layout)
-        self.setWindowTitle('Support iChart')
+        self.setWindowTitle('Support OpenCelerator')
 
     def patreon_btn_clicked(self):
         url = QUrl('https://www.patreon.com/johanpigeon/membership')
