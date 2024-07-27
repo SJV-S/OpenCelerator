@@ -29,7 +29,7 @@ Contact: opencelerator.9qpel@simplelogin.com<br>
 
 ## Download & Installation
 
-The latest version 0.5.0 can be [downloaded here](https://github.com/SJV-S/OpenCelerator/releases/tag/0.5.0). Extract content in your preferred directory. Launch by running executable.
+The latest version 0.6.0 can be [downloaded here](https://github.com/SJV-S/OpenCelerator/releases/tag/0.6.0). Extract content in your preferred directory. Launch by running executable.
 
 #### FAQ
 - “Which file(s) should I download?” To run the app, you only need one file with the name of your operating system. Ignore the source code files.
