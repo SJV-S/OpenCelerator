@@ -55,6 +55,7 @@ If the AppImage does not run, ensure that FUSE is installed.
 - openSUSE: sudo zypper install fuse
 - Arch: sudo pacman -S fuse
 
+Will be available as a flatpak as well in the next release.
 
 ## Import Formatting
 
