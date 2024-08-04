@@ -42,7 +42,7 @@ How to install on MacOS: [video](https://youtu.be/5srnnDgY0Cw)
 
 #### Windows
 
-How to install on Windows 10: [video](https://youtu.be/u8ugPqEv8LM)
+How to install on Windows: [video](https://youtu.be/u8ugPqEv8LM)
 
 #### Linux
 
