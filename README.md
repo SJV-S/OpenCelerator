@@ -37,7 +37,8 @@ The latest version 0.6.0 can be [downloaded here](https://github.com/SJV-S/OpenC
 
 #### Mac
 
-Once downloaded, double click on the zip file to extract it, then right click on the extracted file, and select “Open”. Your system will then ask you to grant the app [permission](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac) to run. After that you should just be able to launch the app by double clicking like any other app
+Watch this [video](https://youtu.be/5srnnDgY0Cw) to see how to install on MacOS.
+
 
 #### Windows
 
