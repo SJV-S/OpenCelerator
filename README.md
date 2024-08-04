@@ -37,7 +37,7 @@ The latest version 0.6.0 can be [downloaded here](https://github.com/SJV-S/OpenC
 
 #### Mac
 
-Watch this [video](https://youtu.be/5srnnDgY0Cw) to see how to install on MacOS.
+How to install on MacOS: [video](https://youtu.be/5srnnDgY0Cw)
 
 
 #### Windows
