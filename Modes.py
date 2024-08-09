@@ -1,11 +1,11 @@
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QGroupBox, QRadioButton, QLineEdit, QLabel, QDateEdit, QListWidget, QFileDialog, QCheckBox,
                                QButtonGroup, QDialog, QComboBox, QMessageBox, QGridLayout, QStackedWidget, QSpinBox,
-                               QSpacerItem, QSizePolicy)
+                               QSpacerItem, QSizePolicy, QDoubleSpinBox, QColorDialog)
 from PySide6.QtGui import QDoubleValidator, QFont, QIcon
 from PySide6.QtCore import Qt, QDate
 
-from Popups import InputDialog, ConfigurePhaseLinesDialog, ConfigureAimLinesDialog, ConfigureTrendLinesDialog, ConfigureDataPointsDialog
+from Popups import InputDialog, ConfigurePhaseLinesDialog, ConfigureAimLinesDialog, ConfigureTrendLinesDialog
 from DataManager import DataManager
 
 
@@ -20,6 +20,294 @@ class ModeWidget(QWidget):
 
     def init_ui(self):
         pass
+
+
+class DataModeWidget(ModeWidget):
+    def __init__(self, figure_manager):
+        self.marker_style_map = {"Circle": "o", "Square": "s", "Triangle Up": "^", "Triangle Down": "v", "Star": "*",
+                                 "Plus": "+", "X": "x", "Underscore": "_", "NoMarker": ''}
+        self.line_style_map = {"Solid": "-", "Dashed": "--", "Dotted": ":", 'NoLine': ''}
+        self.current_button = None
+        super().__init__(figure_manager)
+        self.populate_fields_with_defaults()
+
+    def init_ui(self):
+        main_layout = QVBoxLayout()
+
+        date1 = self.figure_manager.x_to_date[0].strftime(self.data_manager.standard_date_string)
+        date2 = self.figure_manager.x_to_date[max(self.figure_manager.Chart.date_to_pos.values())].strftime(
+            self.data_manager.standard_date_string)
+
+        self.date_range_label = QLabel(f'{date1} ~ {date2}')
+        self.date_range_label.setStyleSheet("font-style: normal;")
+        self.date_range_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        date_layout = QVBoxLayout()
+        date_layout.addWidget(self.date_range_label)
+        main_layout.addLayout(date_layout)
+
+        # Add a spacer item to create a larger margin
+        spacer_item = QSpacerItem(10, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        main_layout.addItem(spacer_item)
+
+        # Create navigation buttons
+        nav_layout = QHBoxLayout()
+        nav_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
+        nav_layout.setSpacing(0)  # Remove spacing
+
+        self.dot_button = self.create_nav_button("Dot", 0)
+        self.x_button = self.create_nav_button("X", 1)
+        self.floor_button = self.create_nav_button("Floor", 2)
+        self.misc_button = self.create_nav_button("Misc", 3)
+
+        nav_layout.addWidget(self.dot_button)
+        nav_layout.addWidget(self.x_button)
+        nav_layout.addWidget(self.floor_button)
+        nav_layout.addWidget(self.misc_button)
+        main_layout.addLayout(nav_layout)
+
+        # Style group
+        style_layout = QVBoxLayout()
+
+        # Stacked widget for style categories
+        self.stacked_widget = QStackedWidget()
+        self.stacked_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        # Add style categories to stacked widget
+        self.dot_category = self.add_style_category(self.stacked_widget, 'Dot', self.data_manager.user_preferences['corr_style'])
+        self.x_category = self.add_style_category(self.stacked_widget, 'X', self.data_manager.user_preferences['err_style'])
+        self.floor_category = self.add_style_category(self.stacked_widget, 'Floor', self.data_manager.user_preferences['floor_style'])
+        self.misc_category = self.add_style_category(self.stacked_widget, 'Misc', self.data_manager.user_preferences['misc_style'])
+
+        style_layout.addWidget(self.stacked_widget)
+        main_layout.addLayout(style_layout)
+
+        self.layout.addLayout(main_layout)  # Use existing layout
+
+        self.switch_category(0, self.dot_button)  # Set default selected category
+
+    def create_nav_button(self, text, index):
+        button = QPushButton(text)
+        button.setStyleSheet(f"""
+            QPushButton {{
+                border: none;
+                border-top: 1px solid black;
+                margin: 0;
+                padding: 10px;
+                background-color: #e7efff;
+                border-radius: 0; /* No rounded corners */
+            }}
+            QPushButton:checked {{
+                background-color: #6ad1e3; /* Background color when selected */
+            }}
+        """)
+        button.setCheckable(True)
+        button.clicked.connect(lambda: self.switch_category(index, button))
+        return button
+
+    def switch_category(self, index, button):
+        self.stacked_widget.setCurrentIndex(index)
+        if self.current_button:
+            self.current_button.setChecked(False)  # Uncheck the previous button
+        button.setChecked(True)  # Check the current button
+        self.current_button = button
+
+    def add_style_category(self, stacked_widget, category_name, default_values):
+        category_widget = QWidget()
+        category_layout = QVBoxLayout(category_widget)
+
+        # Choose marker size
+        marker_size_spinbox = QDoubleSpinBox()
+        marker_size_spinbox.setRange(1, 100)
+        marker_size_spinbox.setSingleStep(1)
+        marker_size_spinbox.valueChanged.connect(
+            lambda value, cat=category_name, field='markersize': self.update_data_point_styles(cat, field, value)
+        )
+        category_layout.addWidget(QLabel("Marker Size"))
+        category_layout.addWidget(marker_size_spinbox)
+
+        # Choose marker style
+        marker_style_combobox = QComboBox()
+        marker_style_combobox.addItems(self.marker_style_map.keys())
+        marker_style_combobox.currentTextChanged.connect(
+            lambda value, cat=category_name, field='marker': self.update_data_point_styles(cat, field,
+                                                                                           self.marker_style_map[value])
+        )
+        category_layout.addWidget(QLabel("Marker Style"))
+        category_layout.addWidget(marker_style_combobox)
+
+        # Marker face color
+        marker_face_color_button = QPushButton("Marker Face Color")
+        marker_face_color_button.clicked.connect(lambda: self.choose_marker_face_color(category_name))
+        category_layout.addWidget(marker_face_color_button)
+
+        # Marker edge color
+        marker_edge_color_button = QPushButton("Marker Edge Color")
+        marker_edge_color_button.clicked.connect(lambda: self.choose_marker_edge_color(category_name))
+        category_layout.addWidget(marker_edge_color_button)
+
+        # Line color
+        line_color_button = QPushButton("Line Color")
+        line_color_button.clicked.connect(lambda: self.choose_line_color(category_name))
+        category_layout.addWidget(line_color_button)
+
+        # Line width
+        line_width_spinbox = QDoubleSpinBox()
+        line_width_spinbox.setRange(0.1, 10.0)
+        line_width_spinbox.setSingleStep(0.1)
+        line_width_spinbox.valueChanged.connect(
+            lambda value, cat=category_name, field='linewidth': self.update_data_point_styles(cat, field, value)
+        )
+        category_layout.addWidget(QLabel("Line Width"))
+        category_layout.addWidget(line_width_spinbox)
+
+        # Line style
+        line_style_combobox = QComboBox()
+        line_style_combobox.addItems(self.line_style_map.keys())
+        line_style_combobox.currentTextChanged.connect(
+            lambda value, cat=category_name, field='linestyle': self.update_data_point_styles(cat, field, self.line_style_map[value]))
+        category_layout.addWidget(QLabel("Line Style"))
+        category_layout.addWidget(line_style_combobox)
+
+        # Add "Set as default" button
+        set_default_button = QPushButton("Set as default")
+        set_default_button.clicked.connect(lambda: self.change_default(category_name))
+
+        # Add vertical spacing before set-as-default button
+        spacer = QSpacerItem(10, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        category_layout.addItem(spacer)
+
+        category_layout.addWidget(set_default_button)
+
+        category_layout.addStretch()
+        stacked_widget.addWidget(category_widget)
+
+        return {
+            'marker_size_spinbox': marker_size_spinbox,
+            'marker_style_combobox': marker_style_combobox,
+            'marker_face_color_button': marker_face_color_button,
+            'marker_edge_color_button': marker_edge_color_button,
+            'line_color_button': line_color_button,
+            'line_width_spinbox': line_width_spinbox,
+            'line_style_combobox': line_style_combobox,
+            'set_default_button': set_default_button
+        }
+
+    def populate_fields_with_defaults(self):
+        self.populate_fields_for_category(self.dot_category, self.data_manager.user_preferences['corr_style'],
+                                          self.marker_style_map, self.line_style_map)
+        self.populate_fields_for_category(self.x_category, self.data_manager.user_preferences['err_style'],
+                                          self.marker_style_map, self.line_style_map)
+        self.populate_fields_for_category(self.floor_category, self.data_manager.user_preferences['floor_style'],
+                                          self.marker_style_map, self.line_style_map)
+        self.populate_fields_for_category(self.misc_category, self.data_manager.user_preferences['misc_style'],
+                                          self.marker_style_map, self.line_style_map)
+
+    def populate_fields_for_category(self, category, default_values, marker_style_map, line_style_map):
+        self.block_signals(category, True)
+        category['marker_size_spinbox'].setValue(default_values['markersize'])
+
+        marker_style_key = next((key for key, value in marker_style_map.items() if value == default_values['marker']),
+                                None)
+        if marker_style_key is not None:
+            index = category['marker_style_combobox'].findText(marker_style_key)
+            category['marker_style_combobox'].setCurrentIndex(index)
+
+        self.set_button_border_style(category['marker_face_color_button'], default_values['marker_face_color'])
+        self.set_button_border_style(category['marker_edge_color_button'], default_values['marker_edge_color'])
+        self.set_button_border_style(category['line_color_button'], default_values['line_color'])
+        category['line_width_spinbox'].setValue(default_values['linewidth'])
+
+        style_key = next((key for key, value in line_style_map.items() if value == default_values['linestyle']), None)
+        if style_key is not None:
+            index = category['line_style_combobox'].findText(style_key)
+            category['line_style_combobox'].setCurrentIndex(index)
+        self.block_signals(category, False)
+
+    def block_signals(self, category, block):
+        category['marker_size_spinbox'].blockSignals(block)
+        category['marker_style_combobox'].blockSignals(block)
+        category['marker_face_color_button'].blockSignals(block)
+        category['marker_edge_color_button'].blockSignals(block)
+        category['line_color_button'].blockSignals(block)
+        category['line_width_spinbox'].blockSignals(block)
+        category['line_style_combobox'].blockSignals(block)
+
+    def choose_marker_face_color(self, category_name):
+        button = self.get_category(category_name)['marker_face_color_button']
+        self.select_color(button)
+        color = self.get_color(button)
+        self.update_data_point_styles(category_name, 'marker_face_color', color)
+
+    def choose_marker_edge_color(self, category_name):
+        button = self.get_category(category_name)['marker_edge_color_button']
+        self.select_color(button)
+        color = self.get_color(button)
+        self.update_data_point_styles(category_name, 'marker_edge_color', color)
+
+    def choose_line_color(self, category_name):
+        button = self.get_category(category_name)['line_color_button']
+        self.select_color(button)
+        color = self.get_color(button)
+        self.update_data_point_styles(category_name, 'line_color', color)
+
+    def select_color(self, button):
+        color = QColorDialog.getColor()
+        if color.isValid():
+            button.setStyleSheet(f"border: 3px solid {color.name()};")
+
+    def set_button_border_style(self, button, color):
+        button.setStyleSheet(f"border: 3px solid {color};")
+
+    def get_color(self, button):
+        style_sheet = button.styleSheet()
+        if (color := style_sheet.split(' ')[-1].strip(';')):
+            return color
+        return '#000000'  # Default to black if no color is set
+
+    def get_category(self, category_name):
+        if category_name == 'Dot':
+            return self.dot_category
+        elif category_name == 'X':
+            return self.x_category
+        elif category_name == 'Floor':
+            return self.floor_category
+        elif category_name == 'Misc':
+            return self.misc_category
+        return None
+
+    def update_data_point_styles(self, point_category, input_field, value):
+        self.figure_manager.update_point_styles(point_category, input_field, value)
+
+    def change_default(self, category_name):
+        category = self.get_category(category_name)
+
+        default_values = {
+            'markersize': category['marker_size_spinbox'].value(),
+            'marker': self.marker_style_map[category['marker_style_combobox'].currentText()],
+            'marker_face_color': self.get_color(category['marker_face_color_button']),
+            'marker_edge_color': self.get_color(category['marker_edge_color_button']),
+            'line_color': self.get_color(category['line_color_button']),
+            'linewidth': category['line_width_spinbox'].value(),
+            'linestyle': self.line_style_map[category['line_style_combobox'].currentText()]
+        }
+
+        msg_box = QMessageBox()
+        msg_box.setIcon(QMessageBox.Icon.Question)
+        msg_box.setWindowTitle("Set Default")
+        msg_box.setText(f"Make current {category_name} settings default for all charts?")
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        result = msg_box.exec()
+
+        if result == QMessageBox.StandardButton.Yes:
+            if category_name == 'Dot':
+                self.data_manager.user_preferences['corr_style'] = default_values
+            elif category_name == 'X':
+                self.data_manager.user_preferences['err_style'] = default_values
+            elif category_name == 'Floor':
+                self.data_manager.user_preferences['floor_style'] = default_values
+            elif category_name == 'Misc':
+                self.data_manager.user_preferences['misc_style'] = default_values
 
 
 class ViewModeWidget(ModeWidget):
@@ -55,8 +343,8 @@ class ViewModeWidget(ModeWidget):
         self.x_trends_check = QCheckBox('Trend')
         self.dot_bounce_check = QCheckBox('Bounce')
         self.x_bounce_check = QCheckBox('Bounce')
-        self.dot_est_check = QCheckBox('Text')
-        self.x_est_check = QCheckBox('Text')
+        self.dot_est_check = QCheckBox('CelTxt')
+        self.x_est_check = QCheckBox('CelTxt')
         self.minor_grid_check = QCheckBox('Minor')
         self.major_grid_check = QCheckBox('Major')
         self.timing_floor_check = QCheckBox('Floor')
@@ -65,6 +353,7 @@ class ViewModeWidget(ModeWidget):
         self.aims_check = QCheckBox('Aim')
         self.fan_check = QCheckBox('CelFan')
         self.credit_check = QCheckBox('Credit')
+        self.misc_point_check = QCheckBox('MiscD')
 
         # Adding checkboxes to the grid
         view_grid.addWidget(self.dots_check, 1, 0)
@@ -83,6 +372,7 @@ class ViewModeWidget(ModeWidget):
         view_grid.addWidget(self.phase_lines_check, 8, 1)
         view_grid.addWidget(self.fan_check, 10, 1)
         view_grid.addWidget(self.credit_check, 11, 1)
+        view_grid.addWidget(self.misc_point_check, 12, 1)
 
         # Set spacing between rows
         view_grid.setSpacing(10)
@@ -91,7 +381,7 @@ class ViewModeWidget(ModeWidget):
         for checkbox in [self.minor_grid_check, self.major_grid_check, self.dots_check, self.xs_check,
                          self.dot_trends_check, self.x_trends_check, self.phase_lines_check,
                          self.aims_check, self.timing_floor_check, self.dot_bounce_check, self.x_bounce_check,
-                         self.dot_est_check, self.x_est_check, self.fan_check, self.credit_check]:
+                         self.dot_est_check, self.x_est_check, self.fan_check, self.credit_check, self.misc_point_check]:
             checkbox.setChecked(True)
 
         for checkbox in [self.timing_grid_check]:
@@ -114,6 +404,7 @@ class ViewModeWidget(ModeWidget):
         self.x_est_check.stateChanged.connect(self.figure_manager.view_x_est)
         self.fan_check.stateChanged.connect(self.figure_manager.view_update_celeration_fan)
         self.credit_check.stateChanged.connect(self.toggle_credit_lines)
+        self.misc_point_check.stateChanged.connect(self.figure_manager.view_misc_points)
 
         # Credit lines button
         credit_lines_btn = QPushButton("Credit lines")
@@ -141,494 +432,6 @@ class ViewModeWidget(ModeWidget):
     def toggle_credit_lines(self, status):
         self.data_manager.chart_data['view_check']['credit_spacing'] = bool(status)
         self.figure_manager.update_chart()
-
-
-class ManualModeTemplate(ModeWidget):
-    def init_ui(self):
-        self.create_radio_buttons()
-        self.create_count_input()
-        self.additional_ui_elements()
-        self.create_date_input()
-        self.create_manual_buttons()
-        self.create_label_coordinates()
-        self.layout.addStretch()
-
-    def create_radio_buttons(self):
-        radio_layout = QHBoxLayout()
-        radio_dot = QRadioButton("Dots")
-        radio_x = QRadioButton("Xs")
-        radio_dot.setChecked(True)
-
-        radio_layout.addWidget(radio_dot)
-        radio_layout.addWidget(radio_x)
-        self.layout.addLayout(radio_layout)
-
-        radio_dot.toggled.connect(lambda checked: setattr(self.figure_manager, 'point_type', True) if checked else None)
-        radio_x.toggled.connect(lambda checked: setattr(self.figure_manager, 'point_type', False) if checked else None)
-
-    def create_count_input(self):
-        validator = QDoubleValidator(0.0, 9999.99, 2)
-        label_manual_count = QLabel('Count')
-        count_input = QLineEdit('')
-        count_input.setValidator(validator)
-        self.layout.addWidget(label_manual_count)
-        self.layout.addWidget(count_input)
-        self.count_input = count_input
-
-    def additional_ui_elements(self):
-        # This method is meant to be overridden in subclasses to add additional UI elements.
-        pass
-
-    def create_date_input(self):
-        # To be called only in subclasses where a date input is needed
-        date_input = QDateEdit()
-        date_input.setDate(QDate.currentDate())
-        date_input.setCalendarPopup(True)
-        date_input.setDisplayFormat("dd-MM-yyyy")
-        self.layout.addWidget(QLabel('Date'))
-        self.layout.addWidget(date_input)
-        self.date_input = date_input
-
-    def create_manual_buttons(self):
-        manual_buttons_layout = QHBoxLayout()
-        add_button = QPushButton()
-        undo_button = QPushButton()
-        config_btn = QPushButton()
-
-        # Add icons
-        add_button.setIcon(QIcon(':/images/plus-solid.svg'))
-        undo_button.setIcon(QIcon(':/images/minus-solid.svg'))
-        config_btn.setIcon(QIcon(':/images/gear-solid.svg'))
-
-        manual_buttons_layout.addWidget(add_button)
-        manual_buttons_layout.addWidget(undo_button)
-        manual_buttons_layout.addWidget(config_btn)
-        self.layout.addLayout(manual_buttons_layout)
-
-        add_button.clicked.connect(self.add_entry)
-        undo_button.clicked.connect(self.figure_manager.manual_undo_point)
-        config_btn.clicked.connect(self.configure_data_points)
-        self.add_button = add_button
-        self.undo_button = undo_button
-
-    def create_label_coordinates(self):
-        label_xy_coordinates = QLabel('')
-        self.layout.addWidget(label_xy_coordinates)
-
-    def add_entry(self):
-        raise NotImplementedError("Subclasses should implement this method")
-
-    def configure_data_points(self):
-        dialog = ConfigureDataPointsDialog(self.figure_manager, self)
-        dialog.exec()
-
-
-class ManualModeWidgetDailyMinute(ManualModeTemplate):
-    def additional_ui_elements(self):
-        self.create_time_inputs()
-
-    def create_time_inputs(self):
-        validator = QDoubleValidator(0.0, 9999.99, 2)
-        time_input_layout = QHBoxLayout()
-        self.hour_input = self.create_time_input("Hour", validator)
-        self.min_input = self.create_time_input("Min", validator)
-        self.sec_input = self.create_time_input("Sec", validator)
-        time_input_layout.addLayout(self.hour_input)
-        time_input_layout.addLayout(self.min_input)
-        time_input_layout.addLayout(self.sec_input)
-        self.layout.addLayout(time_input_layout)
-
-    def add_entry(self):
-        self.figure_manager.manual_plot_form_minutes(
-            self.count_input.text(),
-            self.hour_input.itemAt(1).widget().text(),
-            self.min_input.itemAt(1).widget().text(),
-            self.sec_input.itemAt(1).widget().text(),
-            self.date_input.text()
-        )
-
-    def create_time_input(self, label_text, validator):
-        layout = QVBoxLayout()
-        label = QLabel(label_text)
-        input_field = QLineEdit()
-        input_field.setValidator(validator)
-        layout.addWidget(label, 0, Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(input_field)
-        return layout
-
-
-class ManualModeWidgetDaily(ManualModeTemplate):
-    def add_entry(self):
-        self.figure_manager.manual_plot_form_date(
-            self.count_input.text(),
-            self.date_input.text()
-        )
-
-
-class ManualModeWidgetWeekly(ManualModeTemplate):
-    def init_ui(self):
-        self.create_radio_buttons()
-        self.create_count_input()
-        self.create_date_navigation()
-        self.create_manual_buttons()
-        self.create_label_coordinates()
-        self.layout.addStretch()
-
-    def create_date_navigation(self):
-        date_layout = QHBoxLayout()
-        self.previous_button = QPushButton('<')
-        self.next_button = QPushButton('>')
-        self.date_label = QLabel()
-        self.current_sunday = self.get_nearest_sunday(QDate.currentDate())
-
-        self.update_date_label()
-
-        date_layout.addWidget(self.previous_button)
-        date_layout.addWidget(self.date_label)
-        date_layout.addWidget(self.next_button)
-        self.layout.addLayout(date_layout)
-
-        self.previous_button.clicked.connect(self.show_previous_sunday)
-        self.next_button.clicked.connect(self.show_next_sunday)
-
-    def get_nearest_sunday(self, current_date):
-        current_day_of_week = current_date.dayOfWeek()
-        return current_date.addDays(7 - current_day_of_week if current_day_of_week != 7 else 0)
-
-    def update_date_label(self):
-        week_number = self.current_sunday.weekNumber()[0]
-        month = self.current_sunday.toString("MMMM")
-        year = self.current_sunday.toString("yy")
-        self.date_label.setText(f"W {week_number}, {month}, {year}")
-
-    def show_previous_sunday(self):
-        self.current_sunday = self.current_sunday.addDays(-7)
-        self.update_date_label()
-
-    def show_next_sunday(self):
-        self.current_sunday = self.current_sunday.addDays(7)
-        self.update_date_label()
-
-    def add_entry(self):
-        self.figure_manager.manual_plot_form_date(
-            self.count_input.text(),
-            self.current_sunday.toString("dd-MM-yyyy")
-        )
-
-
-class ManualModeWidgetWeeklyMinute(ManualModeWidgetWeekly):
-    def init_ui(self):
-        self.create_radio_buttons()
-        self.create_count_input()
-        self.create_time_inputs()
-        self.create_date_navigation()
-        self.create_manual_buttons()
-        self.create_label_coordinates()
-        self.layout.addStretch()
-
-    def create_time_inputs(self):
-        validator = QDoubleValidator(0.0, 9999.99, 2)
-        time_input_layout = QHBoxLayout()
-        self.hour_input = self.create_time_input("Hour", validator)
-        self.min_input = self.create_time_input("Min", validator)
-        self.sec_input = self.create_time_input("Sec", validator)
-        time_input_layout.addLayout(self.hour_input)
-        time_input_layout.addLayout(self.min_input)
-        time_input_layout.addLayout(self.sec_input)
-        self.layout.addLayout(time_input_layout)
-
-    def add_entry(self):
-        self.figure_manager.manual_plot_form_minutes(
-            self.count_input.text(),
-            self.hour_input.itemAt(1).widget().text(),
-            self.min_input.itemAt(1).widget().text(),
-            self.sec_input.itemAt(1).widget().text(),
-            self.current_sunday.toString("dd-MM-yyyy")
-        )
-
-    def create_time_input(self, label_text, validator):
-        layout = QVBoxLayout()
-        label = QLabel(label_text)
-        input_field = QLineEdit()
-        input_field.setValidator(validator)
-        layout.addWidget(label, 0, Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(input_field)
-        return layout
-
-
-class ManualModeWidgetMonthly(ManualModeTemplate):
-    def init_ui(self):
-        self.create_radio_buttons()
-        self.create_count_input()
-        self.create_date_navigation()
-        self.create_manual_buttons()
-        self.create_label_coordinates()
-        self.layout.addStretch()
-
-    def create_date_navigation(self):
-        date_layout = QHBoxLayout()
-        self.previous_button = QPushButton('<')
-        self.next_button = QPushButton('>')
-        self.date_label = QLabel()
-        self.current_date = self.get_last_day_of_month(QDate.currentDate())
-
-        self.update_date_label()
-
-        date_layout.addWidget(self.previous_button)
-        date_layout.addWidget(self.date_label)
-        date_layout.addWidget(self.next_button)
-        self.layout.addLayout(date_layout)
-
-        self.previous_button.clicked.connect(self.show_previous_month)
-        self.next_button.clicked.connect(self.show_next_month)
-
-    def get_last_day_of_month(self, date):
-        next_month = date.addMonths(1)
-        first_day_next_month = QDate(next_month.year(), next_month.month(), 1)
-        return first_day_next_month.addDays(-1)
-
-    def update_date_label(self):
-        month = self.current_date.toString("MM")
-        year = self.current_date.toString("yy")
-        self.date_label.setText(f"{month}, {year}")
-
-    def show_previous_month(self):
-        self.current_date = self.current_date.addMonths(-1)
-        self.current_date = self.get_last_day_of_month(self.current_date)
-        self.update_date_label()
-
-    def show_next_month(self):
-        self.current_date = self.current_date.addMonths(1)
-        self.current_date = self.get_last_day_of_month(self.current_date)
-        self.update_date_label()
-
-    def add_entry(self):
-        self.figure_manager.manual_plot_form_date(
-            self.count_input.text(),
-            self.current_date.toString("dd-MM-yyyy")
-        )
-
-
-class ManualModeWidgetMonthlyMinute(ManualModeTemplate):
-    def init_ui(self):
-        self.create_radio_buttons()
-        self.create_count_input()
-        self.create_time_inputs()
-        self.create_date_navigation()
-        self.create_manual_buttons()
-        self.create_label_coordinates()
-        self.layout.addStretch()
-
-    def create_date_navigation(self):
-        date_layout = QHBoxLayout()
-        self.previous_button = QPushButton('<')
-        self.next_button = QPushButton('>')
-        self.date_label = QLabel()
-        self.current_date = self.get_last_day_of_month(QDate.currentDate())
-
-        self.update_date_label()
-
-        date_layout.addWidget(self.previous_button)
-        date_layout.addWidget(self.date_label)
-        date_layout.addWidget(self.next_button)
-        self.layout.addLayout(date_layout)
-
-        self.previous_button.clicked.connect(self.show_previous_month)
-        self.next_button.clicked.connect(self.show_next_month)
-
-    def get_last_day_of_month(self, date):
-        next_month = date.addMonths(1)
-        first_day_next_month = QDate(next_month.year(), next_month.month(), 1)
-        return first_day_next_month.addDays(-1)
-
-    def update_date_label(self):
-        month = self.current_date.toString("MM")
-        year = self.current_date.toString("yy")
-        self.date_label.setText(f"{month}, {year}")
-
-    def show_previous_month(self):
-        self.current_date = self.current_date.addMonths(-1)
-        self.current_date = self.get_last_day_of_month(self.current_date)
-        self.update_date_label()
-
-    def show_next_month(self):
-        self.current_date = self.current_date.addMonths(1)
-        self.current_date = self.get_last_day_of_month(self.current_date)
-        self.update_date_label()
-
-    def create_time_inputs(self):
-        validator = QDoubleValidator(0.0, 9999.99, 2)
-        time_input_layout = QHBoxLayout()
-        self.hour_input = self.create_time_input("Hour", validator)
-        self.min_input = self.create_time_input("Min", validator)
-        self.sec_input = self.create_time_input("Sec", validator)
-        time_input_layout.addLayout(self.hour_input)
-        time_input_layout.addLayout(self.min_input)
-        time_input_layout.addLayout(self.sec_input)
-        self.layout.addLayout(time_input_layout)
-
-    def create_time_input(self, label_text, validator):
-        layout = QVBoxLayout()
-        label = QLabel(label_text)
-        input_field = QLineEdit()
-        input_field.setValidator(validator)
-        layout.addWidget(label, 0, Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(input_field)
-        return layout
-
-    def add_entry(self):
-        self.figure_manager.manual_plot_form_minutes(
-            self.count_input.text(),
-            self.hour_input.itemAt(1).widget().text(),
-            self.min_input.itemAt(1).widget().text(),
-            self.sec_input.itemAt(1).widget().text(),
-            self.current_date.toString("dd-MM-yyyy")
-        )
-
-
-class ManualModeWidgetYearlyMinute(ManualModeTemplate):
-    def init_ui(self):
-        self.create_radio_buttons()
-        self.create_count_input()
-        self.create_time_inputs()
-        self.create_date_navigation()
-        self.create_manual_buttons()
-        self.create_label_coordinates()
-        self.layout.addStretch()
-
-    def create_date_navigation(self):
-        date_layout = QHBoxLayout()
-        self.previous_button = QPushButton('<')
-        self.next_button = QPushButton('>')
-        self.date_label = QLabel()
-        self.current_date = self.get_last_day_of_year(QDate.currentDate())
-
-        self.update_date_label()
-
-        # Set fixed width for the arrow buttons
-        self.previous_button.setFixedWidth(40)
-        self.next_button.setFixedWidth(40)
-
-        # Add the previous button
-        date_layout.addWidget(self.previous_button)
-
-        # Add a stretchable space
-        date_layout.addStretch()
-
-        # Add the date label
-        date_layout.addWidget(self.date_label, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        # Add a stretchable space
-        date_layout.addStretch()
-
-        # Add the next button
-        date_layout.addWidget(self.next_button)
-
-        self.layout.addLayout(date_layout)
-
-        self.previous_button.clicked.connect(self.show_previous_year)
-        self.next_button.clicked.connect(self.show_next_year)
-
-    def get_last_day_of_year(self, date):
-        year = date.year()
-        return QDate(year, 12, 31)
-
-    def update_date_label(self):
-        year = self.current_date.toString("yyyy")
-        self.date_label.setText(year)
-
-    def show_previous_year(self):
-        self.current_date = self.current_date.addYears(-1)
-        self.update_date_label()
-
-    def show_next_year(self):
-        self.current_date = self.current_date.addYears(1)
-        self.update_date_label()
-
-    def create_time_inputs(self):
-        validator = QDoubleValidator(0.0, 9999.99, 2)
-        time_input_layout = QHBoxLayout()
-        self.hour_input = self.create_time_input("Hour", validator)
-        self.min_input = self.create_time_input("Min", validator)
-        self.sec_input = self.create_time_input("Sec", validator)
-        time_input_layout.addLayout(self.hour_input)
-        time_input_layout.addLayout(self.min_input)
-        time_input_layout.addLayout(self.sec_input)
-        self.layout.addLayout(time_input_layout)
-
-    def create_time_input(self, label_text, validator):
-        layout = QVBoxLayout()
-        label = QLabel(label_text)
-        input_field = QLineEdit()
-        input_field.setValidator(validator)
-        layout.addWidget(label, 0, Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(input_field)
-        return layout
-
-    def add_entry(self):
-        self.figure_manager.manual_plot_form_minutes(
-            self.count_input.text(),
-            self.hour_input.itemAt(1).widget().text(),
-            self.min_input.itemAt(1).widget().text(),
-            self.sec_input.itemAt(1).widget().text(),
-            self.current_date.toString("dd-MM-yyyy")
-        )
-
-
-class ManualModeWidgetYearly(ManualModeTemplate):
-    def init_ui(self):
-        self.create_radio_buttons()
-        self.create_count_input()
-        self.create_date_navigation()
-        self.create_manual_buttons()
-        self.create_label_coordinates()
-        self.layout.addStretch()
-
-    def create_date_navigation(self):
-        date_layout = QHBoxLayout()
-        self.previous_button = QPushButton('<')
-        self.next_button = QPushButton('>')
-        self.date_label = QLabel()
-        self.current_date = self.get_last_day_of_year(QDate.currentDate())
-
-        self.update_date_label()
-
-        # Set fixed width for the arrow buttons
-        self.previous_button.setFixedWidth(40)
-        self.next_button.setFixedWidth(40)
-
-        # Add the previous button
-        date_layout.addWidget(self.previous_button)
-        date_layout.addStretch()
-        date_layout.addWidget(self.date_label, alignment=Qt.AlignmentFlag.AlignCenter)
-        date_layout.addStretch()
-        date_layout.addWidget(self.next_button)
-        self.layout.addLayout(date_layout)
-
-        self.previous_button.clicked.connect(self.show_previous_year)
-        self.next_button.clicked.connect(self.show_next_year)
-
-    def get_last_day_of_year(self, date):
-        year = date.year()
-        return QDate(year, 12, 31)
-
-    def update_date_label(self):
-        year = self.current_date.toString("yyyy")
-        self.date_label.setText(year)
-
-    def show_previous_year(self):
-        self.current_date = self.current_date.addYears(-1)
-        self.update_date_label()
-
-    def show_next_year(self):
-        self.current_date = self.current_date.addYears(1)
-        self.update_date_label()
-
-    def add_entry(self):
-        self.figure_manager.manual_plot_form_date(
-            self.count_input.text(),
-            self.current_date.toString("dd-MM-yyyy")
-        )
 
 
 class PhaseModeWidget(ModeWidget):
@@ -761,8 +564,6 @@ class PhaseModeWidget(ModeWidget):
     def update_position_preference(self, position):
         if getattr(self, f'position_{position.lower()}').isChecked():
             self.data_manager.user_preferences['phase_text_position'] = position
-
-
 
 
 class AimModeWidget(ModeWidget):
@@ -903,17 +704,18 @@ class TrendModeWidget(ModeWidget):
 
         # Buttons for managing trends
         trend_button_layout = QHBoxLayout()
-        trend_add_btn = QPushButton()
+        self.trend_add_btn = QPushButton()
         self.trend_fit_btn = QPushButton('Fit')
         trend_undo_btn = QPushButton()
         trend_configure_btn = QPushButton()
 
         # Add icons
-        trend_add_btn.setIcon(QIcon(':/images/plus-solid.svg'))
+        self.trend_add_btn.setIcon(QIcon(':/images/plus-solid-disabled.svg'))
+        self.trend_add_btn.setEnabled(False)
         trend_undo_btn.setIcon(QIcon(':/images/minus-solid.svg'))
         trend_configure_btn.setIcon(QIcon(':/images/gear-solid.svg'))
 
-        trend_button_layout.addWidget(trend_add_btn)
+        trend_button_layout.addWidget(self.trend_add_btn)
         trend_button_layout.addWidget(trend_undo_btn)
         trend_button_layout.addWidget(self.trend_fit_btn)
         trend_button_layout.addWidget(trend_configure_btn)
@@ -978,17 +780,35 @@ class TrendModeWidget(ModeWidget):
 
         # Connect buttons to figure manager methods
         self.trend_fit_btn.clicked.connect(self.handle_fit_button)
-        trend_add_btn.clicked.connect(lambda: self.figure_manager.trend_finalize(self.trend_radio_dot.isChecked()))
-        trend_undo_btn.clicked.connect(lambda: self.figure_manager.trend_undo(self.trend_radio_dot.isChecked()))
+        self.trend_add_btn.clicked.connect(self.add_trend)
+        trend_undo_btn.clicked.connect(self.undo_trend)
         trend_configure_btn.clicked.connect(self.configure_trends)
 
         # Connect date changes to figure manager updates
         self.trend_start_date_input.dateChanged.connect(self.figure_manager.trend_date1_changed)
         self.trend_end_date_input.dateChanged.connect(self.figure_manager.trend_date2_changed)
 
+    def add_trend(self):
+        self.figure_manager.trend_finalize(self.trend_radio_dot.isChecked())
+        self.set_plus_btn_status()
+
+    def undo_trend(self):
+        self.figure_manager.trend_undo(self.trend_radio_dot.isChecked())
+        self.set_plus_btn_status()
+
     def handle_fit_button(self):
         self.figure_manager.trend_fit(self.trend_radio_dot.isChecked())
         self.setFocus()  # Set focus back to the main window
+        self.set_plus_btn_status()
+
+    def set_plus_btn_status(self):
+        # If a magenta trend was placed, make the plus button available
+        if self.figure_manager.trend_manager.trend_temp_fit_on:
+            self.trend_add_btn.setEnabled(True)
+            self.trend_add_btn.setIcon(QIcon(':/images/plus-solid.svg'))
+        else:
+            self.trend_add_btn.setEnabled(False)
+            self.trend_add_btn.setIcon(QIcon(':/images/plus-solid-disabled.svg'))
 
     def configure_trends(self):
         dialog = ConfigureTrendLinesDialog(self.trend_radio_dot.isChecked(), self.figure_manager, self)

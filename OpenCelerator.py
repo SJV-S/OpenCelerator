@@ -53,7 +53,7 @@ class ChartApp(QMainWindow):
         self.loaded_chart_path = None
         self.manual_mode_widget = None
         # Initialize the main window properties
-        self.window_title_str = 'OpenCelerator v0.6.0'
+        self.window_title_str = 'OpenCelerator v0.7.0'
         self.setWindowTitle(self.window_title_str)
         self.setWindowIcon(QIcon(':/images/opencelerator_logo_no_text.svg'))
         
@@ -197,6 +197,7 @@ class ChartApp(QMainWindow):
             self.figure_manager.trend_cleanup()
         elif self.previous_mode == 1:
             self.figure_manager.data_styling_cleanup()
+            self.event_handlers.reset_data_styling_date_range()
 
     def setup_home_tab(self):
         self.tab_home.setContentsMargins(0, 0, 0, 0)  # Add this line to remove margins from the tab
@@ -290,10 +291,11 @@ class ChartApp(QMainWindow):
 
         # Create and add widgets for each mode
         self.view_mode_widget = chart_mode.ViewModeWidget(self.figure_manager)
-        self.set_manual_mode_widget()  # Initial manual mode widget
+        self.manual_mode_widget = chart_mode.DataModeWidget(self.figure_manager)
         self.phase_mode_widget = chart_mode.PhaseModeWidget(self.figure_manager)
         self.aim_mode_widget = chart_mode.AimModeWidget(self.figure_manager)
         self.trend_mode_widget = chart_mode.TrendModeWidget(self.figure_manager)
+
         self.stacked_widget.addWidget(self.view_mode_widget)
         self.stacked_widget.addWidget(self.manual_mode_widget)
         self.stacked_widget.addWidget(self.phase_mode_widget)
@@ -317,31 +319,22 @@ class ChartApp(QMainWindow):
         files_layout = QVBoxLayout()  # Create a QVBoxLayout instance
         self.files_tab.setLayout(files_layout)  # Set the layout to files_tab
 
-        # Data GroupBox
-        group_box_data = QGroupBox("Raw Data")
-        layout_data = QVBoxLayout()
-        btn_import_delete = QPushButton('Import')
-        btn_import_delete.setToolTip('Replot data from xls, xlsx, ods, or csv')
-        btn_export = QPushButton("Export")
-        btn_export.setToolTip('Export data as csv')
-        layout_data.addWidget(btn_import_delete)
-        layout_data.addWidget(btn_export)
-        group_box_data.setLayout(layout_data)
-        files_layout.addWidget(group_box_data)
-
         # Chart GroupBox
         group_box_chart = QGroupBox("Chart")
         layout_chart = QVBoxLayout()
         btn_new = QPushButton('New')
+        btn_import_delete = QPushButton('Import')
+        btn_import_delete.setToolTip('Raw data from xls, xlsx, ods, or csv')
         btn_load = QPushButton('Load')
         btn_load.setToolTip('Load data and chart configs from json')
         btn_save = QPushButton('Save')
         btn_save.setToolTip('Save data and chart configs as json')
         btn_image = QPushButton('Export')
-        btn_image.setToolTip('Export chart as png, jpeg or pdf')
+        btn_image.setToolTip('Export chart as png, jpeg, pdf, or svg')
         layout_chart.addWidget(btn_new)
         layout_chart.addWidget(btn_load)
         layout_chart.addWidget(btn_save)
+        layout_chart.addWidget(btn_import_delete)
         layout_chart.addWidget(btn_image)
         group_box_chart.setLayout(layout_chart)
         files_layout.addWidget(group_box_chart)
@@ -354,7 +347,7 @@ class ChartApp(QMainWindow):
         lbl_recent_data_imports.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_recent_data_imports.setStyleSheet("font-weight: bold; font-style: normal;")
         self.lst_recent_data_imports = QListWidget()
-        self.lst_recent_data_imports.setFixedHeight(150)
+        self.lst_recent_data_imports.setFixedHeight(200)
         files_layout.addWidget(lbl_recent_data_imports)
         files_layout.addWidget(self.lst_recent_data_imports)
 
@@ -366,7 +359,7 @@ class ChartApp(QMainWindow):
         lbl_recent_charts.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_recent_charts.setStyleSheet("font-weight: bold; font-style: normal;")
         self.lst_recent_charts = QListWidget()
-        self.lst_recent_charts.setFixedHeight(150)
+        self.lst_recent_charts.setFixedHeight(200)
         files_layout.addWidget(lbl_recent_charts)
         files_layout.addWidget(self.lst_recent_charts)
 
@@ -376,7 +369,6 @@ class ChartApp(QMainWindow):
 
         # Button connections
         btn_import_delete.clicked.connect(lambda: self.event_handlers.import_data(None))
-        btn_export.clicked.connect(self.event_handlers.export_data)
         btn_new.clicked.connect(self.files_show_dialog)
         btn_image.clicked.connect(self.event_handlers.save_image)
         btn_save.clicked.connect(self.event_handlers.save_chart)
@@ -479,10 +471,7 @@ class ChartApp(QMainWindow):
         settings_decreasing_frequency_handling.setCurrentIndex(0 if current_value else 1)
 
         settings_decreasing_frequency_handling.currentIndexChanged.connect(
-            lambda index: (
-                self.data_manager.user_preferences.__setitem__('div_deceleration', settings_decreasing_frequency_handling.itemData(index)),
-                self.figure_manager.view_manager.redraw_celeration_fan()
-            )
+            lambda index: self.event_handlers.update_cel_fan(settings_decreasing_frequency_handling.itemData(index))
         )
 
         preferences_group_layout.addWidget(settings_decreasing_frequency_label)
@@ -516,6 +505,7 @@ class ChartApp(QMainWindow):
         self.settings_data_agg.addItem('Sum', 'sum')
         self.settings_data_agg.addItem('Mean', 'mean')
         self.settings_data_agg.addItem('Median', 'median')
+        self.settings_data_agg.addItem('Stack', 'stack')
 
         # Load preference
         current_value = self.data_manager.user_preferences['chart_data_agg']
@@ -602,7 +592,7 @@ class ChartApp(QMainWindow):
         settings_layout.addWidget(other_settings_group)
 
         self.right_dev_btn = QPushButton('Support developer')
-        self.right_dev_btn.setStyleSheet("font-weight: bold; background-color: #96deeb; font-size: 10pt;")
+        self.right_dev_btn.setStyleSheet("font-weight: bold; background-color: #96deeb")
         other_settings_layout.addWidget((self.right_dev_btn))
         self.right_dev_btn.clicked.connect(self.support_dev_btn_clicked)
 
@@ -670,7 +660,7 @@ class ChartApp(QMainWindow):
             self.figure_manager.canvas.mpl_disconnect(self.current_connection)
         if self.mode == 0:  # View mode
             pass  # No interaction
-        elif self.mode == 1:  # Manual mode
+        elif self.mode == 1:  # Data mode
             self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.point_click)
         elif self.mode == 2:  # Phase mode
             self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.phase_click)
@@ -706,6 +696,7 @@ class ChartApp(QMainWindow):
         self.view_mode_widget.dot_est_check.setChecked(settings['dot_est'])
         self.view_mode_widget.x_est_check.setChecked(settings['x_est'])
         self.view_mode_widget.fan_check.setChecked(settings['fan'])
+        self.view_mode_widget.misc_point_check.setChecked(settings['misc'])
 
         # Preventing a double redrawing
         self.view_mode_widget.credit_check.blockSignals(True)
@@ -729,8 +720,7 @@ class ChartApp(QMainWindow):
         self.figure_manager.view_dot_est(settings['dot_est'], refresh=refresh)
         self.figure_manager.view_x_est(settings['x_est'], refresh=refresh)
         self.figure_manager.view_update_celeration_fan(settings['fan'], refresh=refresh)
-
-        # Need to make sure the graph is not redrawn twice when enabling credit for chart type!
+        self.figure_manager.view_misc_points(settings['misc'], refresh=refresh)
 
         self.figure_manager.refresh()  # Only refresh canvas once!
 
@@ -763,55 +753,6 @@ class ChartApp(QMainWindow):
         else:
             event.accept()  # Proceed with the window close if no chart is loaded
 
-    def set_manual_mode_widget(self):
-        # Ensure currentMode is initialized before using it
-        if not hasattr(self, 'currentMode'):
-            self.currentMode = 'view'
-
-        # Always rebuild the widget
-        if self.manual_mode_widget is not None:
-            # Remove the current widget from the stacked widget
-            self.stacked_widget.removeWidget(self.manual_mode_widget)
-
-        # Create a new instance of the specified class
-        chart_type = self.data_manager.user_preferences['chart_type']
-        if chart_type == 'DailyMinute':
-            self.manual_mode_widget = chart_mode.ManualModeWidgetDailyMinute(self.figure_manager)
-        elif chart_type == 'Daily':
-            self.manual_mode_widget = chart_mode.ManualModeWidgetDaily(self.figure_manager)
-        elif chart_type == 'WeeklyMinute':
-            self.manual_mode_widget = chart_mode.ManualModeWidgetWeeklyMinute(self.figure_manager)
-        elif chart_type == 'Weekly':
-            self.manual_mode_widget = chart_mode.ManualModeWidgetWeekly(self.figure_manager)
-        elif chart_type == 'Monthly':
-            self.manual_mode_widget = chart_mode.ManualModeWidgetMonthly(self.figure_manager)
-        elif chart_type == 'MonthlyMinute':
-            self.manual_mode_widget = chart_mode.ManualModeWidgetMonthlyMinute(self.figure_manager)
-        elif chart_type == 'YearlyMinute':
-            self.manual_mode_widget = chart_mode.ManualModeWidgetYearlyMinute(self.figure_manager)
-        elif chart_type == 'Yearly':
-            self.manual_mode_widget = chart_mode.ManualModeWidgetYearly(self.figure_manager)
-        else:
-            print('Unable to find chart type')
-            self.manual_mode_widget = chart_mode.ManualModeWidgetDailyMinute(self.figure_manager)
-
-        # Add the new widget to the stacked widget
-        index = 1  # Assuming manual mode widget is the second widget in the stack
-        self.stacked_widget.insertWidget(index, self.manual_mode_widget)
-
-        # # Safely disconnect the button if it is connected
-        # try:
-        #     self.button_manual.clicked.disconnect()
-        # except TypeError:
-        #     pass  # No connection to disconnect
-
-        # Reconnect the button to the new widget
-        self.button_manual.clicked.connect(lambda: self.change_mode(index))
-
-        # Force an update if manual mode is already selected
-        if self.currentMode == 'manual':
-            self.change_mode(index)
-
 
 class EventHandlers:
     def __init__(self, chart_app, figure_manager, data_manager):
@@ -819,18 +760,26 @@ class EventHandlers:
         self.figure_manager = figure_manager
         self.data_manager = data_manager
 
+    def reset_data_styling_date_range(self):
+        d1 = self.figure_manager.x_to_date[0].strftime(self.data_manager.standard_date_string)
+        d2 = self.figure_manager.x_to_date[max(self.figure_manager.Chart.date_to_pos.values())].strftime(self.data_manager.standard_date_string)
+        self.chart_app.manual_mode_widget.populate_fields_with_defaults()
+        self.chart_app.manual_mode_widget.date_range_label.setText(f'{d1} ~ {d2}')
+
     def show_date_dialog(self):
         dialog = StartDateDialog(self.chart_app)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_start_date = dialog.get_date()
             self.figure_manager.settings_change_start_date(new_start_date)
             self.chart_app.set_interaction_mode()
+            self.reset_data_styling_date_range()
 
     def save_recent(self, file_path, recent_type):
+        max_recent = 10
         if file_path in self.data_manager.user_preferences[recent_type]:
             self.data_manager.user_preferences[recent_type].remove(file_path)
         self.data_manager.user_preferences[recent_type].insert(0, file_path)
-        self.data_manager.user_preferences[recent_type] = self.data_manager.user_preferences[recent_type][:7]
+        self.data_manager.user_preferences[recent_type] = self.data_manager.user_preferences[recent_type][:max_recent]
 
     def import_data(self, file_path):
         if file_path is None:
@@ -846,7 +795,6 @@ class EventHandlers:
                 # Save to recents and refresh list
                 self.save_recent(file_path, 'recent_imports')
                 self.chart_app.refresh_recent_data_imports_list()
-
             except:
                 msg_box = QMessageBox()
                 msg_box.setWindowTitle('Failed to import data')
@@ -863,11 +811,8 @@ class EventHandlers:
         file_name = os.path.basename(file_path)
         self.chart_app.setWindowTitle(f'{self.chart_app.window_title_str} – {file_name}')
 
-    def export_data(self):
-        file_path, _ = QFileDialog.getSaveFileName(self.chart_app, 'Save file', self.data_manager.user_preferences['home_folder'],
-                                                   'CSV files (*.csv);;Excel files (*.xls *.xlsx);;ODS files (*.ods);;All files (*.*)')
-        if file_path:
-            self.data_manager.create_export_file(file_path)
+        # Reset data styling range based new chart
+        self.reset_data_styling_date_range()
 
     def save_image(self):
         dialog = SaveImageDialog(self.chart_app)
@@ -919,10 +864,20 @@ class EventHandlers:
         file_name = os.path.basename(file_path)
         self.chart_app.setWindowTitle(f'{self.chart_app.window_title_str} – {file_name}')
 
+        # Reset data styling range based new chart
+        self.reset_data_styling_date_range()
+
     def update_zero_count_handling(self, bool_type):
         self.data_manager.user_preferences['place_below_floor'] = bool_type
         self.figure_manager.new_chart(self.data_manager.chart_data['start_date'])
         self.chart_app.set_interaction_mode()  # Make sure current mode is enabled for key handling
+
+    def update_cel_fan(self, status):
+        self.data_manager.user_preferences['div_deceleration'] = bool(status)
+        # self.figure_manager.new_chart(self.data_manager.chart_data['start_date'])
+        # self.chart_app.set_interaction_mode()  # Make sure current mode is enabled for key handling
+        self.figure_manager.Chart.change_deceleration_symbol(bool(status))
+        self.figure_manager.refresh()
 
     def set_data_folder(self):
         folder_path = QFileDialog.getExistingDirectory(self.chart_app, "Select Folder", QDir.homePath())
@@ -938,13 +893,15 @@ class EventHandlers:
 
     def change_chart_type(self, index):
         self.figure_manager.change_chart_type(self.chart_app.chart_type_settings_dropdown.itemData(index)),
-        self.chart_app.set_manual_mode_widget()
 
         # Make sure current mode is enabled for key handling
         self.chart_app.set_interaction_mode()
 
         # Update timing and floor checkboxes
         self.chart_app.view_mode_widget.update_timing_checkboxes()
+
+        # Reset data styling range based new chart
+        self.reset_data_styling_date_range()
 
     def change_width(self, new_width):
         self.data_manager.user_preferences['width'] = new_width
@@ -975,7 +932,19 @@ class EventHandlers:
         self.chart_app.trend_adjust_dates()
 
     def point_click(self, event):
-        self.figure_manager.point_on_click(event)
+        self.figure_manager.point_on_click(event)  # Paint temporary magenta lines
+        self.data_adjust_dates()
+
+    def data_adjust_dates(self):
+        result = self.figure_manager.point_adjust_dates()
+        if result:
+            date, order = result
+            new_date = date.strftime(self.data_manager.standard_date_string)
+            d1, sep, d2 = self.chart_app.manual_mode_widget.date_range_label.text().split()
+            if order == 'first':
+                self.chart_app.manual_mode_widget.date_range_label.setText(f'{new_date} {sep} {d2}')
+            elif order == 'second':
+                self.chart_app.manual_mode_widget.date_range_label.setText(f'{d1} {sep} {new_date}')
 
     def test_angle(self, show):
         self.figure_manager.settings_test_angle(show)

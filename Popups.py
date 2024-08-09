@@ -1,7 +1,7 @@
 from resources.resources_rc import *
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QRadioButton, QDialogButtonBox, QGroupBox, QHBoxLayout, QLineEdit, QLabel, QPushButton, QGridLayout, QSpinBox, QScrollArea, QComboBox, QListWidget,
-                               QColorDialog, QListWidgetItem, QDoubleSpinBox, QApplication, QFrame, QStackedLayout)
+                               QColorDialog, QListWidgetItem, QDoubleSpinBox, QApplication, QFrame, QStackedLayout, QTabWidget, QSizePolicy, QWidget, QStackedWidget)
 from PySide6.QtCore import Qt, QUrl, QTimer
 from PySide6.QtGui import QIcon, QDesktopServices, QPixmap, QClipboard
 
@@ -149,7 +149,6 @@ class SaveImageDialog(QDialog):
         self.radio_low.setEnabled(not is_vector_format_selected)
 
 
-
 class StartDateDialog(QDialog):
     def __init__(self, parent=None):
         super(StartDateDialog, self).__init__(parent)
@@ -189,7 +188,7 @@ class StartDateDialog(QDialog):
         # SpinBox for selecting Year
         year_label = QLabel('Year')
         self.year_spinbox = QSpinBox()
-        self.year_spinbox.setRange(current_year - 300, current_year + 300)
+        self.year_spinbox.setRange(1679, 2261)
         self.year_spinbox.setValue(current_year)
         grid_layout.addWidget(year_label, 2, 0)
         grid_layout.addWidget(self.year_spinbox, 2, 1)
@@ -711,8 +710,8 @@ class SupportDevDialog(QDialog):
             "<li>If you use this in an official capacity, please acknowledge by linking to my GitHub: "
             "<a href='https://github.com/SJV-S/OpenCelerator'>https://github.com/SJV-S/OpenCelerator</a></li>"
             "</ul>"
-            "<p>I am also looking for work! I have a PhD in behavior analysis and obviously know a little bit about coding. Will share CV upon request. Contact: "
-            "<a href='mailto:opencelerator.9qpel@simplelogin.com'>opencelerator.9qpel@simplelogin.com</a></p>"
+            "<p>I am also looking for work! I have a PhD in behavior analysis and obviously know a little bit about coding. Happy to relocate. Will share CV upon request.</p>"
+            "<p>Contact: <a href='mailto:opencelerator.9qpel@simplelogin.com'>opencelerator.9qpel@simplelogin.com</a></p>"
         )
 
         scrollArea.setWidget(contentWidget)
@@ -783,7 +782,7 @@ class BitcoinDonationPopup(QDialog):
         first_label = QLabel("Bitcoin (Base chain)", self)
         first_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         first_label.setStyleSheet(
-            "font: normal 10pt Arial; margin: 0; padding: 0; font-size: 15px")  # Ensure the font is not italic
+            "font: normal 10pt; margin: 0; padding: 0")  # Ensure the font is not italic
         self.first_layout.addWidget(first_label)
 
         self.imageLabel1 = QLabel(self)
@@ -806,7 +805,7 @@ class BitcoinDonationPopup(QDialog):
 
         second_label = QLabel("Lightning (LNURL)", self)
         second_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        second_label.setStyleSheet("font: normal 10pt Arial; margin: 0; padding: 0; font-size: 15px")
+        second_label.setStyleSheet("font: normal 10pt; margin: 0; padding: 0; font-size: 15px")
         self.second_layout.addWidget(second_label)
 
         self.imageLabel2 = QLabel(self)
@@ -844,194 +843,5 @@ class BitcoinDonationPopup(QDialog):
         clipboard.setText(address)
         button.setText("Copied!")
         QTimer.singleShot(3000, lambda: button.setText("Copy Address"))
-
-
-class ConfigureDataPointsDialog(QDialog):
-    def __init__(self, figure_manager, parent=None):
-        super().__init__(parent)
-        self.figure_manager = figure_manager
-        self.data_manager = DataManager()
-        x1 = self.figure_manager.data_point_x1 if self.figure_manager.data_point_x1 else 0
-        x2 = self.figure_manager.data_point_x2 if self.figure_manager.data_point_x2 else max(self.figure_manager.Chart.date_to_pos.values())
-
-        date1 = self.figure_manager.x_to_date[x1].strftime(self.data_manager.standard_date_string)
-        date2 = self.figure_manager.x_to_date[x2].strftime(self.data_manager.standard_date_string)
-        self.setWindowTitle(f'Data point styling between {date1} and {date2}')
-        self.setGeometry(300, 300, 400, 400)
-
-        self.marker_style_map = {"Circle": "o", "Square": "s", "Triangle Up": "^", "Triangle Down": "v", "Star": "*",
-                                 "Plus": "+", "X": "x", "Underscore": "_", "NoMarker": ''}
-        self.line_style_map = {"Solid": "-", "Dashed": "--", "Dotted": ":", 'NoLine': ''}
-
-        # Methods
-        self.init_ui()
-        self.populate_fields_with_defaults()
-
-    def init_ui(self):
-        main_layout = QVBoxLayout(self)
-
-        # Top layout for style categories
-        top_layout = QHBoxLayout()
-
-        # Add style categories
-        self.dot_category = self.add_style_category(top_layout, 'Dot', self.data_manager.default_corr_point_style)
-        self.x_category = self.add_style_category(top_layout, 'X', self.data_manager.default_err_point_style)
-        self.floor_category = self.add_style_category(top_layout, 'Floor', self.data_manager.default_floor_point_style)
-
-        main_layout.addLayout(top_layout)
-        self.setLayout(main_layout)
-
-    def add_style_category(self, parent_layout, category_name, default_values):
-        category_group_box = QGroupBox(category_name)
-        category_layout = QVBoxLayout(category_group_box)
-
-        # Choose marker size
-        marker_size_spinbox = QDoubleSpinBox()
-        marker_size_spinbox.setRange(1, 100)
-        marker_size_spinbox.setSingleStep(1)
-        marker_size_spinbox.valueChanged.connect(
-            lambda value, cat=category_name, field='markersize': self.update_data_point_styles(cat, field, value)
-        )
-        category_layout.addWidget(QLabel("Marker Size"))
-        category_layout.addWidget(marker_size_spinbox)
-
-        # Choose marker style
-        marker_style_combobox = QComboBox()
-        marker_style_combobox.addItems(self.marker_style_map.keys())
-        marker_style_combobox.currentTextChanged.connect(
-            lambda value, cat=category_name, field='marker': self.update_data_point_styles(cat, field, self.marker_style_map[value])
-        )
-        category_layout.addWidget(QLabel("Marker Style"))
-        category_layout.addWidget(marker_style_combobox)
-
-        # Marker face color
-        marker_face_color_button = QPushButton("Marker Face Color")
-        marker_face_color_button.clicked.connect(lambda: self.choose_marker_face_color(category_name))
-        category_layout.addWidget(marker_face_color_button)
-
-        # Marker edge color
-        marker_edge_color_button = QPushButton("Marker Edge Color")
-        marker_edge_color_button.clicked.connect(lambda: self.choose_marker_edge_color(category_name))
-        category_layout.addWidget(marker_edge_color_button)
-
-        # Line color
-        line_color_button = QPushButton("Line Color")
-        line_color_button.clicked.connect(lambda: self.choose_line_color(category_name))
-        category_layout.addWidget(line_color_button)
-
-        # Line width
-        line_width_spinbox = QDoubleSpinBox()
-        line_width_spinbox.setRange(0.1, 10.0)
-        line_width_spinbox.setSingleStep(0.1)
-        line_width_spinbox.valueChanged.connect(
-            lambda value, cat=category_name, field='linewidth': self.update_data_point_styles(cat, field, value)
-        )
-        category_layout.addWidget(QLabel("Line Width"))
-        category_layout.addWidget(line_width_spinbox)
-
-        # Line style
-        line_style_combobox = QComboBox()
-        line_style_combobox.addItems(self.line_style_map.keys())
-        line_style_combobox.currentTextChanged.connect(
-            lambda value, cat=category_name, field='linestyle': self.update_data_point_styles(cat, field, self.line_style_map[value])
-        )
-        category_layout.addWidget(QLabel("Line Style"))
-        category_layout.addWidget(line_style_combobox)
-
-        parent_layout.addWidget(category_group_box)
-
-        return {
-            'marker_size_spinbox': marker_size_spinbox,
-            'marker_style_combobox': marker_style_combobox,
-            'marker_face_color_button': marker_face_color_button,
-            'marker_edge_color_button': marker_edge_color_button,
-            'line_color_button': line_color_button,
-            'line_width_spinbox': line_width_spinbox,
-            'line_style_combobox': line_style_combobox
-        }
-
-    def populate_fields_with_defaults(self):
-        self.populate_fields_for_category(self.dot_category, self.data_manager.default_corr_point_style,
-                                          self.marker_style_map, self.line_style_map)
-        self.populate_fields_for_category(self.x_category, self.data_manager.default_err_point_style,
-                                          self.marker_style_map, self.line_style_map)
-        self.populate_fields_for_category(self.floor_category, self.data_manager.default_floor_point_style,
-                                          self.marker_style_map, self.line_style_map)
-
-    def populate_fields_for_category(self, category, default_values, marker_style_map, line_style_map):
-        self.block_signals(category, True)
-        category['marker_size_spinbox'].setValue(default_values['markersize'])
-
-        marker_style_key = next((key for key, value in marker_style_map.items() if value == default_values['marker']),
-                                None)
-        if marker_style_key is not None:
-            index = category['marker_style_combobox'].findText(marker_style_key)
-            category['marker_style_combobox'].setCurrentIndex(index)
-
-        self.set_button_border_style(category['marker_face_color_button'], default_values['marker_face_color'])
-        self.set_button_border_style(category['marker_edge_color_button'], default_values['marker_edge_color'])
-        self.set_button_border_style(category['line_color_button'], default_values['marker_edge_color'])
-        category['line_width_spinbox'].setValue(default_values['linewidth'])
-
-        style_key = next((key for key, value in line_style_map.items() if value == default_values['linestyle']), None)
-        if style_key is not None:
-            index = category['line_style_combobox'].findText(style_key)
-            category['line_style_combobox'].setCurrentIndex(index)
-        self.block_signals(category, False)
-
-    def block_signals(self, category, block):
-        category['marker_size_spinbox'].blockSignals(block)
-        category['marker_style_combobox'].blockSignals(block)
-        category['marker_face_color_button'].blockSignals(block)
-        category['marker_edge_color_button'].blockSignals(block)
-        category['line_color_button'].blockSignals(block)
-        category['line_width_spinbox'].blockSignals(block)
-        category['line_style_combobox'].blockSignals(block)
-
-    def choose_marker_face_color(self, category_name):
-        button = self.get_category(category_name)['marker_face_color_button']
-        self.select_color(button)
-        color = self.get_color(button)
-        self.update_data_point_styles(category_name, 'marker_face_color', color)
-
-    def choose_marker_edge_color(self, category_name):
-        button = self.get_category(category_name)['marker_edge_color_button']
-        self.select_color(button)
-        color = self.get_color(button)
-        self.update_data_point_styles(category_name, 'marker_edge_color', color)
-
-    def choose_line_color(self, category_name):
-        button = self.get_category(category_name)['line_color_button']
-        self.select_color(button)
-        color = self.get_color(button)
-        self.update_data_point_styles(category_name, 'line_color', color)
-
-    def select_color(self, button):
-        color = QColorDialog.getColor()
-        if color.isValid():
-            button.setStyleSheet(f"border: 3px solid {color.name()};")
-
-    def set_button_border_style(self, button, color):
-        button.setStyleSheet(f"border: 3px solid {color};")
-
-    def get_color(self, button):
-        style_sheet = button.styleSheet()
-        if style_sheet:
-            return style_sheet.split(' ')[-1].strip(';')
-        return '#000000'  # Default to black if no color is set
-
-    def get_category(self, category_name):
-        if category_name == 'Dot':
-            return self.dot_category
-        elif category_name == 'X':
-            return self.x_category
-        elif category_name == 'Floor':
-            return self.floor_category
-        return None
-
-    def update_data_point_styles(self, point_category, input_field, value):
-        self.figure_manager.update_point_styles(point_category, input_field, value)
-
-
 
 

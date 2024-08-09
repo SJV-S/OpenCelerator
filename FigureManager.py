@@ -31,6 +31,7 @@ class FigureManager(QWidget):
         self.chart_objects = {'corr_obj': [],
                               'err_obj': [],
                               'floor_obj': [],
+                              'misc_obj': [],
                               'phase_obj': [],
                               'aim_obj': [],
                               'trend_corr_obj': [],
@@ -64,8 +65,6 @@ class FigureManager(QWidget):
         self.trend_est_font = 10
 
         # Data point styling control variables
-        self.data_point_x1 = None
-        self.data_point_x2 = None
         self.x_style_array = None
 
         # Other control variables
@@ -150,6 +149,7 @@ class FigureManager(QWidget):
         self.chart_objects = {'corr_obj': [],
                               'err_obj': [],
                               'floor_obj': [],
+                              'misc_obj': [],
                               'phase_obj': [],
                               'aim_obj': [],
                               'trend_corr_obj': [],
@@ -160,6 +160,7 @@ class FigureManager(QWidget):
                               'trend_err_bounce_obj': [],
                               }
 
+        self.data_manager.get_replot_points(self.Chart.date_to_pos)
         self.create_point_style_arrays()
         self.point_styles_replot()
 
@@ -201,7 +202,7 @@ class FigureManager(QWidget):
                                       y,
                                       zorder=2,
                                       facecolors=self.corr_face_colors,
-                                        edgecolors=self.corr_edge_colors,
+                                      edgecolors=self.corr_edge_colors,
                                       marker='o',
                                       s=self.corr_marker_sizes)
         # Selectively set marker styles
@@ -209,40 +210,75 @@ class FigureManager(QWidget):
 
         self.chart_objects['corr_obj'].append(corr_scatter)
 
-    def create_point_style_arrays(self):
-        corr_style = self.data_manager.default_corr_point_style
-        err_style = self.data_manager.default_err_point_style
-        floor_style = self.data_manager.default_floor_point_style
+    def plot_misc_points(self, x, y):
+        # Remove any previous plot and scatter objects
+        for misc_obj in self.chart_objects['misc_obj']:
+            misc_obj.remove()
+        self.chart_objects['misc_obj'] = []
 
-        x, _ = self.data_manager.get_replot_points(self.Chart.date_to_pos, kind='c')
-        self.x_style_array = np.array(x)
+        # Plot lines without markers
+        for i in range(len(x)):
+            misc_points = self.ax.plot(x[i:i + 2], y[i:i + 2], linestyle=self.misc_line_styles[i], color=self.misc_line_colors[i], linewidth=self.misc_line_width[i])
+            self.chart_objects['misc_obj'].append(misc_points[0])
+
+        # Add chart markers
+        misc_scatter = self.ax.scatter(x,
+                                      y,
+                                      zorder=2,
+                                      facecolors=self.misc_face_colors,
+                                      edgecolors=self.misc_edge_colors,
+                                      marker='o',
+                                      s=self.misc_marker_sizes)
+
+        # Selectively set marker styles
+        misc_scatter.set_paths([MarkerStyle(marker).get_path().transformed(MarkerStyle(marker).get_transform()) for marker in self.misc_markers])
+
+        self.chart_objects['misc_obj'].append(misc_scatter)
+
+    def create_point_style_arrays(self):
+        corr_style = self.data_manager.user_preferences['corr_style']
+        err_style = self.data_manager.user_preferences['err_style']
+        floor_style = self.data_manager.user_preferences['floor_style']
+        misc_style = self.data_manager.user_preferences['misc_style']
+
+        x = self.data_manager.df_plot.shape[0]
+        self.x_style_array = np.arange(x)
 
         # Set all default styles for corr
-        self.corr_face_colors = np.full(x.shape, corr_style['marker_face_color'], dtype=object)
-        self.corr_edge_colors = np.full(x.shape, corr_style['marker_edge_color'], dtype=object)
-        self.corr_markers = np.full(x.shape, corr_style['marker'], dtype=object)
-        self.corr_marker_sizes = np.full(x.shape, corr_style['markersize'], dtype=float)
-        self.corr_line_styles = np.full(x.shape, corr_style['linestyle'], dtype=object)
-        self.corr_line_colors = np.full(x.shape, corr_style['line_color'], dtype=object)
-        self.corr_line_width = np.full(x.shape, corr_style['linewidth'], dtype=object)
+        self.corr_face_colors = np.full(x, corr_style['marker_face_color'], dtype=object)
+        self.corr_edge_colors = np.full(x, corr_style['marker_edge_color'], dtype=object)
+        self.corr_markers = np.full(x, corr_style['marker'], dtype=object)
+        self.corr_marker_sizes = np.full(x, corr_style['markersize'], dtype=float)
+        self.corr_line_styles = np.full(x, corr_style['linestyle'], dtype=object)
+        self.corr_line_colors = np.full(x, corr_style['line_color'], dtype=object)
+        self.corr_line_width = np.full(x, corr_style['linewidth'], dtype=object)
 
         # Set all default styles for err
-        self.err_face_colors = np.full(x.shape, err_style['marker_face_color'], dtype=object)
-        self.err_edge_colors = np.full(x.shape, err_style['marker_edge_color'], dtype=object)
-        self.err_markers = np.full(x.shape, err_style['marker'], dtype=object)
-        self.err_marker_sizes = np.full(x.shape, err_style['markersize'], dtype=float)
-        self.err_line_styles = np.full(x.shape, err_style['linestyle'], dtype=object)
-        self.err_line_colors = np.full(x.shape, err_style['line_color'], dtype=object)
-        self.err_line_width = np.full(x.shape, err_style['linewidth'], dtype=object)
+        self.err_face_colors = np.full(x, err_style['marker_face_color'], dtype=object)
+        self.err_edge_colors = np.full(x, err_style['marker_edge_color'], dtype=object)
+        self.err_markers = np.full(x, err_style['marker'], dtype=object)
+        self.err_marker_sizes = np.full(x, err_style['markersize'], dtype=float)
+        self.err_line_styles = np.full(x, err_style['linestyle'], dtype=object)
+        self.err_line_colors = np.full(x, err_style['line_color'], dtype=object)
+        self.err_line_width = np.full(x, err_style['linewidth'], dtype=object)
 
         # Set all default styles for floor
-        self.floor_face_colors = np.full(x.shape, floor_style['marker_face_color'], dtype=object)
-        self.floor_edge_colors = np.full(x.shape, floor_style['marker_edge_color'], dtype=object)
-        self.floor_markers = np.full(x.shape, floor_style['marker'], dtype=object)
-        self.floor_marker_sizes = np.full(x.shape, floor_style['markersize'], dtype=float)
-        self.floor_line_styles = np.full(x.shape, floor_style['linestyle'], dtype=object)
-        self.floor_line_colors = np.full(x.shape, floor_style['line_color'], dtype=object)
-        self.floor_line_width = np.full(x.shape, floor_style['linewidth'], dtype=object)
+        self.floor_face_colors = np.full(x, floor_style['marker_face_color'], dtype=object)
+        self.floor_edge_colors = np.full(x, floor_style['marker_edge_color'], dtype=object)
+        self.floor_markers = np.full(x, floor_style['marker'], dtype=object)
+        self.floor_marker_sizes = np.full(x, floor_style['markersize'], dtype=float)
+        self.floor_line_styles = np.full(x, floor_style['linestyle'], dtype=object)
+        self.floor_line_colors = np.full(x, floor_style['line_color'], dtype=object)
+        self.floor_line_width = np.full(x, floor_style['linewidth'], dtype=object)
+
+        # Set all default styles for misc
+        self.misc_face_colors = np.full(x, misc_style['marker_face_color'], dtype=object)
+        self.misc_edge_colors = np.full(x, misc_style['marker_edge_color'], dtype=object)
+        self.misc_markers = np.full(x, misc_style['marker'], dtype=object)
+        self.misc_marker_sizes = np.full(x, misc_style['markersize'], dtype=float)
+        self.misc_line_styles = np.full(x, misc_style['linestyle'], dtype=object)
+        self.misc_line_colors = np.full(x, misc_style['line_color'], dtype=object)
+        self.misc_line_width = np.full(x, misc_style['linewidth'], dtype=object)
 
     def safe_eval_tuple(self, date_tuple_str):
         # Check if the string matches either of the expected patterns
@@ -251,24 +287,64 @@ class FigureManager(QWidget):
         else:
             raise ValueError("Invalid tuple string format")
 
+    def x_to_row_num(self, x_min, x_max, df):
+        row_min = None
+        row_max = None
+
+        # Finding row_min
+        while x_min >= 0:
+            if x_min in df['x'].values:
+                row_min = df[df['x'] == x_min].index[0]
+                break
+            x_min -= 1
+        if row_min is None:
+            row_min = df.index.min()
+
+        # Finding row_max
+        max_x = df['x'].max()
+        while x_max <= max_x:
+            if x_max in df['x'].values:
+                row_max = df[df['x'] == x_max].index[-1]
+                break
+            x_max += 1
+        if row_max is None:
+            row_max = df.index.max()
+
+        return row_min, row_max
+
     def point_styles_replot(self):
         for date_pair_str in self.data_manager.chart_data['data_point_styles'].keys():
             date1, date2 = self.safe_eval_tuple(date_pair_str)
-
             d1 = pd.to_datetime(date1)
             d2 = pd.to_datetime(date2)
-            if d1 in self.Chart.date_to_pos.keys() or d2 in self.Chart.date_to_pos.keys():
 
-                # If one of the dates are outside the range
-                if d1 not in self.Chart.date_to_pos.keys():
-                    d1 = min(self.Chart.date_to_pos.keys())
-                if d2 not in self.Chart.date_to_pos.keys():
-                    d2 = max(self.Chart.date_to_pos.keys())
+            chart_dates = self.Chart.date_to_pos.keys()
 
-                x_min = self.Chart.date_to_pos[d1]
-                x_max = self.Chart.date_to_pos[d2]
+            # Ensures styling is applied across chart types with different sets of dates
+            min_date = min(chart_dates)
+            max_date = max(chart_dates)
+            if d1 not in chart_dates and min_date <= d1 <= max_date:
+                d1 = min(chart_dates, key=lambda d: abs(d - d1))
+            if d2 not in chart_dates and min_date <= d2 <= max_date:
+                d2 = min(chart_dates, key=lambda d: abs(d - d2))
 
-                # Get slice
+            if d1 in chart_dates or d2 in chart_dates:
+
+                # If one of the dates is outside the range
+                if d1 not in chart_dates:
+                    d1 = min(chart_dates)
+                if d2 not in chart_dates:
+                    d2 = max(chart_dates)
+
+                x1 = self.Chart.date_to_pos[d1]
+                x2 = self.Chart.date_to_pos[d2]
+                x_max = max(x1, x2)
+                x_min = min(x1, x2)
+
+                # Get convert x to row number (became necessary when stacking was introduced)
+                df = self.data_manager.df_plot
+                x_min, x_max = self.x_to_row_num(x_min, x_max, df)
+
                 subset_mask = (self.x_style_array >= x_min) & (self.x_style_array <= x_max)
                 subset_mask_non_inclusive = (self.x_style_array >= x_min) & (self.x_style_array < x_max)
 
@@ -323,100 +399,163 @@ class FigureManager(QWidget):
                         elif input_field == 'linestyle':
                             self.floor_line_styles[subset_mask_non_inclusive] = value
 
-        # Apply styles
-        x, y = self.data_manager.get_replot_points(self.Chart.date_to_pos, kind='c')
-        if len(y) > 0:
-            self.plot_corr_points(x, y)
+                    elif point_category == 'Misc':
+                        if input_field == 'marker_face_color':
+                            self.misc_face_colors[subset_mask] = value
+                        elif input_field == 'marker_edge_color':
+                            self.misc_edge_colors[subset_mask] = value
+                        elif input_field == 'marker':
+                            self.misc_markers[subset_mask] = value
+                        elif input_field == 'markersize':
+                            self.misc_marker_sizes[subset_mask] = value
+                        elif input_field == 'linewidth':
+                            self.misc_line_width[subset_mask] = value
+                        elif input_field == 'line_color':
+                            self.misc_line_colors[subset_mask] = value
+                        elif input_field == 'linestyle':
+                            self.misc_line_styles[subset_mask_non_inclusive] = value
 
-        x, y = self.data_manager.get_replot_points(self.Chart.date_to_pos, kind='i')
+        # Apply styles
+        df = self.data_manager.df_plot
+        x = df['x'].to_numpy()
+        y = df['corr_freq'].to_numpy()
+        if len(y) > 0:
+            self.plot_corr_points(x, df['corr_freq'].to_numpy())
+
+        y = df['err_freq'].to_numpy()
         if len(y) > 0:
             self.plot_err_points(x, y)
 
-        x, y = self.data_manager.get_replot_points(self.Chart.date_to_pos, kind='m')
+        y = df['floor'].to_numpy()
         if len(y) > 0:
             self.plot_floor_points(x, y)
+
+        # Don't plot if all zeros or empty
+        y = df['o'].to_numpy()
+        if not (y == 0).all() and len(y) > 0:
+            self.plot_misc_points(x, y)
 
     def update_point_styles(self, point_category, input_field, value):
-        # Get slice boundaries
-        x1 = self.data_point_x1 if self.data_point_x1 is not None else 0
-        x2 = self.data_point_x2 if self.data_point_x2 is not None else max(self.Chart.date_to_pos.values())
-        x_min = min(x1, x2)
-        x_max = max(x1, x2)
+        df = self.data_manager.df_plot
 
-        # Get slices
-        subset_mask = (self.x_style_array >= x_min) & (self.x_style_array <= x_max)
-        subset_mask_non_inclusive = (self.x_style_array >= x_min) & (self.x_style_array < x_max)
+        if df is not None:
 
-        if point_category == 'Dot':
-            if input_field == 'marker_face_color':
-                self.corr_face_colors[subset_mask] = value
-            elif input_field == 'marker_edge_color':
-                self.corr_edge_colors[subset_mask] = value
-            elif input_field == 'marker':
-                self.corr_markers[subset_mask] = value
-            elif input_field == 'markersize':
-                self.corr_marker_sizes[subset_mask] = value
-            elif input_field == 'linewidth':
-                self.corr_line_width[subset_mask] = value
-            elif input_field == 'line_color':
-                self.corr_line_colors[subset_mask] = value
-            elif input_field == 'linestyle':
-                self.corr_line_styles[subset_mask_non_inclusive] = value
+            # Get slice boundaries
+            if self.manual_manager.point_temp_first_marker is not None:
+                x1 = self.manual_manager.point_temp_first_marker.get_xdata()[0]
+            else:
+                x1 = 0
 
-            # Apply corr style changes
-            x, y = self.data_manager.get_replot_points(self.Chart.date_to_pos, kind='c')
-            self.plot_corr_points(x, y)
+            if self.manual_manager.point_temp_second_marker is not None:
+                x2 = self.manual_manager.point_temp_second_marker.get_xdata()[0]
+            else:
+                x2 = max(self.Chart.date_to_pos.values())
 
-        if point_category == 'X':
-            if input_field == 'marker_face_color':
-                self.err_face_colors[subset_mask] = value
-            elif input_field == 'marker_edge_color':
-                self.err_edge_colors[subset_mask] = value
-            elif input_field == 'marker':
-                self.err_markers[subset_mask] = value
-            elif input_field == 'markersize':
-                self.err_marker_sizes[subset_mask] = value
-            elif input_field == 'linewidth':
-                self.err_line_width[subset_mask] = value
-            elif input_field == 'line_color':
-                self.err_line_colors[subset_mask] = value
-            elif input_field == 'linestyle':
-                self.err_line_styles[subset_mask_non_inclusive] = value
+            # Get start and end
+            x_min = min(x1, x2)
+            x_max = max(x1, x2)
 
-            # Apply err style changes
-            x, y = self.data_manager.get_replot_points(self.Chart.date_to_pos, kind='i')
-            self.plot_err_points(x, y)
+            # Convert x to row number (became necessary when stacking was introduced)
+            x_min, x_max = self.x_to_row_num(x_min, x_max, df)
 
-        if point_category == 'Floor':
-            if input_field == 'marker_face_color':
-                self.floor_face_colors[subset_mask] = value
-            elif input_field == 'marker_edge_color':
-                self.floor_edge_colors[subset_mask] = value
-            elif input_field == 'marker':
-                self.floor_markers[subset_mask] = value
-            elif input_field == 'markersize':
-                self.floor_marker_sizes[subset_mask] = value
-            elif input_field == 'linewidth':
-                self.floor_line_width[subset_mask] = value
-            elif input_field == 'line_color':
-                self.floor_line_colors[subset_mask] = value
-            elif input_field == 'linestyle':
-                self.floor_line_styles[subset_mask_non_inclusive] = value
+            # Get slices
+            subset_mask = (self.x_style_array >= x_min) & (self.x_style_array <= x_max)
+            subset_mask_non_inclusive = (self.x_style_array >= x_min) & (self.x_style_array < x_max)
 
-            # Apply floor style changes
-            x, y = self.data_manager.get_replot_points(self.Chart.date_to_pos, kind='m')
-            self.plot_floor_points(x, y)
+            # Get data
+            df = self.data_manager.df_plot
+            x = df['x'].to_numpy()
+            y_corr = df['corr_freq'].to_numpy()
+            y_err = df['err_freq'].to_numpy()
+            y_floor = df['floor'].to_numpy()
+            y_misc = df['o'].to_numpy()
 
-        self.refresh()
+            if point_category == 'Dot':
+                if input_field == 'marker_face_color':
+                    self.corr_face_colors[subset_mask] = value
+                elif input_field == 'marker_edge_color':
+                    self.corr_edge_colors[subset_mask] = value
+                elif input_field == 'marker':
+                    self.corr_markers[subset_mask] = value
+                elif input_field == 'markersize':
+                    self.corr_marker_sizes[subset_mask] = value
+                elif input_field == 'linewidth':
+                    self.corr_line_width[subset_mask] = value
+                elif input_field == 'line_color':
+                    self.corr_line_colors[subset_mask] = value
+                elif input_field == 'linestyle':
+                    self.corr_line_styles[subset_mask_non_inclusive] = value
 
-        # Save style configuration
-        date1 = self.x_to_date[x1].strftime(self.data_manager.standard_date_string)
-        date2 = self.x_to_date[x2].strftime(self.data_manager.standard_date_string)
-        date1_date2_str = str((date1, date2))
-        point_category_input_field_str = str((point_category, input_field))
-        if date1_date2_str not in self.data_manager.chart_data['data_point_styles'].keys():
-            self.data_manager.chart_data['data_point_styles'][date1_date2_str] = {}
-        self.data_manager.chart_data['data_point_styles'][date1_date2_str][point_category_input_field_str] = value
+                # Apply corr style changes
+                self.plot_corr_points(x, y_corr)
+
+            if point_category == 'X':
+                if input_field == 'marker_face_color':
+                    self.err_face_colors[subset_mask] = value
+                elif input_field == 'marker_edge_color':
+                    self.err_edge_colors[subset_mask] = value
+                elif input_field == 'marker':
+                    self.err_markers[subset_mask] = value
+                elif input_field == 'markersize':
+                    self.err_marker_sizes[subset_mask] = value
+                elif input_field == 'linewidth':
+                    self.err_line_width[subset_mask] = value
+                elif input_field == 'line_color':
+                    self.err_line_colors[subset_mask] = value
+                elif input_field == 'linestyle':
+                    self.err_line_styles[subset_mask_non_inclusive] = value
+
+                # Apply err style changes
+                self.plot_err_points(x, y_err)
+
+            if point_category == 'Floor':
+                if input_field == 'marker_face_color':
+                    self.floor_face_colors[subset_mask] = value
+                elif input_field == 'marker_edge_color':
+                    self.floor_edge_colors[subset_mask] = value
+                elif input_field == 'marker':
+                    self.floor_markers[subset_mask] = value
+                elif input_field == 'markersize':
+                    self.floor_marker_sizes[subset_mask] = value
+                elif input_field == 'linewidth':
+                    self.floor_line_width[subset_mask] = value
+                elif input_field == 'line_color':
+                    self.floor_line_colors[subset_mask] = value
+                elif input_field == 'linestyle':
+                    self.floor_line_styles[subset_mask_non_inclusive] = value
+
+                # Apply floor style changes
+                self.plot_floor_points(x, y_floor)
+
+            if point_category == 'Misc':
+                if input_field == 'marker_face_color':
+                    self.misc_face_colors[subset_mask] = value
+                elif input_field == 'marker_edge_color':
+                    self.misc_edge_colors[subset_mask] = value
+                elif input_field == 'marker':
+                    self.misc_markers[subset_mask] = value
+                elif input_field == 'markersize':
+                    self.misc_marker_sizes[subset_mask] = value
+                elif input_field == 'linewidth':
+                    self.misc_line_width[subset_mask] = value
+                elif input_field == 'line_color':
+                    self.misc_line_colors[subset_mask] = value
+                elif input_field == 'linestyle':
+                    self.misc_line_styles[subset_mask_non_inclusive] = value
+
+                # Apply err style changes
+                self.plot_misc_points(x, y_misc)
+
+            self.refresh()
+
+            # Save style configuration
+            date1 = self.x_to_date[x1].strftime(self.data_manager.standard_date_string)
+            date2 = self.x_to_date[x2].strftime(self.data_manager.standard_date_string)
+            date1_date2_str = str((date1, date2))
+            point_category_input_field_str = str((point_category, input_field))
+            if date1_date2_str not in self.data_manager.chart_data['data_point_styles'].keys():
+                self.data_manager.chart_data['data_point_styles'][date1_date2_str] = {}
+            self.data_manager.chart_data['data_point_styles'][date1_date2_str][point_category_input_field_str] = value
 
     def plot_err_points(self, x, y):
         # Assumes x are integers
@@ -561,7 +700,7 @@ class FigureManager(QWidget):
 
             result = self.data_manager.get_trend(xmin, xmax, corr, self.Chart.date_to_pos, self.Chart.x_to_day_count, trend['fit_method'], trend['bounce_envelope'])
             if result:
-                trend_vals, trend_est, x_slice, upper_bounce, lower_bounce, bounce_est_label = result
+                trend_vals, trend_est, x_slice, upper_bounce, lower_bounce, bounce_est_label, x_min_lim, x_max_lim = result
 
                 trend_line, = self.ax.plot(x_slice,
                                            trend_vals,
@@ -678,6 +817,9 @@ class FigureManager(QWidget):
     def view_floor(self, show, refresh=True):
         self.view_manager.view_floor(show, refresh)
 
+    def view_misc_points(self, show, refresh=True):
+        self.view_manager.view_misc_points(show, refresh)
+
     def view_floor_grid(self, show, refresh=True):
         self.view_manager.view_floor_grid(show, refresh)
 
@@ -717,13 +859,8 @@ class FigureManager(QWidget):
         self.trend_manager.trend_on_click(event)
 
     def point_on_click(self, event):
-        result = self.manual_manager.point_on_click(event)
-        if result:
-            x_i, num = result
-            if num == 0:
-                self.data_point_x1 = x_i
-            else:
-                self.data_point_x2 = x_i
+        self.manual_manager.point_on_click(event)
+
 
     def plot_trend_line(self, x_slice, trend_vals, color):
         trend_line = self.trend_manager.plot_trend_line(x_slice, trend_vals, color)
@@ -765,6 +902,12 @@ class FigureManager(QWidget):
 
     def trend_adjust_dates(self):
         result = self.trend_manager.adjust_dates()
+        if result:
+            date, order = result
+            return date, order
+
+    def point_adjust_dates(self):
+        result = self.manual_manager.adjust_dates()
         if result:
             date, order = result
             return date, order
@@ -851,6 +994,10 @@ class FigureManager(QWidget):
         df['d'] = pd.to_datetime(df['d'])  # Convert back to a datetime column with no time or timezone information
         self.data_manager.chart_data['raw_df'] = df
 
+        # Ensure backwards compatibility for missing o
+        if 'o' not in df.columns:
+            df['o'] = 0  # Add the column with zeros
+
         # Generate chart
         self.new_chart(start_date=start_date)
 
@@ -863,7 +1010,7 @@ class FigureManager(QWidget):
         self.new_chart(start_date=self.data_manager.chart_data['start_date'])
 
     def data_styling_cleanup(self):
-        self.manual_manager.manual_clean_up()
+        self.manual_manager.manual_cleanup()
 
 
 class PhaseManager:
@@ -1099,9 +1246,10 @@ class TrendManager:
                     self.trend_second_click_x = x
 
             if self.trend_temp_fit_on:
-                y = event.ydata
-                self.trend_temp_est.set_position((x, y))
-                self.figure_manager.refresh()
+                if event.ydata is not None:
+                    y = event.ydata
+                    self.trend_temp_est.set_position((x, y))
+                    self.figure_manager.refresh()
             else:
                 if self.trend_first_click_x is not None and self.trend_second_click_x is None:
                     self.plot_trend_temp_first_marker(self.trend_first_click_x)
@@ -1195,18 +1343,17 @@ class TrendManager:
     def trend_fit(self, corr):
         if self.trend_temp_first_marker and self.trend_temp_second_marker and self.trend_temp_line is None:
 
-            self.trend_temp_fit_on = True
-
             x1 = self.trend_temp_first_marker.get_xdata()[0]
             x2 = self.trend_temp_second_marker.get_xdata()[0]
 
             result = self.figure_manager.data_manager.get_trend(x1, x2, corr, self.figure_manager.Chart.date_to_pos, self.figure_manager.Chart.x_to_day_count)
             if result:
-                trend_vals, cel_slope_label, x_slice, upper_bounce, lower_bounce, bounce_est_label = result
+                trend_vals, cel_slope_label, x_slice, upper_bounce, lower_bounce, bounce_est_label, x_min_lim, x_max_lim = result
+                self.trend_temp_fit_on = True
 
-                # Will tightened the date range
-                self.trend_temp_first_marker.set_xdata([x_slice[0]])
-                self.trend_temp_second_marker.set_xdata([x_slice[-1]])
+                # # Will tightened the date range
+                self.trend_temp_first_marker.set_xdata([x_min_lim])
+                self.trend_temp_second_marker.set_xdata([x_max_lim])
 
                 self.plot_trend_line(x_slice, trend_vals, 'magenta')
                 self.plot_trend_est(np.mean(x_slice), np.mean(trend_vals), cel_slope_label, 'magenta')
@@ -1401,6 +1548,13 @@ class ViewManager:
         if refresh:
             self.figure_manager.refresh()
 
+    def view_misc_points(self, show, refresh):
+        self.figure_manager.data_manager.chart_data['view_check']['misc'] = bool(show)
+        for misc_obj in self.figure_manager.chart_objects['misc_obj']:
+            misc_obj.set_visible(show)
+        if refresh:
+            self.figure_manager.refresh()
+
     def view_floor_grid(self, show, refresh=True):
         self.figure_manager.Chart.floor_grid_lines(show)
         self.figure_manager.data_manager.update_view_check('timing_grid', show)
@@ -1453,15 +1607,6 @@ class ViewManager:
         if refresh:
             self.figure_manager.refresh()
 
-    def redraw_celeration_fan(self):
-        # When the divisor or multiple needs to update without manual chart type switching
-        if self.figure_manager.fan_ax and self.figure_manager.data_manager.chart_data['view_check']['fan']:
-            self.figure_manager.fan_ax.remove()
-            div_decrease = self.figure_manager.data_manager.user_preferences['div_deceleration']
-            chart_type = self.figure_manager.data_manager.user_preferences['chart_type']
-            self.figure_manager.fan_ax = self.figure_manager.Chart.add_cel_fan(chart_type, div_decrease)
-            self.figure_manager.refresh()
-
     def view_update_credit_lines(self, row1, row2, row3):
         # Clean up previous credit lines
         if self.figure_manager.credit_lines_object:
@@ -1486,79 +1631,21 @@ class ManualManager:
         self.point_first_click_x = None
         self.point_second_click_x = None
 
+    def adjust_dates(self):
+        if self.point_current_temp_marker == 'first':
+            x1 = self.point_temp_first_marker.get_xdata()[0]
+            d1 = self.figure_manager.x_to_date[x1]
+            return d1, 'first'
+        elif self.point_current_temp_marker == 'second':
+            x2 = self.point_temp_second_marker.get_xdata()[0]
+            d2 = self.figure_manager.x_to_date[x2]
+            return d2, 'second'
+
     def safe_float_convert(self, input):
         try:
             return float(input)
         except ValueError:
             return 0.0
-
-    def manual_plot_form_minutes(self, count, hour, min_, sec, date):
-        count = self.safe_float_convert(count)
-        hour = self.safe_float_convert(hour)
-        min_ = self.safe_float_convert(min_)
-        sec = self.safe_float_convert(sec)
-
-        # Plot data point
-        date = pd.to_datetime(date, format='%d-%m-%Y')
-
-        total_minutes = hour * 60 + min_ + sec / 60
-
-        if date in self.figure_manager.Chart.date_to_pos.keys() and total_minutes > 0:
-            self.figure_manager.data_manager.update_dataframe(date, total_minutes, count, self.figure_manager.point_type)
-
-            self.figure_manager.create_point_style_arrays()
-
-            x, y = self.figure_manager.data_manager.get_replot_points(self.figure_manager.Chart.date_to_pos, kind='c')
-            self.figure_manager.plot_corr_points(x, y)
-            x, y = self.figure_manager.data_manager.get_replot_points(self.figure_manager.Chart.date_to_pos, kind='i')
-            self.figure_manager.plot_err_points(x, y)
-            x, y = self.figure_manager.data_manager.get_replot_points(self.figure_manager.Chart.date_to_pos, kind='m')
-            self.figure_manager.plot_floor_points(x, y)
-
-            self.figure_manager.create_point_style_arrays()  # Had to run it a second time
-            self.figure_manager.point_styles_replot()
-
-            self.figure_manager.refresh()
-
-    def manual_plot_form_date(self, count, date):
-        # Plot data point
-        date = pd.to_datetime(date, format='%d-%m-%Y')
-        count = self.safe_float_convert(count)
-        total_minutes = 1
-
-        if date in self.figure_manager.Chart.date_to_pos.keys():
-            self.figure_manager.data_manager.update_dataframe(date, total_minutes, count, self.figure_manager.point_type)
-
-            self.figure_manager.create_point_style_arrays()
-
-            x, y = self.figure_manager.data_manager.get_replot_points(self.figure_manager.Chart.date_to_pos, kind='c')
-            self.figure_manager.plot_corr_points(x, y)
-            x, y = self.figure_manager.data_manager.get_replot_points(self.figure_manager.Chart.date_to_pos, kind='i')
-            self.figure_manager.plot_err_points(x, y)
-            x, y = self.figure_manager.data_manager.get_replot_points(self.figure_manager.Chart.date_to_pos, kind='m')
-            self.figure_manager.plot_floor_points(x, y)
-
-            self.figure_manager.create_point_style_arrays()  # Had to run it a second time
-            self.figure_manager.point_styles_replot()
-
-            self.figure_manager.refresh()
-
-    def manual_undo_point(self):
-        df = self.figure_manager.data_manager.chart_data['raw_df']
-        if not df.empty:
-            # Pop the latest row
-            self.figure_manager.data_manager.chart_data['raw_df'] = df[:-1]
-            self.figure_manager.create_point_style_arrays()
-
-            # Get new plot objects
-            x, y = self.figure_manager.data_manager.get_replot_points(self.figure_manager.Chart.date_to_pos, kind='c')
-            self.figure_manager.plot_corr_points(x, y)
-            x, y = self.figure_manager.data_manager.get_replot_points(self.figure_manager.Chart.date_to_pos, kind='i')
-            self.figure_manager.plot_err_points(x, y)
-            x, y = self.figure_manager.data_manager.get_replot_points(self.figure_manager.Chart.date_to_pos, kind='m')
-            self.figure_manager.plot_floor_points(x, y)
-
-            self.figure_manager.refresh()
 
     def plot_point_temp_first_marker(self, x_i):
         self.point_current_temp_marker = 'first'
@@ -1592,7 +1679,7 @@ class ManualManager:
                     self.plot_point_temp_second_marker(self.point_second_click_x)
                     return self.point_second_click_x, 1
 
-    def manual_clean_up(self):
+    def manual_cleanup(self):
         if self.point_temp_first_marker:
             self.point_temp_first_marker.remove()
         if self.point_temp_second_marker:
@@ -1602,8 +1689,6 @@ class ManualManager:
         self.point_current_temp_marker = None
         self.point_first_click_x = None
         self.point_second_click_x = None
-        self.figure_manager.data_point_x1 = None
-        self.figure_manager.data_point_x2 = None
 
         self.figure_manager.refresh()
 

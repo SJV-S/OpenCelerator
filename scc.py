@@ -1,9 +1,12 @@
 import matplotlib.pyplot as plt
 from matplotlib import transforms
 import matplotlib.font_manager as font_manager
+import platform
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import numpy as np
 import pandas as pd
+import os
+import sys
 
 
 class Chart:
@@ -21,10 +24,10 @@ class Chart:
         self.major_grid_width = 0.1555 * width
         self.x_tick_length = width * 0.666
         self.style_color = style_color
-        self.font = self.select_font()
-        self.general_fontsize = width * 1.33
+        self.font = self.get_system_font()
+        self.general_fontsize = width * 1.2
         self.credit_fontsize = width * 0.92
-        self.right_y_axis_fontsize = width
+        self.right_y_axis_fontsize = width * 0.85
         self.top_x_label_pad = width * 1
 
         # Chart margin spacing
@@ -37,14 +40,16 @@ class Chart:
             self.space_top = 0.85
             self.space_bottom = 0.14
 
-        # Fan dict
-        self.fan_dict = {'DailyMinute': (-14, 0.1, "per week"),
+        # Fan control variables
+        self.div_text_objects = []
+        self.mult_text_objects = []
+        self.fan_dict = {'DailyMinute': (-15, 0.1, "per week"),
                     'Daily': (158, 14500, "per week"),
-                    'WeeklyMinute': (-10, 0.1, "per month"),
+                    'WeeklyMinute': (-11, 0.1, "per month"),
                     'Weekly': (113, 14500, "per month"),
-                    'MonthlyMinute': (-12, 0.1, 'per 6 months'),
+                    'MonthlyMinute': (-13, 0.1, 'per 6 months'),
                     'Monthly': (135.5, 14500, 'per 6 months'),
-                    'YearlyMinute': (-10, 0.1, 'per 5 years'),
+                    'YearlyMinute': (-11, 0.1, 'per 5 years'),
                     'Yearly': (113, 14500, 'per 5 years'),
                     }
 
@@ -60,14 +65,16 @@ class Chart:
                 else:
                     self.start_date = pd.to_datetime(self.start_date)
 
-    def select_font(self):
-        desired_fonts = ["Liberation Sans", "Arial", "Helvetica", "sans-serif"]
-        available_fonts = set(f.name for f in font_manager.fontManager.ttflist)
-
-        for font in desired_fonts:
-            if font in available_fonts:
-                return font
-        return "sans-serif"
+    def get_system_font(self):
+        os_name = platform.system()
+        if os_name == "Windows":
+            return "Tahoma"
+        elif os_name == "Darwin":  # macOS
+            return "Tahoma"
+        elif os_name == "Linux":
+            return "DejaVu Sans"
+        else:
+            return "Sans-serif"
 
     def major_grid_lines(self, grid_on):
         for line in self.major_grid_line_objects:
@@ -124,9 +131,13 @@ class Chart:
                 g3 = self.ax.axhline(power, color=self.custom_grid_color, linewidth=self.major_grid_width * 0.5, visible=True, zorder=1)
                 self.major_grid_line_objects.append(g3)
 
-    def add_cel_fan(self, chart_type, div_decrease, line_length=0.95, text_pos=0.70, num_dec=1):
+    def add_cel_fan(self, chart_type, div_decrease, line_length=0.95, text_pos=0.70):
         def getAngle(celeration):
             return np.degrees(np.atan(np.log10(celeration) / (np.log10(2) / np.tan(np.radians(34)))))
+
+        # Clear any previous text objects
+        self.div_text_objects = []
+        self.mult_text_objects = []
 
         x, y, per_unit_str = self.fan_dict[chart_type]
         fig_width = self.width * 10
@@ -156,35 +167,49 @@ class Chart:
         inset_ax.set_ylim(ymin, ymax)  # Set limits for y-axis.
         inset_ax.axis('off')  # Don't show the coordinate system.
 
-        # Example celeration values
+        # Standard celeration values
         cels = [2 ** (1 / 2), 2, 4, 16]
         cels = cels + [1] + [1 / c for c in cels]
 
-        for c in cels:
+        # Celeration labels
+        div_strs = ['x16', 'x4', 'x2', 'x1.4', 'x1', '÷1.4', '÷2', '÷4', '÷16']
+        mult_strs = ['x16', 'x4', 'x2', 'x1.4', 'x1', 'x0.71', 'x0.5', 'x0.25', 'x0.06']
+        cels = sorted(cels, reverse=True)
+
+        for c, div_text, mult_text in zip(cels, div_strs, mult_strs):
             angle = getAngle(c)
             x = np.cos(np.radians(angle))
             y = np.sin(np.radians(angle))
             inset_ax.plot([0, line_length * x], [0, line_length * y], color=self.custom_grid_color, linewidth=1)
 
-            if c >= 1 or not div_decrease:
-                num = lambda value: int(c) if value == int(c) else round(value, num_dec)
-                text = 'x' + str(num(c)).ljust(3)  # Call the lambda function with `c`
-            else:
-                num = lambda value: int(1 / c) if value == int(1 / c) else round(value, num_dec)
-                text = '÷' + str(num(1 / c)).ljust(3)  # Call the lambda function with `1 / c`
-
-            inset_ax.text(text_pos * x, text_pos * y, text, color=self.custom_grid_color, backgroundcolor='white',
+            div_text_obj = inset_ax.text(text_pos * x, text_pos * y, div_text.ljust(3), color=self.custom_grid_color, backgroundcolor='white',
                           weight='bold', ha='left', va='center',
                           rotation=round(angle), rotation_mode='anchor', fontsize=self.general_fontsize * 0.7)
 
-        inset_ax.text(0.15, 1.2, "Standard\nceleration", color=self.custom_grid_color, backgroundcolor='white', weight='bold', ha='left', va='center', fontsize=self.general_fontsize * 0.7)
-        inset_ax.text(0.15, -1.2, per_unit_str, color=self.custom_grid_color, backgroundcolor='white', weight='bold', ha='left', va='center', fontsize=self.general_fontsize * 0.7)
+            mult_text_obj = inset_ax.text(text_pos * x, text_pos * y, mult_text.ljust(3), color=self.custom_grid_color, backgroundcolor='white',
+                          weight='bold', ha='left', va='center',
+                          rotation=round(angle), rotation_mode='anchor', fontsize=self.general_fontsize * 0.7)
+
+            div_text_obj.set_visible(div_decrease)
+            mult_text_obj.set_visible(not div_decrease)
+            self.div_text_objects.append(div_text_obj)
+            self.mult_text_objects.append(mult_text_obj)
+
+        inset_ax.text(0.15, 1.2, "Standard\nceleration", color=self.custom_grid_color, backgroundcolor='white',
+                      weight='bold', ha='left', va='center', fontsize=self.general_fontsize * 0.7)
+        inset_ax.text(0.15, -1.25, per_unit_str, color=self.custom_grid_color, backgroundcolor='white', weight='bold',
+                      ha='left', va='center', fontsize=self.general_fontsize * 0.7)
 
         # Adjust right y-label if dealing with a minute chart
         if 'Minute' in chart_type:
             self.ax.yaxis.set_label_coords(-0.1, 0.7)
 
         return inset_ax
+
+    def change_deceleration_symbol(self, div_decrease):
+        for div_text, mult_text in zip(self.div_text_objects, self.mult_text_objects):
+            div_text.set_visible(div_decrease)
+            mult_text.set_visible(not div_decrease)
 
 
 class DailyTemplate(Chart):
@@ -221,7 +246,7 @@ class DailyTemplate(Chart):
 
         self.credit_vert_pos = -0.26
         self.vert_pos = self.vert_pos_scaling_dict[width]
-        self.underline = self.vert_pos - 0.0067
+        self.underline = self.vert_pos - 0.012
         self.top_x_label_pad = width * 3.7
 
         self.top_x_ticks = np.arange(0, 141, 28)
@@ -255,7 +280,8 @@ class DailyTemplate(Chart):
         self.trans = transforms.blended_transform_factory(self.ax.transData, self.ax.transAxes)
         for tick, date in zip(self.top_x_ticks, self.month_dates):
             self.ax.text(tick, self.vert_pos, date, transform=self.trans, fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, ha="center", weight='bold')
-            self.ax.text(tick, self.underline, len(date) * "_", transform=self.trans, fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, ha="center", weight='bold')
+            line = plt.Line2D([tick - 9, tick + 9], [self.underline, self.underline], color=self.style_color, transform=self.ax.get_xaxis_transform(), clip_on=False)
+            self.ax.add_line(line)
 
         self.ax.spines["bottom"].set_position(("axes", -0.03))
         self.ax2.spines["bottom"].set_visible(False)
@@ -292,6 +318,7 @@ class DailyTemplate(Chart):
 
         self.ax.set_ylabel(self.y_label, fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, weight="bold")
         self.ax.set_xlabel("SUCCESSIVE CALENDAR DAYS", fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, weight="bold")
+        self.ax.xaxis.set_label_coords(0.5, -0.1)
 
         for label in self.ax.get_yticklabels():
             if '5' in label.get_text():
@@ -375,8 +402,8 @@ class DailyMinute(DailyTemplate):
         self.ax3.spines["left"].set_color(self.custom_grid_color)
         self.ax3.spines["right"].set_color(self.custom_grid_color)
         self.ax3.spines["bottom"].set_visible(False)
-        self.ax3.set_ylabel('COUNTING TIMES', fontname=self.font, fontsize=self.general_fontsize * 0.9, color=self.style_color, weight="bold")
-        self.ax3.yaxis.set_label_coords(1.03, 0.83)
+        self.ax3.set_ylabel('COUNTING TIMES', fontname=self.font, fontsize=self.general_fontsize * 0.8, color=self.style_color, weight="bold")
+        self.ax3.yaxis.set_label_coords(1.03, 0.85)
 
         self.ax3.tick_params(color=self.custom_grid_color)
         for tick in self.ax3.yaxis.get_major_ticks():
@@ -389,6 +416,11 @@ class DailyMinute(DailyTemplate):
                 tick.tick2line.set_markeredgewidth(self.major_grid_width * 0.5)
             elif 'h' in tick_value:
                 tick.tick2line.set_markeredgewidth(0)
+
+        # for tick in self.ax3.yaxis.get_major_ticks():
+        #     tick_value = tick.label1.get_text()
+        #     if tick_value in ['15"', '20"']:
+        #         tick.label2.set_fontsize(self.right_y_axis_fontsize * 0.85)  # Shrink labels
 
 
 class WeeklyTemplate(Chart):
@@ -415,7 +447,7 @@ class WeeklyTemplate(Chart):
         self.top_x_labels_vert_pos = 1.01
 
         # Scaling
-        self.month_label_size = 0.9 * width
+        self.month_label_size = 0.8 * width
         self.top_x_tick_length = 2.222 * width
 
     def get_sundays_for_months(self, months):
@@ -486,6 +518,7 @@ class WeeklyTemplate(Chart):
 
         self.ax.set_ylabel(self.y_label, fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, weight="bold")
         self.ax.set_xlabel("SUCCESSIVE CALENDAR WEEKS", fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, weight="bold")
+        self.ax.xaxis.set_label_coords(0.5, -0.1)
 
         for label in self.ax.get_yticklabels():
             if '5' in label.get_text():
@@ -611,8 +644,8 @@ class WeeklyMinute(WeeklyTemplate):
         self.ax3.spines["left"].set_color(self.custom_grid_color)
         self.ax3.spines["right"].set_color(self.custom_grid_color)
         self.ax3.spines["bottom"].set_visible(False)
-        self.ax3.set_ylabel('COUNTING TIMES', fontname=self.font, fontsize=self.general_fontsize * 0.9, color=self.style_color, weight="bold")
-        self.ax3.yaxis.set_label_coords(1.03, 0.83)
+        self.ax3.set_ylabel('COUNTING TIMES', fontname=self.font, fontsize=self.general_fontsize * 0.8, color=self.style_color, weight="bold")
+        self.ax3.yaxis.set_label_coords(1.03, 0.85)
 
         self.ax3.tick_params(color=self.custom_grid_color)
         for tick in self.ax3.yaxis.get_major_ticks():
@@ -728,6 +761,7 @@ class MonthlyTemplate(Chart):
 
         self.ax.set_ylabel(self.y_label, fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, weight="bold")
         self.ax.set_xlabel("SUCCESSIVE CALENDAR MONTHS", fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, weight="bold")
+        self.ax.xaxis.set_label_coords(0.5, -0.1)
 
         for label in self.ax.get_yticklabels():
             if '5' in label.get_text():
@@ -826,8 +860,8 @@ class MonthlyMinute(MonthlyTemplate):
         self.ax3.spines["left"].set_color(self.custom_grid_color)
         self.ax3.spines["right"].set_color(self.custom_grid_color)
         self.ax3.spines["bottom"].set_visible(False)
-        self.ax3.set_ylabel('COUNTING TIMES', fontname=self.font, fontsize=self.general_fontsize * 0.9, color=self.style_color, weight="bold")
-        self.ax3.yaxis.set_label_coords(1.03, 0.83)
+        self.ax3.set_ylabel('COUNTING TIMES', fontname=self.font, fontsize=self.general_fontsize * 0.8, color=self.style_color, weight="bold")
+        self.ax3.yaxis.set_label_coords(1.03, 0.85)
 
         self.ax3.tick_params(color=self.custom_grid_color)
         for tick in self.ax3.yaxis.get_major_ticks():
@@ -867,7 +901,7 @@ class YearlyTemplate(Chart):
         self.year_vert_pos = 1.025
 
         # Scaling
-        self.year_font_size = 1.3 * width
+        self.year_font_size = 1.15 * width
         self.top_x_tick_length = 2.222 * width
 
     def _setup_axes(self):
@@ -943,6 +977,7 @@ class YearlyTemplate(Chart):
 
         self.ax.set_ylabel(self.y_label, fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, weight="bold")
         self.ax.set_xlabel("SUCCESSIVE CALENDAR YEARS", fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, weight="bold")
+        self.ax.xaxis.set_label_coords(0.5, -0.1)
 
         for label in self.ax.get_yticklabels():
             if '5' in label.get_text():
@@ -1042,8 +1077,8 @@ class YearlyMinute(YearlyTemplate):
         self.ax3.spines["left"].set_color(self.custom_grid_color)
         self.ax3.spines["right"].set_color(self.custom_grid_color)
         self.ax3.spines["bottom"].set_visible(False)
-        self.ax3.set_ylabel('COUNTING TIMES', fontname=self.font, fontsize=self.general_fontsize * 0.9, color=self.style_color, weight="bold")
-        self.ax3.yaxis.set_label_coords(1.03, 0.83)
+        self.ax3.set_ylabel('COUNTING TIMES', fontname=self.font, fontsize=self.general_fontsize * 0.8, color=self.style_color, weight="bold")
+        self.ax3.yaxis.set_label_coords(1.03, 0.85)
 
         self.ax3.tick_params(color=self.custom_grid_color)
         for tick in self.ax3.yaxis.get_major_ticks():

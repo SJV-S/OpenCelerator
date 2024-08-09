@@ -46,6 +46,15 @@ class DataManager:
                                              'line_color': 'black'
                                               }
 
+            self.default_misc_point_style = {'marker_face_color': 'black',
+                                             'marker_edge_color': 'black',
+                                             'marker': 'v',
+                                             'linewidth': 0.5,
+                                             'markersize': 8,
+                                             'linestyle': '-',
+                                             'line_color': 'black'
+                                             }
+
             self.default_phase_style = {
                 'date': None,
                 'y_line': None,
@@ -113,7 +122,7 @@ class DataManager:
                 'chart_type': 'DailyMinute',
                 'chart_font_color': '#05c3de',
                 'chart_grid_color': '#6ad1e3',
-                'width': 9,
+                'width': 10,
                 'phase_text_type': 'Flag',
                 'phase_text_position': 'Top',
                 'fit_method': 'Least-squares',
@@ -121,6 +130,10 @@ class DataManager:
                 'celeration_unit': 'Weekly (standard)',
                 'forward_projection': 0,
                 'home_folder': os.path.expanduser("~"),
+                'corr_style': self.default_corr_point_style,
+                'err_style': self.default_err_point_style,
+                'floor_style': self.default_floor_point_style,
+                'misc_style': self.default_misc_point_style,
                 'phase_style': self.default_phase_style,
                 'aim_style': self.default_aim_style,
                 'trend_corr_style': self.default_corr_trend_style,
@@ -132,7 +145,7 @@ class DataManager:
             self.chart_data = {
                 'type': 'DailyMinute',
                 'raw_data': {'d': [], 'm': [], 'c': [], 'i': []},
-                'raw_df': pd.DataFrame(columns=['d', 'm', 'c', 'i']),
+                'raw_df': pd.DataFrame(columns=['d', 'm', 'c', 'i', 'o']),
                 'phase': [],
                 'aim': [],
                 'trend_corr': [],
@@ -159,6 +172,7 @@ class DataManager:
                     'aims': True,
                     'fan': True,
                     'credit_spacing': True,
+                    'misc': True,
                 }
             }
 
@@ -175,8 +189,13 @@ class DataManager:
             # Control variables
             self.initialized = True  # Set this attribute after initializing
             self.chart_data_default = copy.deepcopy(self.chart_data)
-            self.mask_zero_counts = None  # Boolean array for preventing trendlines to be affected by zero counts
+
+            # Boolean arrays for preventing trendlines to be affected by zero counts
+            self.mask_corr_zero_counts = None
+            self.mask_err_zero_counts = None
+
             self.standard_date_string = '%Y-%m-%d'
+            self.df_plot = None  # df created from raw data for plotting
 
             # Apply settings
             self.get_user_preferences()
@@ -210,58 +229,108 @@ class DataManager:
         else:
             return None
 
-    def get_replot_points(self, date_to_x, kind):
+    def get_replot_points(self, date_to_x):
         df = copy.deepcopy(self.chart_data['raw_df'])
+
+        # Index will be an object dtype otherwise and return a string, causing errors in point styling
+        df.index = pd.to_numeric(df.index, errors='coerce')
 
         # Currently just a patch to handle manual entries
         if not pd.api.types.is_datetime64_any_dtype(df['d']):
             df['d'] = pd.to_datetime(df['d'])
 
         chart_type = self.user_preferences['chart_type']
-        if any(period in chart_type for period in ('Weekly', 'Monthly', 'Yearly')):
-            agg_type = chart_type[0]
-            df['d'] = pd.to_datetime(df.d)
+        agg_type = chart_type[0]
+        df['d'] = pd.to_datetime(df['d'])
+
+        if self.user_preferences['chart_data_agg'] == "stack":
+            # Define the date keys and the earliest and latest date for filtering
+            date_keys = pd.Series(list(date_to_x.keys()))
+            earliest_date = date_keys.min()
+            latest_date = date_keys.max()
+
+            # Filter the rows before conversion
+            offsets = {
+                'D': pd.Timedelta(days=1),
+                'W': pd.Timedelta(weeks=1),
+                'M': pd.DateOffset(months=1),
+                'Y': pd.DateOffset(years=1)
+            }
+            offset = offsets[agg_type]
+            df = df[(df['d'] >= earliest_date - offset) & (df['d'] < latest_date + offset)]
+
+            # Convert each date in the 'd' column to the nearest date in date_to_x.keys()
+            date_array = date_keys.values
+            df['d'] = df['d'].apply(lambda d: date_array[np.argmin(np.abs(date_array - d.to_numpy()))])
+        else:
+            # Aggregating the values as per user preferences.
             df.set_index('d', inplace=True)
-            df = df.resample(agg_type).agg(self.user_preferences['chart_data_agg']).reset_index()  # Will pad missing dates with zeros
-            df = df.loc[~((df['m'] == 0) & (df['c'] == 0) & (df['i'] == 0))]  # Drop padded dates
+            df = df.resample(agg_type).agg(self.user_preferences['chart_data_agg']).reset_index()
+
+            # Drop padded dates (they are introduced during resampling)
+            df = df.loc[~(((df['m'] == 0) | df['m'].isna()) &
+                          ((df['c'] == 0) | df['c'].isna()) &
+                          ((df['i'] == 0) | df['i'].isna()))]
 
         # Filter data points based on current date range / chart window
         df = df[df['d'].isin(date_to_x.keys())]
 
-        x = pd.to_datetime(df['d']).map(date_to_x)  # Convert date to x position
-        if kind == 'm' and 'Minute' in chart_type:
-            y = 1 / df[kind]  # Get timing floor
+        # Get plot variables
+        df['x'] = pd.to_datetime(df['d']).map(date_to_x)  # Convert date to x position
+        df['floor'] = 1 / df['m']
+
+        # Replace 0 in 'm' with NaN for safety or  everything in m with 1
+        if 'Minute' in chart_type:
+            m_safe = df['m'].replace(0, np.nan)
         else:
-            y = self.handle_zero_counts(df, kind, chart_type)
+            m_safe = df['m'].apply(lambda x: 1)
+        df['corr_freq'] = df['c'] / m_safe
+        df['err_freq'] = df['i'] / m_safe
+
+        # Store bool array for any necessary trend filtering
+        self.mask_corr_zero_counts = df['corr_freq'] != 0
+        self.mask_err_zero_counts = df['err_freq'] != 0
+
+        if self.user_preferences['place_below_floor']:
+            # Place zero counts below timing floor
+            df['corr_freq'] = np.where(df['corr_freq'] == 0, (1 / m_safe) * 0.8, df['corr_freq'])
+            df['err_freq'] = np.where(df['err_freq'] == 0, (1 / m_safe) * 0.8, df['err_freq'])
+        else:
+            # Do not display zero counts
+            df['corr_freq'] = df['corr_freq'].apply(lambda x: np.nan if x == 0 else x)
+            df['err_freq'] = df['err_freq'].apply(lambda x: np.nan if x == 0 else x)
 
         # Sort data points just in case it was manually plotted out of order
-        sorted_indices = x.argsort()
-        x = x.iloc[sorted_indices].reset_index(drop=True)
-        y = y.iloc[sorted_indices].reset_index(drop=True)
+        df = df.sort_values(by='d')
 
-        return x, y
+        # Necessary to ensure styling alignment
+        df = df.reset_index(drop=True)
+
+        # Used for plotting, styling, and trend fitting
+        self.df_plot = df
 
     def data_import_data(self, file_path):
-        data_cols = ['m', 'h', 's', 'c', 'i', 'd']
+        data_cols = ['m', 'h', 's', 'c', 'i', 'd', 'o']
         # Determine file type
         if file_path.endswith('.csv'):
             df = pd.read_csv(file_path)
         elif file_path.endswith('.xls') or file_path.endswith('.xlsx') or file_path.endswith('.ods'):
             df = pd.read_excel(file_path)
 
-        df = df[df.columns[:6]]  # Only first 6 columns
+        df = df[df.columns[:7]]  # Only first 7 columns
         df.columns = [col.lower()[0] for col in df.columns]  # Lower case, first letter
         filtered_cols = [col for col in df.columns if col in data_cols]  # Filter columns
         df = df[filtered_cols]
 
         # Loop over each column and add it with zeros if it's not present
-        for col in ['s', 'm', 'h', 'c', 'i']:
+        for col in ['s', 'm', 'h', 'c', 'i', 'o']:
             if col not in df.columns:
                 df[col] = 0  # Add the column with zeros
 
         # Clean up any malformed entries
         df['c'] = pd.to_numeric(df['c'], errors='coerce').fillna(0)
         df['i'] = pd.to_numeric(df['i'], errors='coerce').fillna(0)
+        df['o'] = pd.to_numeric(df['o'], errors='coerce').fillna(0)
         df['s'] = pd.to_numeric(df['s'], errors='coerce').fillna(1)
         df['m'] = pd.to_numeric(df['m'], errors='coerce').fillna(1)
         df['h'] = pd.to_numeric(df['h'], errors='coerce').fillna(1)
@@ -269,6 +338,7 @@ class DataManager:
         # Set negative values to zero
         df.loc[:, 'c'] = df['c'].apply(lambda x: x if x >= 0 else 0)
         df.loc[:, 'i'] = df['i'].apply(lambda x: x if x >= 0 else 0)
+        df.loc[:, 'o'] = df['o'].apply(lambda x: x if x >= 0 else 0)
         df.loc[:, 's'] = df['s'].apply(lambda x: x if x >= 0 else 1)
         df.loc[:, 'm'] = df['m'].apply(lambda x: x if x >= 0 else 1)
         df.loc[:, 'h'] = df['h'].apply(lambda x: x if x >= 0 else 1)
@@ -288,24 +358,8 @@ class DataManager:
             df['d'] = pd.to_datetime(df['d']).dt.date
         df['d'] = pd.to_datetime(df['d'])  # Convert back to a datetime column with no time or timezone information
 
-        # # Sum entries if stacked on the same date
-        df = df.groupby('d', as_index=False).sum()
-
         # Store imported raw data (also clears any previous data points)
         self.chart_data['raw_df'] = df
-
-    def create_export_file(self, file_path):
-        df = copy.deepcopy(self.chart_data['raw_df'])
-
-        # Discard times
-        df['d'] = pd.to_datetime(df.d).dt.date
-
-        if not file_path.endswith('.csv'):
-            file_path += '.csv'
-
-        full_names = {'c': 'Corrects', 'i': 'Incorrects', 'm': 'Minutes', 'd': 'Dates'}
-        df.rename(columns=full_names, inplace=True)
-        df.to_csv(file_path, index=False)
 
     def update_view_check(self, setting, state):
         self.chart_data['view_check'][setting] = bool(state)
@@ -313,28 +367,6 @@ class DataManager:
     def get_trend(self, x1, x2, corr, date_to_x, x_to_day_count, fit_method=None, bounce_envelope=None):
         result = self.trend_fitter.get_trend(x1, x2, corr, date_to_x, x_to_day_count, fit_method, bounce_envelope)
         return result
-
-    def update_dataframe(self, date, total_minutes, count, point_type):
-        df = self.chart_data['raw_df']
-        kind = 'c' if point_type else 'i'
-        other_kind = 'i' if kind == 'c' else 'c'
-
-        # Create a mask for existing date
-        mask = df['d'] == date.strftime(self.standard_date_string)
-
-        if mask.any():
-            # Update the values for the existing row with the matching date
-            df.loc[mask, kind] = count
-            df.loc[mask, 'm'] = total_minutes
-        else:
-            # Create a new row as a DataFrame and append it
-            new_data = {'d': [date], kind: [count], 'm': [total_minutes], other_kind: [0]}
-            new_row = pd.DataFrame(new_data)
-            new_row = new_row.reindex(columns=df.columns, fill_value=0).astype(df.dtypes.to_dict())
-            df = pd.concat([df, new_row], ignore_index=True)
-            df['d'] = pd.to_datetime(df['d'])
-            df['d'] = df['d'].dt.strftime(self.standard_date_string)
-            self.chart_data['raw_df'] = df
 
     def set_chart_type(self, new_type):
         if self.chart_data['type'] != new_type:
@@ -377,26 +409,6 @@ class DataManager:
 
         if os.path.exists(filepath):
             os.remove(filepath)
-
-    def handle_zero_counts(self, df, kind, chart_type):
-        if 'Minute' in chart_type:
-            m_safe = df['m'].replace(0, np.nan)  # Replace 0 in 'm' with NaN for safety
-        else:
-            m_safe = df['m'].apply(lambda x: 1)  # Replace everything in m with 1
-
-        y = df[kind] / m_safe  # Get frequency for kind
-
-        # Store bool array for any necessary trend filtering
-        self.mask_zero_counts = y != 0
-
-        if self.user_preferences['place_below_floor']:
-            # Place zero counts below timing floor
-            y = np.where(df[kind] == 0, (1 / m_safe) * 0.8, df[kind] / m_safe)
-        else:
-            # Do not display zero counts
-            y = y.apply(lambda x: np.where(x == 0, np.nan, x))
-
-        return pd.Series(y)
 
     def get_user_preferences(self):
         system = platform.system()
@@ -483,10 +495,16 @@ class TrendFitter:
     def __init__(self, data_manager):
         self.data_manager = data_manager
 
-    def filter_zero_counts_and_below_floor(self, x, y):
+    def filter_zero_counts_and_below_floor(self, x, y, corr):
         # Prevents trends from being pulled by zero counts
-        y = y[self.data_manager.mask_zero_counts]
-        x = x[self.data_manager.mask_zero_counts]
+
+        if corr:
+            y = y[self.data_manager.mask_corr_zero_counts]
+            x = x[self.data_manager.mask_corr_zero_counts]
+        else:
+            y = y[self.data_manager.mask_err_zero_counts]
+            x = x[self.data_manager.mask_err_zero_counts]
+
         return x, y
 
     def get_trend_label(self, slope):
@@ -569,6 +587,10 @@ class TrendFitter:
         x = x[sorted_indices]
         y = y[sorted_indices]
 
+        # Boundaries
+        x_min_lim = x[0]
+        x_max_lin = x[-1]
+
         # Used to obtain daily slope regardless of chart type
         x_as_day_count = np.array([x_to_day_count[x_i] for x_i in list(x)])
         extended_x = np.arange(x[0], x[-1] + self.data_manager.user_preferences['forward_projection'] + 1)
@@ -631,21 +653,25 @@ class TrendFitter:
             lower_bounce = None
             bounce_est_label = None
 
-        return trend, celeration_slope_label, extended_x, upper_bounce, lower_bounce, bounce_est_label
+        return trend, celeration_slope_label, extended_x, upper_bounce, lower_bounce, bounce_est_label, x_min_lim, x_max_lin
 
     def get_trend(self, x1, x2, corr, date_to_x, x_to_day_count, fit_method=None, bounce_envelope=None):
         min_x = min(x1, x2)
         max_x = max(x1, x2)
-        kind = 'c' if corr else 'i'
 
-        x, y = self.data_manager.get_replot_points(date_to_x, kind)
-        x, y = self.filter_zero_counts_and_below_floor(x, y)
-        point_dict = {x_i: y_i for x_i, y_i in zip(x, y)}
-        selected_range_set = set(np.arange(min_x, max_x + 1))  # Create a set from the range
-        keys_set = set(x)  # Get keys from dictionary as a set
+        df = self.data_manager.df_plot
+        x = df['x'].to_numpy()
+        y = df['corr_freq' if corr else 'err_freq'].to_numpy()
+        x, y = self.filter_zero_counts_and_below_floor(x, y, corr)
+
+        # Get median y for each x if stacking
+        point_dict = {val: np.median(y[x == val]) for val in np.unique(x)}
 
         min_sample = 4
         if len(x) >= min_sample:
+            # Filter
+            selected_range_set = set(np.arange(min_x, max_x + 1))  # Create a set from the range
+            keys_set = set(x)  # Get keys from dictionary as a set
             x_slice = list(selected_range_set & keys_set)  # Find intersection of both sets
             y_slice = [point_dict[x_i] for x_i in x_slice]
         else:
