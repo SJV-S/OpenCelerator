@@ -10,6 +10,7 @@ YouTube: https://www.youtube.com/@sudorandom7619
 
 Contact: opencelerator.9qpel@simplelogin.com<br>
 
+Resources:
 "What is Precision Teaching?" Here is an excellent [intro](https://www.youtube.com/watch?v=PjwWZP726Ko&list=PLuQRRtTr10Mm1QycJLUjowBFugi7lg0c7&index=5&t=0s) by Carl Binder.
 
 
