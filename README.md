@@ -6,6 +6,8 @@ Tutorial: [playlist](https://www.youtube.com/playlist?list=PLAU5et__-B6HCHmlgyxg
 
 About me: https://www.linkedin.com/in/jsv01/
 
+YouTube: https://www.youtube.com/@sudorandom7619
+
 Contact: opencelerator.9qpel@simplelogin.com<br>
 
 "What is Precision Teaching?" Here is an excellent [intro](https://www.youtube.com/watch?v=PjwWZP726Ko&list=PLuQRRtTr10Mm1QycJLUjowBFugi7lg0c7&index=5&t=0s) by Carl Binder.
