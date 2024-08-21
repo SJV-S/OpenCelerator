@@ -4,12 +4,9 @@ OpenCelerator (formerly named iChart) is an open-source Python implementation of
 
 While available for free and without restrictions, please consider donating if you have the means and like the project. A donation button can be found in the app.
 
-Tutorial: [playlist](https://www.youtube.com/playlist?list=PLAU5et__-B6HCHmlgyxgPPDJ2rHgZ1PY4)
-
-About me: [LinkedIn](https://www.linkedin.com/in/jsv01/)
-
-YouTube: [Channel](https://www.youtube.com/@sudorandom7619)
-
+Tutorial: [playlist](https://www.youtube.com/playlist?list=PLAU5et__-B6HCHmlgyxgPPDJ2rHgZ1PY4)<br>
+About me: [LinkedIn](https://www.linkedin.com/in/jsv01/)<br>
+YouTube: [Channel](https://www.youtube.com/@sudorandom7619)<br>
 Contact: [mail](opencelerator.9qpel@simplelogin.com)
 
 "What is Precision Teaching?" Here is an excellent [intro](https://www.youtube.com/watch?v=PjwWZP726Ko&list=PLuQRRtTr10Mm1QycJLUjowBFugi7lg0c7&index=5&t=0s) by Carl Binder.
