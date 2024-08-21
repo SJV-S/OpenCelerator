@@ -67,3 +67,19 @@ You can import data from csv, xls, xlsx, and ods, files. OpenCelerator will only
 
 ![Example Chart](images/example_chart.png)
 
+## Support-the-project
+
+**OpenCelerator will forever remain free and open-source.**
+
+About half a year's work has gone into this project. There is no team or funding behind it—just me. If you find the app useful and would like to see its development continue, please consider donating.
+
+### Other ways to contribute:
+
+- **Provide feedback:** Let me know what you like, what can be improved, report bugs, do testing, and so on. The software is still in alpha.
+- **Share this tool:** Spread the word to others who might find it useful.
+- **Acknowledge:** If you use this in an official capacity, please acknowledge by linking to my GitHub: https://github.com/SJV-S/OpenCelerator.
+
+I am also looking for work! I have a PhD in behavior analysis and some coding experience. I'm happy to relocate and will share my CV upon request.
+
+**Contact:** opencelerator.9qpel@simplelogin.com
+
