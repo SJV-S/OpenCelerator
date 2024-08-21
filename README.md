@@ -70,7 +70,7 @@ You can import data from csv, xls, xlsx, and ods, files. OpenCelerator will only
 
 ## Support the project
 
-**OpenCelerator will forever remain free and open-source.**
+**OpenCelerator will forever remain free and open-source**
 
 About half a year's work has gone into this project. There is no team or funding behind it—just me. If you find the app useful and would like to see its development continue, please consider donating.
 
