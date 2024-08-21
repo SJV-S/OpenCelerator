@@ -74,9 +74,9 @@ You can import data from csv, xls, xlsx, and ods, files. OpenCelerator will only
 
 About half a year's work has gone into this project. There is no team or funding behind it—just me. If you find the app useful and would like to see its development continue, please consider donating.
 
-Patreon: https://www.patreon.com/johanpigeon/membership
-Bitcoin (base chain): bc1qg8y5pxv5g86mhj59xdk89r6tr70zdw6rh6rwh4
-Bitcoin Lightning (LNURL): pigeon@getalby.com
+Patreon: https://www.patreon.com/johanpigeon/membership<br>
+Bitcoin (base chain): bc1qg8y5pxv5g86mhj59xdk89r6tr70zdw6rh6rwh4<br>
+Bitcoin Lightning (LNURL): pigeon@getalby.com<br>
 
 **Other ways to contribute**
 
