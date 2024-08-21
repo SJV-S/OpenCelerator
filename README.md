@@ -68,7 +68,7 @@ You can import data from csv, xls, xlsx, and ods, files. OpenCelerator will only
 
 ![Example Chart](images/example_chart.png)
 
-## Support-the-project
+## Support the project
 
 **OpenCelerator will forever remain free and open-source.**
 
