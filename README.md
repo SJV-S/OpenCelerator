@@ -84,7 +84,7 @@ Bitcoin Lightning (LNURL): pigeon@getalby.com<br>
 - **Share this tool.** Spread the word to others who might find it useful.
 - **Acknowledge.** If you use this in an official capacity, please acknowledge by linking to my GitHub.
 
-I am also looking for work! I have a PhD in behavior analysis and some coding experience. I'm happy to relocate and will share my CV upon request.
+I am also looking for work! I have a PhD in behavior analysis and obviously know a little bit about coding. Happy to relocate. Will share CV upon request.<br>
 
 
 
