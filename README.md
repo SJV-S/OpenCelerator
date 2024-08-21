@@ -4,7 +4,7 @@ OpenCelerator (formerly named iChart) is an open-source Python implementation of
 
 While available for free and without restrictions, please consider donating if you have the means and like the project. A donation button can be found in the app.
 
-Tutorial: [playlist](https://www.youtube.com/playlist?list=PLAU5et__-B6HCHmlgyxgPPDJ2rHgZ1PY4)<br>
+Tutorial: [Playlist](https://www.youtube.com/playlist?list=PLAU5et__-B6HCHmlgyxgPPDJ2rHgZ1PY4)<br>
 About me: [LinkedIn](https://www.linkedin.com/in/jsv01/)<br>
 YouTube: [Channel](https://www.youtube.com/@sudorandom7619)<br>
 Contact: opencelerator.9qpel@simplelogin.com
