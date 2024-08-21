@@ -6,11 +6,11 @@ While available for free and without restrictions, please consider donating if y
 
 Tutorial: [playlist](https://www.youtube.com/playlist?list=PLAU5et__-B6HCHmlgyxgPPDJ2rHgZ1PY4)
 
-About me: https://www.linkedin.com/in/jsv01/
+About me: [LinkedIn](https://www.linkedin.com/in/jsv01/)
 
-YouTube: https://www.youtube.com/@sudorandom7619
+YouTube: [Channel](https://www.youtube.com/@sudorandom7619)
 
-Contact: opencelerator.9qpel@simplelogin.com<br>
+Contact: [mail](opencelerator.9qpel@simplelogin.com)
 
 "What is Precision Teaching?" Here is an excellent [intro](https://www.youtube.com/watch?v=PjwWZP726Ko&list=PLuQRRtTr10Mm1QycJLUjowBFugi7lg0c7&index=5&t=0s) by Carl Binder.
 
