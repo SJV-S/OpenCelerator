@@ -1,6 +1,6 @@
 # OpenCelerator
 
-OpenCelerator (formerly named iChart) is an open-source Python implementation of the Standard Celeration Chart (SCC). The SCC is a versatile data visualization tool used in the field of Precision Teaching and other areas for analysis of frequencies. The project is currently in alpha. The goal is a free and easy to use app for charting on desktop. 
+OpenCelerator (formerly named iChart) is an open-source Python implementation of the Standard Celeration Chart (SCC). The SCC is a versatile data visualization tool used in the field of Precision Teaching and other areas for analysis of frequencies. The project is currently in alpha and new releases are coming out on a regular basis. The goal is a free and easy to use app for charting on desktop. 
 
 While available for free and without restrictions, please consider donating if you have the means and like the project. A donation button can be found in the app.
 
