@@ -18,7 +18,6 @@ Contact: opencelerator.9qpel@simplelogin.com
 
 ## Features
 - Data import and export
-- Direct data entry
 - Phase lines
 - Aim lines
 - Celeration and bounce lines
