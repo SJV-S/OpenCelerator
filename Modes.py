@@ -568,24 +568,35 @@ class PhaseModeWidget(ModeWidget):
 
 class AimModeWidget(ModeWidget):
     def init_ui(self):
-        # Create a QGridLayout
-        grid_layout = QGridLayout()
-        grid_layout.setSpacing(0)
-        grid_layout.setContentsMargins(0, 0, 0, 0)
+        # Create the main layout
+        main_layout = QVBoxLayout()
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(10, 0, 10, 10)
+
+        # Create a QGridLayout for the input fields
+        input_grid_layout = QGridLayout()
+        input_grid_layout.setHorizontalSpacing(10)
+        input_grid_layout.setVerticalSpacing(0)
 
         # Note input for aim
-        aim_target_label = QLabel('Note')
-        aim_target_label.setStyleSheet("margin-top: 10px; margin-bottom: 5px;")
-        self.aim_target_input = QLineEdit('')
+        self.aim_text_label = QLabel('Text')
+        self.aim_text_label.setStyleSheet("margin-top: 10px; margin-bottom: 5px;")
+        self.aim_text_input = QLineEdit('')
+
+        # Baseline input for targeting (renamed from Start-Y)
+        self.aim_baseline_label = QLabel('Baseline')
+        self.aim_baseline_label.setStyleSheet("margin-top: 10px; margin-bottom: 5px;")
+        self.aim_baseline_input = QLineEdit('')
+        self.aim_baseline_input.setValidator(QDoubleValidator(0.0, 9999.99, 4))
 
         # Y-value input for targeting
-        aim_label_y = QLabel('Target')
-        aim_label_y.setStyleSheet("margin-top: 10px; margin-bottom: 5px;")
-        self.aim_y_input = QLineEdit('')
-        self.aim_y_input.setValidator(QDoubleValidator(0.0, 9999.99, 4))
+        self.aim_target_label = QLabel('Target')
+        self.aim_target_label.setStyleSheet("margin-top: 10px; margin-bottom: 5px;")
+        self.aim_target_input = QLineEdit('')
+        self.aim_target_input.setValidator(QDoubleValidator(0.0, 9999.99, 4))
 
         # Start date input
-        aim_label_start_date = QLabel('Start')
+        aim_label_start_date = QLabel('Start date')
         aim_label_start_date.setStyleSheet("margin-top: 10px; margin-bottom: 5px;")
         self.aim_start_date_input = QDateEdit()
         self.aim_start_date_input.setDate(QDate.currentDate())
@@ -600,58 +611,145 @@ class AimModeWidget(ModeWidget):
         self.aim_end_date_input.setCalendarPopup(True)
         self.aim_end_date_input.setDisplayFormat("dd-MM-yyyy")
 
+        # Add widgets to the grid layout
+        input_grid_layout.addWidget(self.aim_text_label, 0, 0, 1, 2)
+        input_grid_layout.addWidget(self.aim_text_input, 1, 0, 1, 2)
+        input_grid_layout.addWidget(self.aim_baseline_label, 2, 0)
+        input_grid_layout.addWidget(self.aim_baseline_input, 3, 0)
+        input_grid_layout.addWidget(self.aim_target_label, 4, 0)
+        input_grid_layout.addWidget(self.aim_target_input, 5, 0)
+        input_grid_layout.addWidget(aim_label_start_date, 2, 1)
+        input_grid_layout.addWidget(self.aim_start_date_input, 3, 1)
+        input_grid_layout.addWidget(aim_label_end_date, 4, 1)
+        input_grid_layout.addWidget(self.aim_end_date_input, 5, 1)
+
+        # Add input grid layout to the main layout
+        main_layout.addLayout(input_grid_layout)
+
+        # Create a horizontal layout for the buttons
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(5)
+
         # Add, Undo, and Configure buttons for setting aims
         add_aim_line_btn = QPushButton()
-        add_aim_line_btn.setStyleSheet("margin-right: 5px; margin-top: 15px")
+        add_aim_line_btn.setStyleSheet("margin-left: 0px; margin-top: 15px; margin-bottom: 15px")
         undo_aim_line_btn = QPushButton()
-        undo_aim_line_btn.setStyleSheet("margin-left: 5px; margin-top: 15px")
+        undo_aim_line_btn.setStyleSheet("margin-top: 15px; margin-bottom: 15px")
         configure_aim_btn = QPushButton()
-        configure_aim_btn.setStyleSheet("margin-left: 5px; margin-top: 15px")
+        configure_aim_btn.setStyleSheet("margin-right: 0px; margin-top: 15px; margin-bottom: 15px")
 
         # Add icons
         add_aim_line_btn.setIcon(QIcon(':/images/plus-solid.svg'))
         undo_aim_line_btn.setIcon(QIcon(':/images/minus-solid.svg'))
         configure_aim_btn.setIcon(QIcon(':/images/gear-solid.svg'))
 
-        # Add widgets to the grid layout
-        grid_layout.addWidget(aim_target_label, 0, 0)
-        grid_layout.addWidget(self.aim_target_input, 1, 0)
-        grid_layout.addWidget(aim_label_y, 2, 0)
-        grid_layout.addWidget(self.aim_y_input, 3, 0)
-        grid_layout.addWidget(aim_label_start_date, 4, 0)
-        grid_layout.addWidget(self.aim_start_date_input, 5, 0)
-        grid_layout.addWidget(aim_label_end_date, 6, 0)
-        grid_layout.addWidget(self.aim_end_date_input, 7, 0)
+        # Add buttons to the button layout
+        button_layout.addWidget(add_aim_line_btn)
+        button_layout.addWidget(undo_aim_line_btn)
+        button_layout.addWidget(configure_aim_btn)
 
-        # Add buttons to a horizontal layout
-        aim_line_button_layout = QHBoxLayout()
-        aim_line_button_layout.addWidget(add_aim_line_btn)
-        aim_line_button_layout.addWidget(undo_aim_line_btn)
-        aim_line_button_layout.addWidget(configure_aim_btn)
+        # Add the button layout to the main layout
+        main_layout.addLayout(button_layout)
 
-        # Add the button layout to the grid layout
-        grid_layout.addLayout(aim_line_button_layout, 8, 0, 1, 1)
-
-        # Create a container widget to hold the grid layout
+        # Create a container widget to hold the main layout
         container_widget = QWidget()
-        container_layout = QVBoxLayout(container_widget)
-        container_layout.addLayout(grid_layout)
-        container_layout.addStretch()  # Add a stretch to push everything to the top
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.setSpacing(0)
+        container_widget.setLayout(main_layout)
 
         # Add the container widget to the existing layout
         self.layout.addWidget(container_widget)
 
         # Connect buttons to figure manager methods
         add_aim_line_btn.clicked.connect(lambda: self.figure_manager.aim_from_form(
+            self.aim_text_input.text(),
+            self.aim_baseline_input.text(),
             self.aim_target_input.text(),
-            self.aim_y_input.text(),
             self.aim_start_date_input.text(),
             self.aim_end_date_input.text()
         ))
         undo_aim_line_btn.clicked.connect(self.figure_manager.aim_undo)
         configure_aim_btn.clicked.connect(self.configure_aim_lines)
+
+        # Create a horizontal layout for the radio buttons
+        radio_buttons_layout = QGridLayout()
+
+        # Aim type radio buttons
+        aim_type_label = QLabel('Line type')
+        self.aim_type_group = QButtonGroup(self)
+        self.aim_type_flat = QRadioButton('Flat')
+        self.aim_type_slope = QRadioButton('Slope')
+
+        # Set the aim type based on user preferences
+        aim_text_type = self.data_manager.user_preferences.get('aim_line_type', 'Flat')
+        self.aim_type_flat.setChecked(aim_text_type == 'Flat')
+        self.aim_type_slope.setChecked(aim_text_type == 'Slope')
+
+        self.aim_type_group.addButton(self.aim_type_flat)
+        self.aim_type_group.addButton(self.aim_type_slope)
+
+        # Connect radio button changes to a method to enable/disable Baseline
+        self.aim_type_flat.toggled.connect(self.update_start_y_state)
+
+        # Update aim line type
+        self.aim_type_flat.toggled.connect(lambda checked: self.update_aim_type("Flat") if checked else None)
+        self.aim_type_slope.toggled.connect(lambda checked: self.update_aim_type("Slope") if checked else None)
+
+        # Position radio buttons
+        position_label = QLabel('Text position')
+        self.position_group = QButtonGroup(self)
+        self.position_left = QRadioButton('Left')
+        self.position_middle = QRadioButton('Middle')
+        self.position_right = QRadioButton('Right')
+
+        # Set the position based on user preferences
+        aim_text_position = self.data_manager.user_preferences.get('aim_text_position', 'Middle')
+        self.position_left.setChecked(aim_text_position == 'Left')
+        self.position_middle.setChecked(aim_text_position == 'Middle')
+        self.position_right.setChecked(aim_text_position == 'Right')
+
+        self.position_left.toggled.connect(lambda checked: self.update_aim_text_pos("Left") if checked else None)
+        self.position_middle.toggled.connect(lambda checked: self.update_aim_text_pos("Middle") if checked else None)
+        self.position_right.toggled.connect(lambda checked: self.update_aim_text_pos("Right") if checked else None)
+
+        self.position_group.addButton(self.position_left)
+        self.position_group.addButton(self.position_middle)
+        self.position_group.addButton(self.position_right)
+
+        # Add labels and radio buttons to the grid layout
+        radio_buttons_layout.addWidget(aim_type_label, 0, 0)
+        radio_buttons_layout.addWidget(self.aim_type_flat, 1, 0)
+        radio_buttons_layout.addWidget(self.aim_type_slope, 2, 0)
+        radio_buttons_layout.addWidget(position_label, 0, 1)
+        radio_buttons_layout.addWidget(self.position_left, 1, 1)
+        radio_buttons_layout.addWidget(self.position_middle, 2, 1)
+        radio_buttons_layout.addWidget(self.position_right, 3, 1)
+
+        # Add the grid layout with the radio buttons to the main layout
+        main_layout.addLayout(radio_buttons_layout)
+
+        # Initial call to set the Baseline state
+        self.update_start_y_state()
+
+    def update_aim_text_pos(self, text_pos):
+        self.data_manager.user_preferences['aim_text_position'] = text_pos
+
+    def update_aim_type(self, aim_type):
+        self.data_manager.user_preferences["aim_line_type"] = aim_type
+
+    def update_start_y_state(self):
+        """Enable or disable the Baseline input and its label based on the selected line type."""
+        is_flat = self.aim_type_flat.isChecked()
+        self.aim_baseline_input.setEnabled(not is_flat)
+        if is_flat:
+            # Disable the input and change its appearance to indicate it's disabled
+            self.aim_baseline_label.setStyleSheet("color: grey;")
+            self.aim_baseline_input.setStyleSheet("background-color: #f0f0f0; color: grey;")
+            self.aim_baseline_input.setText('')
+            self.aim_text_input.setText('')
+        else:
+            # Enable the input and revert its appearance
+            self.aim_baseline_label.setStyleSheet("color: black")
+            self.aim_baseline_input.setStyleSheet("background-color: white;")
+            self.aim_target_input.setStyleSheet("")
 
     def configure_aim_lines(self):
         dialog = ConfigureAimLinesDialog(self.figure_manager, self)

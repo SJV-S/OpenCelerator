@@ -1,14 +1,22 @@
 import platform
+import os
 
 
 def get_system_font():
     os_name = platform.system()
-    fonts = {
-        "Windows": ("Tahoma", 12),
-        "Darwin": ("Tahoma", 12),
-        "Linux": ("DejaVu Sans", 12)
-    }
-    return fonts.get(os_name, ("Sans serif", 12))
+
+    if os_name == "Linux":
+        available_fonts = os.popen('fc-list : family').read()
+        if "Tahoma" in available_fonts:
+            return ("Tahoma", 12)
+        else:
+            return ("DejaVu Sans", 12)
+    else:
+        fonts = {
+            "Windows": ("Tahoma", 12),
+            "Darwin": ("Tahoma", 12),
+        }
+        return fonts.get(os_name, ("Sans serif", 12))
 
 
 font_family, size = get_system_font()

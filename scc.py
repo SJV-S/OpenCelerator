@@ -5,8 +5,15 @@ import platform
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import numpy as np
 import pandas as pd
-import os
-import sys
+
+'''
+x = math.pow(10, math.tan(math.radians(angle))*math.log10(2)/math.tan(math.radians(34)))
+där "angle" är vinkeln i grader på en passlinje.
+
+Formel för att beräkna storleken på den vinkel a som motsvarar förstoringen x.
+angle = math.degrees(math.atan(math.log10(x)/(math.log10(2)/math.tan(math.radians(34)))))
+
+'''
 
 
 class Chart:
@@ -67,12 +74,18 @@ class Chart:
 
     def get_system_font(self):
         os_name = platform.system()
+
         if os_name == "Windows":
             return "Tahoma"
         elif os_name == "Darwin":  # macOS
             return "Tahoma"
         elif os_name == "Linux":
-            return "DejaVu Sans"
+            # Check if Tahoma is available in Matplotlib's font list
+            available_fonts = [f.name for f in font_manager.fontManager.ttflist]
+            if "Tahoma" in available_fonts:
+                return "Tahoma"
+            else:
+                return "DejaVu Sans"
         else:
             return "Sans-serif"
 

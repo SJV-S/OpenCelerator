@@ -5,6 +5,7 @@ import copy
 import json
 import platform
 from datetime import datetime
+import math
 
 
 class DataManager:
@@ -75,8 +76,11 @@ class DataManager:
                 'date1': None,
                 'date2': None,
                 'y': None,
+                'baseline': None,
                 'text': None,
-                'font_size': 8,
+                'text_pos': None,
+                'line_type': 'Flat',
+                'font_size': 10,
                 'font_color': '#000000',
                 'bg_color': '#FFFFFF',
                 'edge_color': '#000000',
@@ -90,6 +94,7 @@ class DataManager:
                 'date2': None,
                 'text': None,
                 'text_date': None,
+                'forward_projection': 0,
                 'font_size': 10,
                 'font_color': '#008000',
                 'bg_color': '#FFFFFF',
@@ -106,6 +111,7 @@ class DataManager:
                 'text': None,
                 'text_y': None,
                 'text_date': None,
+                'forward_projection': 0,
                 'font_size': 10,
                 'font_color': '#EE4B2B',
                 'bg_color': '#FFFFFF',
@@ -125,6 +131,8 @@ class DataManager:
                 'width': 10,
                 'phase_text_type': 'Flag',
                 'phase_text_position': 'Top',
+                'aim_line_type': 'Flat',
+                'aim_text_position': 'Middle',
                 'fit_method': 'Least-squares',
                 'bounce_envelope': 'None',
                 'celeration_unit': 'Weekly (standard)',
@@ -140,12 +148,14 @@ class DataManager:
                 'trend_err_style': self.default_err_trend_style,
                 'recent_imports': [],
                 'recent_charts': [],
+                'autosave': True,
             }
 
             self.chart_data = {
                 'type': 'DailyMinute',
                 'raw_data': {'d': [], 'm': [], 'c': [], 'i': []},
                 'raw_df': pd.DataFrame(columns=['d', 'm', 'c', 'i', 'o']),
+                'import_path': None,
                 'phase': [],
                 'aim': [],
                 'trend_corr': [],
@@ -176,6 +186,10 @@ class DataManager:
                 }
             }
 
+            # Necessary for backwards compatibility corrections
+            # Also used for not trigger autosave in some cases
+            self.default_chart = copy.deepcopy(self.chart_data)
+
             # Celeration unit dictionary
             self.cel_unit_dict = {'Daily': 1,
                                   'Weekly (standard)': 7,
@@ -199,6 +213,58 @@ class DataManager:
 
             # Apply settings
             self.get_user_preferences()
+
+    def ensure_backwards_compatibility(self, sample_dict, default_dict):
+        for key, value in default_dict.items():
+            if key not in sample_dict:
+                sample_dict[key] = value
+            elif isinstance(value, dict) and isinstance(sample_dict[key], dict):
+                # Apply recursively if value in default_dict and sample_dict are dictionaries
+                self.ensure_backwards_compatibility(sample_dict[key], value)
+        return sample_dict
+
+    def format_y_value(self, y_value):
+        if y_value >= 10:
+            return int(y_value)
+        elif y_value >= 1:
+            return round(y_value, 1)
+        elif y_value >= 0.1:
+            return round(y_value, 2)
+        elif y_value >= 0.01:
+            return round(y_value, 3)
+        else:
+            return round(y_value, 4)
+
+    def get_aim_slope_text(self, text_pos, xmin, xmax, ymin, ymax, x_to_day_count):
+        # Convert dimensionless x-values to days and get celeration label
+        daily_slope = (np.log10(ymin) - np.log10(ymax)) / (x_to_day_count[xmin] - x_to_day_count[xmax])
+        cel_label = self.trend_fitter.get_trend_label(daily_slope)
+
+        chart_type = self.user_preferences['chart_type'][0].lower()
+        doubling = {'d': 7, 'w': 5, 'm': 6, 'y': 5}
+        unit = doubling[chart_type]
+        celeration = (ymax / ymin) ** (unit / (xmax - xmin))
+        angle = np.degrees(np.atan(np.log10(celeration) / (np.log10(2) / np.tan(np.radians(34)))))
+
+        if text_pos == 'Left':
+            ha = 'left'
+            rel_pos = 0
+        elif text_pos == 'Right':
+            ha = 'right'
+            rel_pos = 1
+        else:
+            ha = 'center'
+            rel_pos = 0.5
+
+        pos_x = xmin + rel_pos * (xmax - xmin)
+        pos_y = ymin * (ymax / ymin) ** rel_pos
+
+        # Get text offset
+        text_distance_to_line = 0.3
+        text_offset_x = -text_distance_to_line * np.sin(np.radians(angle))
+        text_offset_y = text_distance_to_line * np.cos(np.radians(angle))
+
+        return pos_x, pos_y, ha, angle, cel_label, text_offset_x, text_offset_y
 
     def find_closest_date(self, date_str, date_to_pos, date_format=None):
         if date_format is None:
@@ -244,24 +310,12 @@ class DataManager:
         df['d'] = pd.to_datetime(df['d'])
 
         if self.user_preferences['chart_data_agg'] == "stack":
-            # Define the date keys and the earliest and latest date for filtering
-            date_keys = pd.Series(list(date_to_x.keys()))
-            earliest_date = date_keys.min()
-            latest_date = date_keys.max()
-
-            # Filter the rows before conversion
-            offsets = {
-                'D': pd.Timedelta(days=1),
-                'W': pd.Timedelta(weeks=1),
-                'M': pd.DateOffset(months=1),
-                'Y': pd.DateOffset(years=1)
-            }
-            offset = offsets[agg_type]
-            df = df[(df['d'] >= earliest_date - offset) & (df['d'] < latest_date + offset)]
-
-            # Convert each date in the 'd' column to the nearest date in date_to_x.keys()
-            date_array = date_keys.values
-            df['d'] = df['d'].apply(lambda d: date_array[np.argmin(np.abs(date_array - d.to_numpy()))])
+            if 'D' != agg_type:
+                date_keys = pd.Series(list(date_to_x.keys()))
+                date_keys = sorted(date_keys)
+                bins = pd.cut(df['d'], bins=date_keys, right=True, labels=date_keys[1:])
+                df['d'] = bins  # Assign the corresponding upper bound to each row
+                df.dropna(subset=['d'], inplace=True)  # Drop rows where 'd' is None (those that were discarded)
         else:
             # Aggregating the values as per user preferences.
             df.set_index('d', inplace=True)
@@ -276,10 +330,10 @@ class DataManager:
         df = df[df['d'].isin(date_to_x.keys())]
 
         # Get plot variables
-        df['x'] = pd.to_datetime(df['d']).map(date_to_x)  # Convert date to x position
+        df['x'] = pd.to_datetime(df['d']).map(date_to_x)
         df['floor'] = 1 / df['m']
 
-        # Replace 0 in 'm' with NaN for safety or  everything in m with 1
+        # Replace 0 in 'm' with NaN for safety or everything in m with 1
         if 'Minute' in chart_type:
             m_safe = df['m'].replace(0, np.nan)
         else:
@@ -309,7 +363,7 @@ class DataManager:
         # Used for plotting, styling, and trend fitting
         self.df_plot = df
 
-    def data_import_data(self, file_path):
+    def data_import_raw(self, file_path):
         data_cols = ['m', 'h', 's', 'c', 'i', 'd', 'o']
         # Determine file type
         if file_path.endswith('.csv'):
@@ -364,8 +418,8 @@ class DataManager:
     def update_view_check(self, setting, state):
         self.chart_data['view_check'][setting] = bool(state)
 
-    def get_trend(self, x1, x2, corr, date_to_x, x_to_day_count, fit_method=None, bounce_envelope=None):
-        result = self.trend_fitter.get_trend(x1, x2, corr, date_to_x, x_to_day_count, fit_method, bounce_envelope)
+    def get_trend(self, x1, x2, corr, x_to_day_count, fit_method=None, bounce_envelope=None, forward_projection=None):
+        result = self.trend_fitter.get_trend(x1, x2, corr, x_to_day_count, fit_method, bounce_envelope, forward_projection)
         return result
 
     def set_chart_type(self, new_type):
@@ -433,13 +487,7 @@ class DataManager:
             try:
                 with open(filepath, 'r') as f:
                     loaded_pref = json.load(f)
-                    if self.user_preferences.keys() == loaded_pref.keys():
-                        # Load saved preferences
-                        self.user_preferences = loaded_pref
-                    else:
-                        # Reset json to default due to missing keys
-                        with open(filepath, 'w') as f:
-                            json.dump(self.user_preferences, f, indent=4)
+                    self.user_preferences = self.ensure_backwards_compatibility(loaded_pref, self.user_preferences)
             except:
                 # Reset malformed json to default
                 with open(filepath, 'w') as f:
@@ -578,7 +626,7 @@ class TrendFitter:
 
         return slope, intercept
 
-    def extract_trend(self, x, y, x_to_day_count, fit_method, bounce_envelope):
+    def extract_trend(self, x, y, x_to_day_count, fit_method, bounce_envelope, forward_projection):
         x = np.array(x)
         y = np.array(y)
 
@@ -593,7 +641,13 @@ class TrendFitter:
 
         # Used to obtain daily slope regardless of chart type
         x_as_day_count = np.array([x_to_day_count[x_i] for x_i in list(x)])
-        extended_x = np.arange(x[0], x[-1] + self.data_manager.user_preferences['forward_projection'] + 1)
+
+        if forward_projection is None:
+            # Plotting trend for the first time
+            extended_x = np.arange(x[0], x[-1] + self.data_manager.user_preferences['forward_projection'] + 1)
+        else:
+            # Loading a finalized trend
+            extended_x = np.arange(x[0], x[-1] + forward_projection + 1)
 
         if fit_method is None:
             fit_method = self.data_manager.user_preferences['fit_method']
@@ -655,7 +709,7 @@ class TrendFitter:
 
         return trend, celeration_slope_label, extended_x, upper_bounce, lower_bounce, bounce_est_label, x_min_lim, x_max_lin
 
-    def get_trend(self, x1, x2, corr, date_to_x, x_to_day_count, fit_method=None, bounce_envelope=None):
+    def get_trend(self, x1, x2, corr, x_to_day_count, fit_method=None, bounce_envelope=None, forward_projection=None):
         min_x = min(x1, x2)
         max_x = max(x1, x2)
 
@@ -678,7 +732,7 @@ class TrendFitter:
             return
 
         if len(y_slice) >= min_sample and x1 in x_to_day_count.keys() and x2 in x_to_day_count.keys():
-            return self.extract_trend(x_slice, y_slice, x_to_day_count, fit_method, bounce_envelope)
+            return self.extract_trend(x_slice, y_slice, x_to_day_count, fit_method, bounce_envelope, forward_projection)
 
 
 

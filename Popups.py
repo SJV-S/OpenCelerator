@@ -233,8 +233,7 @@ class ConfigureTemplateDialog(QDialog):
         layout = QHBoxLayout(self)
 
         # Group box for configuration options
-        config_group_box = QGroupBox('Styles')
-        config_layout = QVBoxLayout(config_group_box)
+        config_layout = QVBoxLayout()
 
         # Line text
         self.line_text = QLineEdit('')
@@ -252,18 +251,6 @@ class ConfigureTemplateDialog(QDialog):
         self.font_size_spinbox.setRange(8, 32)  # Example range
         config_layout.addWidget(QLabel("Font Size"))
         config_layout.addWidget(self.font_size_spinbox)
-
-        # Box background color picker
-        self.box_bg_color_button = QPushButton("Choose Background Color")
-        self.box_bg_color_button.clicked.connect(self.choose_bg_color)
-        config_layout.addWidget(QLabel("Box Background Color"))
-        config_layout.addWidget(self.box_bg_color_button)
-
-        # Box edge color picker
-        self.box_edge_color_button = QPushButton("Choose Edge Color")
-        self.box_edge_color_button.clicked.connect(self.choose_edge_color)
-        config_layout.addWidget(QLabel("Box Edge Color"))
-        config_layout.addWidget(self.box_edge_color_button)
 
         # Line color picker
         self.line_color_button = QPushButton("Choose Line Color")
@@ -297,7 +284,7 @@ class ConfigureTemplateDialog(QDialog):
         set_default_btn.clicked.connect(self.set_default_style)
         config_layout.addWidget(set_default_btn)
 
-        layout.addWidget(config_group_box)
+        layout.addLayout(config_layout)
 
         # List box and buttons
         right_layout = QVBoxLayout()
@@ -329,8 +316,6 @@ class ConfigureTemplateDialog(QDialog):
     def set_default_style(self):
         self.default_item['font_size'] = self.font_size_spinbox.value()
         self.default_item['font_color'] = self.font_color_button.text()
-        self.default_item['bg_color'] = self.box_bg_color_button.text()
-        self.default_item['edge_color'] = self.box_edge_color_button.text()
         self.default_item['line_color'] = self.line_color_button.text()
         self.default_item['linewidth'] = self.line_width_spinbox.value()
         self.default_item['linestyle'] = self.line_style_map[self.line_style_combobox.currentText()]
@@ -347,8 +332,6 @@ class ConfigureTemplateDialog(QDialog):
             self.font_size_spinbox.setValue(item_data.get('font_size', 12))
             self.line_text.setText(item_data.get('text', ''))
             self.set_color_button_style(self.font_color_button, item_data.get('font_color', '#000000'))
-            self.set_color_button_style(self.box_bg_color_button, item_data.get('bg_color', '#FFFFFF'))
-            self.set_color_button_style(self.box_edge_color_button, item_data.get('edge_color', '#000000'))
             self.set_color_button_style(self.line_color_button, item_data.get('line_color', '#000000'))
             self.line_width_spinbox.setValue(item_data.get('linewidth', 1))
             style_value = item_data.get('linestyle', '-')
@@ -360,8 +343,6 @@ class ConfigureTemplateDialog(QDialog):
         self.font_size_spinbox.setValue(self.default_item['font_size'])
         self.line_text.setText(self.default_item['text'])
         self.set_color_button_style(self.font_color_button, self.default_item['font_color'])
-        self.set_color_button_style(self.box_bg_color_button, self.default_item['bg_color'])
-        self.set_color_button_style(self.box_edge_color_button, self.default_item['edge_color'])
         self.set_color_button_style(self.line_color_button, self.default_item['line_color'])
         self.line_width_spinbox.setValue(self.default_item['linewidth'])
         style_value = self.default_item['linestyle']
@@ -378,8 +359,6 @@ class ConfigureTemplateDialog(QDialog):
             'text': self.line_text.text(),
             'font_size': self.font_size_spinbox.value(),
             'font_color': self.font_color_button.text(),
-            'bg_color': self.box_bg_color_button.text(),
-            'edge_color': self.box_edge_color_button.text(),
             'line_color': self.line_color_button.text(),
             'linewidth': self.line_width_spinbox.value(),
             'linestyle': self.line_style_map[self.line_style_combobox.currentText()],
@@ -392,12 +371,6 @@ class ConfigureTemplateDialog(QDialog):
 
     def choose_font_color(self):
         self.select_color(self.font_color_button)
-
-    def choose_bg_color(self):
-        self.select_color(self.box_bg_color_button)
-
-    def choose_edge_color(self):
-        self.select_color(self.box_edge_color_button)
 
     def choose_line_color(self):
         self.select_color(self.line_color_button)
@@ -441,8 +414,6 @@ class ConfigurePhaseLinesDialog(ConfigureTemplateDialog):
             'text': self.line_text.text(),
             'font_size': self.font_size_spinbox.value(),
             'font_color': self.font_color_button.text(),
-            'bg_color': self.box_bg_color_button.text(),
-            'edge_color': self.box_edge_color_button.text(),
             'line_color': self.line_color_button.text(),
             'linewidth': self.line_width_spinbox.value(),
             'linestyle': self.line_style_map[self.line_style_combobox.currentText()],
@@ -481,8 +452,6 @@ class ConfigureAimLinesDialog(ConfigureTemplateDialog):
             'text': self.line_text.text(),
             'font_size': self.font_size_spinbox.value(),
             'font_color': self.font_color_button.text(),
-            'bg_color': self.box_bg_color_button.text(),
-            'edge_color': self.box_edge_color_button.text(),
             'line_color': self.line_color_button.text(),
             'linewidth': self.line_width_spinbox.value(),
             'linestyle': self.line_style_map[self.line_style_combobox.currentText()],
@@ -701,7 +670,7 @@ class SupportDevDialog(QDialog):
             "p.center { text-align: center; }"
             "</style>"
             "<p class='center'><b>OpenCelerator will forever remain free and open-source </b></p>"
-            "<p> Months of work have gone into this project. There is no team or funding behind it. Just me. "
+            "<p> About half a year's work has gone into this project. There is no team or funding behind it. Just me. "
             "If you find the app useful and would like to see its development continue, please consider donating.</p>"
             "<p>Other ways to contribute:</p>"
             "<ul>"
@@ -760,29 +729,22 @@ class BitcoinDonationPopup(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Bitcoin")
         self.initUI()
+        self.timer = None  # Initialize the timer as None
 
     def initUI(self):
-        self.layout = QVBoxLayout(self)  # Use QVBoxLayout for main layout
+        self.layout = QVBoxLayout(self)
 
-        # Toggle button
         self.toggleButton = QPushButton("Lightning", self)
         self.toggleButton.clicked.connect(self.toggleView)
         self.layout.addWidget(self.toggleButton)
 
-        # Stacked layout to switch between base chain and lightning
         self.stackedLayout = QStackedLayout()
 
-        # First layout (Base chain)
         self.first_frame = QFrame(self)
-        self.first_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self.first_layout = QVBoxLayout(self.first_frame)
-        self.first_layout.setContentsMargins(0, 0, 0, 0)  # Reduce padding around the label and image
-        self.first_layout.setSpacing(5)  # Minimal spacing between widgets
 
         first_label = QLabel("Bitcoin (Base chain)", self)
         first_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        first_label.setStyleSheet(
-            "font: normal 10pt; margin: 0; padding: 0")  # Ensure the font is not italic
         self.first_layout.addWidget(first_label)
 
         self.imageLabel1 = QLabel(self)
@@ -796,16 +758,11 @@ class BitcoinDonationPopup(QDialog):
 
         self.stackedLayout.addWidget(self.first_frame)
 
-        # Second layout (Lightning)
         self.second_frame = QFrame(self)
-        self.second_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self.second_layout = QVBoxLayout(self.second_frame)
-        self.second_layout.setContentsMargins(0, 0, 0, 0)  # Reduce padding around the label and image
-        self.second_layout.setSpacing(5)  # Minimal spacing between widgets
 
         second_label = QLabel("Lightning (LNURL)", self)
         second_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        second_label.setStyleSheet("font: normal 10pt; margin: 0; padding: 0; font-size: 15px")
         self.second_layout.addWidget(second_label)
 
         self.imageLabel2 = QLabel(self)
@@ -833,15 +790,33 @@ class BitcoinDonationPopup(QDialog):
         current_index = self.stackedLayout.currentIndex()
         new_index = 1 - current_index
         self.stackedLayout.setCurrentIndex(new_index)
-        if new_index == 0:
-            self.toggleButton.setText("Lightning")
-        else:
-            self.toggleButton.setText("Base chain")
+        self.toggleButton.setText("Lightning" if new_index == 0 else "Base chain")
 
     def copyAddress(self, address, button):
         clipboard = QApplication.clipboard()
         clipboard.setText(address)
         button.setText("Copied!")
-        QTimer.singleShot(3000, lambda: button.setText("Copy Address"))
+
+        # Cancel any existing timer
+        if self.timer:
+            self.timer.stop()
+
+        # Create and start a new timer
+        self.timer = QTimer()
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(lambda: self.resetButtonText(button))
+        self.timer.start(3000)
+
+    def resetButtonText(self, button):
+        if self.isVisible():  # Check if the dialog is still visible
+            button.setText("Copy Address")
+
+    def closeEvent(self, event):
+        # Stop the timer when the dialog is closing
+        if self.timer:
+            self.timer.stop()
+        super().closeEvent(event)
+
+
 
 

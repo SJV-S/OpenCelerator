@@ -9,6 +9,7 @@ from DataManager import DataManager
 import copy
 import json
 import re
+import os
 
 
 class FigureManager(QWidget):
@@ -58,11 +59,6 @@ class FigureManager(QWidget):
         # For eval
         self.date_tuple_pattern = re.compile(r"\('(\d{4}-\d{2}-\d{2})', '(\d{4}-\d{2}-\d{2})'\)")
         self.style_tuple_pattern = re.compile(r"\('([A-Za-z_]{1,30})', '([A-Za-z_]{1,30})'\)")
-
-        # Fonts sizes
-        self.aim_font = 8
-        self.phase_font = 8
-        self.trend_est_font = 10
 
         # Data point styling control variables
         self.x_style_array = None
@@ -576,7 +572,7 @@ class FigureManager(QWidget):
                                       zorder=2,
                                       facecolors=self.err_face_colors,
                                       edgecolors=edge,
-                                      marker='x',
+                                      marker=None,
                                       s=self.err_marker_sizes,
                                       linewidth=1)  # Marker thickness, not point lines
         # Selectively set marker styles
@@ -603,7 +599,7 @@ class FigureManager(QWidget):
                                           zorder=2,
                                           facecolors=self.floor_face_colors,
                                           edgecolors=edge,
-                                          marker='_',
+                                          marker=None,
                                           s=self.floor_marker_sizes,
                                           linewidth=self.data_manager.default_floor_point_style['markeredgewidth'])  # Marker thickness, not point lines
             # Selectively set marker styles
@@ -612,6 +608,7 @@ class FigureManager(QWidget):
             self.chart_objects['floor_obj'].append(floor_scatter)
 
     def phase_replot(self, phase):
+        phase = self.data_manager.ensure_backwards_compatibility(phase, self.data_manager.default_phase_style)
         date = self.data_manager.find_closest_date(phase['date'], self.Chart.date_to_pos)
         if date:
             x_i = self.Chart.date_to_pos[date]
@@ -620,7 +617,7 @@ class FigureManager(QWidget):
             ymin = self.Chart.ymin
             ymax = self.Chart.ymax
             if phase['text_position'] == 'Top':
-                y_text_pos = ymax / 2
+                y_text_pos = ymax / 3
             elif phase['text_position'] == 'Center':
                 y_text_pos = (ymin * ymax) ** 0.5
             elif phase['text_position'] == 'Bottom':
@@ -646,7 +643,6 @@ class FigureManager(QWidget):
             phase_text = self.ax.text(x_i + 1,
                                       y_text_pos,
                                       phase['text'],
-                                      bbox=bbox,
                                       ha="left",
                                       va=va,
                                       rotation=rotation,
@@ -655,40 +651,48 @@ class FigureManager(QWidget):
 
             self.chart_objects['phase_obj'].append((phase_line, phase_text))
 
-
     def aim_replot(self, aim):
+        aim = self.data_manager.ensure_backwards_compatibility(aim, self.data_manager.default_aim_style)
         date1 = self.data_manager.find_closest_date(aim['date1'], self.Chart.date_to_pos)
         date2 = self.data_manager.find_closest_date(aim['date2'], self.Chart.date_to_pos)
-        if all(key in self.Chart.date_to_pos for key in [date1, date2]):
+        if date1 != date2 and all(key in self.Chart.date_to_pos for key in [date1, date2]):
             xmin = self.Chart.date_to_pos[date1]
             xmax = self.Chart.date_to_pos[date2]
-            y_i = float(aim['y'])
+            target = float(aim['y'])
 
-            aim_line = self.ax.hlines(xmin=xmin,
-                                      xmax=xmax,
-                                      y=y_i,
-                                      colors=aim['line_color'],
-                                      linewidth=aim['linewidth'],
-                                      linestyle=aim['linestyle'])
-            aim_note = self.ax.text(xmax,
-                                    y_i,
-                                    aim['text'],
-                                    color=aim['font_color'],
-                                    bbox=dict(facecolor=aim['bg_color'],
-                                              edgecolor=aim['edge_color']),
-                                    ha="left",
-                                    va="bottom",
-                                    fontsize=aim['font_size'])
+            line_type = aim['line_type']
+            if line_type == 'Slope':
+                baseline = float(aim['baseline'])
+                pos_x, pos_y, ha, angle, _, text_offset_x, text_offset_y = self.data_manager.get_aim_slope_text(aim['text_pos'], xmin, xmax, baseline, target,  self.Chart.x_to_day_count)
+
+                aim_line, = self.ax.plot([xmin, xmax], [baseline, target],
+                                          color=aim['line_color'],
+                                          linewidth=aim['linewidth'],
+                                          linestyle=aim['linestyle'])
+
+                aim_note = self.ax.annotate(aim['text'], xy=(pos_x, pos_y), xytext=(text_offset_x, text_offset_y), textcoords='offset fontsize', ha=ha, va='bottom', rotation=angle, rotation_mode='anchor', color=aim['font_color'], fontsize=aim['font_size'])
+
+            else:
+                text_x, ha = self.aim_manager.aim_get_text_pos(xmin, xmax, text_pos=aim['text_pos'])
+                aim_line = self.ax.hlines(xmin=xmin,
+                                          xmax=xmax,
+                                          y=target,
+                                          colors=aim['line_color'],
+                                          linewidth=aim['linewidth'],
+                                          linestyle=aim['linestyle'])
+
+                aim_note = self.ax.text(text_x,
+                                        target * 1.2,
+                                        aim['text'],
+                                        color=aim['font_color'],
+                                        ha=ha,
+                                        fontsize=aim['font_size'])
 
             self.chart_objects['aim_obj'].append((aim_line, aim_note))
 
-    def plot_aim_line(self, xmin, xmax, target, note):
-        # Runs only on replot
-        aim_line = self.ax.hlines(xmin=xmin, xmax=xmax, y=target, colors="black", linewidth=1, linestyle="-")
-        aim_note = self.ax.text(xmax, target, note, bbox=dict(facecolor='white', edgecolor='black'), ha="left", va="bottom", fontsize=self.aim_font)
-        self.chart_objects['aim_obj'].append((aim_line, aim_note))
-
     def trend_replot(self, trend, corr=True):
+        default_trend = self.data_manager.default_corr_trend_style if corr else self.data_manager.default_err_trend_style
+        trend = self.data_manager.ensure_backwards_compatibility(trend, default_trend)
         date1 = pd.to_datetime(trend['date1'])
         date2 = pd.to_datetime(trend['date2'])
         text_date = pd.to_datetime(trend['text_date'])
@@ -698,7 +702,7 @@ class FigureManager(QWidget):
             xmax = self.Chart.date_to_pos[date2]
             xtext = self.Chart.date_to_pos[text_date]
 
-            result = self.data_manager.get_trend(xmin, xmax, corr, self.Chart.date_to_pos, self.Chart.x_to_day_count, trend['fit_method'], trend['bounce_envelope'])
+            result = self.data_manager.get_trend(xmin, xmax, corr, self.Chart.x_to_day_count, trend['fit_method'], trend['bounce_envelope'], trend['forward_projection'])
             if result:
                 trend_vals, trend_est, x_slice, upper_bounce, lower_bounce, bounce_est_label, x_min_lim, x_max_lim = result
 
@@ -912,8 +916,8 @@ class FigureManager(QWidget):
             date, order = result
             return date, order
 
-    def aim_from_form(self, note, target, start, deadline):
-        self.aim_manager.aim_from_form(note, target, start, deadline)
+    def aim_from_form(self, note, baseline, target, start, deadline):
+        self.aim_manager.aim_from_form(note, baseline, target, start, deadline)
 
     def aim_cleanup(self):
         self.aim_manager.aim_cleanup()
@@ -947,7 +951,7 @@ class FigureManager(QWidget):
         self.new_chart(start_date=self.Chart.start_date)
 
     def fig_import_data(self, file_path, keep_current_start_date=False):
-        self.data_manager.data_import_data(file_path)
+        self.data_manager.data_import_raw(file_path)
 
         if keep_current_start_date:
             start_date = self.data_manager.chart_data['start_date']
@@ -967,36 +971,31 @@ class FigureManager(QWidget):
 
     def fig_load_chart(self, full_path):
         with open(full_path, 'r') as file:
-            default_chart = self.data_manager.chart_data
+            default_chart = self.data_manager.default_chart
             loaded_chart = json.load(file)
 
-            # Add default values if one is loading an older chart file
-            for key in default_chart:
-                if key not in loaded_chart:
-                    loaded_chart[key] = default_chart[key]
-            for key in default_chart['view_check']:
-                if key not in loaded_chart['view_check']:
-                    loaded_chart['view_check'][key] = default_chart['view_check'][key]
-
+            loaded_chart = self.data_manager.ensure_backwards_compatibility(loaded_chart, default_chart)
             self.data_manager.chart_data = loaded_chart
-
-        # Handling for ensuring backwards compatibility with older chart files that might be missing certain keys
-        # Delete incompatible phase lines
-        self.data_manager.chart_data['phase'] = [phase for phase in self.data_manager.chart_data['phase'] if 'y' not in phase.keys()]
 
         # Handling for setting the start date
         start_date = self.data_manager.chart_data['start_date']
         # Set chart type
         self.data_manager.user_preferences['chart_type'] = self.data_manager.chart_data['type']
 
-        # Create raw_df
-        df = pd.DataFrame.from_dict(self.data_manager.chart_data["raw_data"])
-        df['d'] = pd.to_datetime(df['d'])  # Convert back to a datetime column with no time or timezone information
-        self.data_manager.chart_data['raw_df'] = df
+        # Update df if an import path can be found
+        import_path = self.data_manager.chart_data['import_path']
+        if import_path and os.path.exists(import_path):
+            # Will set raw df with the latest data set
+            self.data_manager.data_import_raw(import_path)
+        else:
+            # Create raw_df from json
+            df = pd.DataFrame.from_dict(self.data_manager.chart_data["raw_data"])
+            df['d'] = pd.to_datetime(df['d'])  # Convert back to a datetime column with no time or timezone information
+            self.data_manager.chart_data['raw_df'] = df
 
-        # Ensure backwards compatibility for missing o
-        if 'o' not in df.columns:
-            df['o'] = 0  # Add the column with zeros
+            # Ensure backwards compatibility for missing o
+            if 'o' not in df.columns:
+                df['o'] = 0  # Add the column with zeros
 
         # Generate chart
         self.new_chart(start_date=start_date)
@@ -1065,7 +1064,7 @@ class PhaseManager:
                 ymin = self.figure_manager.Chart.ymin
                 ymax = self.figure_manager.Chart.ymax
                 if phase_text_position == 'Top':
-                    self.y_text_pos = ymax / 2
+                    self.y_text_pos = ymax / 3
                 elif phase_text_position == 'Center':
                     self.y_text_pos = (ymin * ymax) ** 0.5
                 elif phase_text_position == 'Bottom':
@@ -1086,7 +1085,6 @@ class PhaseManager:
                 self.temp_phase_line_text = self.figure_manager.ax.text(x + 1,
                                                                         self.y_text_pos,
                                                                         text,
-                                                                        bbox=bbox,
                                                                         ha="left",
                                                                         va=va,
                                                                         rotation=rotation,
@@ -1120,10 +1118,13 @@ class AimManager:
         self.aim_temp_note = None
         self.aim_first_click_x = None
         self.aim_second_click_x = None
-        self.aim_y = None
+        self.aim_first_click_y = None
+        self.aim_second_click_y = None
+        self.aim_target = None
         self.aim_first_click_indicator = None
+        self.slope = None
 
-    def aim_from_form(self, text, target, start, deadline):
+    def aim_from_form(self, text, baseline, target, start, deadline):
         try:
             target = float(target)
         except (ValueError, TypeError):
@@ -1146,6 +1147,9 @@ class AimManager:
             aim['date2'] = xmax_date
             aim['y'] = target
             aim['text'] = text
+            aim['text_pos'] = self.figure_manager.data_manager.user_preferences['aim_text_position']
+            aim['baseline'] = None if baseline == '' else baseline
+            aim['line_type'] = self.figure_manager.data_manager.user_preferences["aim_line_type"]
 
             self.figure_manager.data_manager.save_plot_item(item=aim, item_type='aim')
             self.figure_manager.aim_replot(aim)
@@ -1154,6 +1158,9 @@ class AimManager:
     def aim_cleanup(self):
         self.aim_first_click_x = None
         self.aim_second_click_x = None
+        self.aim_first_click_y = None
+        self.aim_second_click_y = None
+        self.slope = None
 
         if self.aim_temp_line:
             self.aim_temp_line.remove()
@@ -1175,48 +1182,88 @@ class AimManager:
             note.remove()
             self.figure_manager.refresh()
 
+    def aim_get_text_pos(self, xmin, xmax, text_pos=None):
+        if text_pos is None:
+            text_pos = self.figure_manager.data_manager.user_preferences['aim_text_position']
+
+        if text_pos == 'Left':
+            ha = 'left'
+            text_x = xmin
+        elif text_pos == 'Right':
+            ha = 'right'
+            text_x = xmax
+        else:
+            ha = 'center'
+            text_x = (xmin + xmax) / 2
+
+        return text_x, ha
+
+    def aim_temp_line_n_text(self, xmin, xmax, note):
+        text_mode = self.figure_manager.data_manager.user_preferences['aim_line_type']
+        font_size = self.figure_manager.data_manager.default_aim_style['font_size']
+        if text_mode == 'Flat':
+            text_x, ha = self.aim_get_text_pos(xmin, xmax)
+            self.aim_temp_line = self.figure_manager.ax.hlines(xmin=xmin, xmax=xmax, y=self.aim_first_click_y, colors="magenta", linewidth=1.5, linestyle="--")
+            self.aim_temp_note = self.figure_manager.ax.text(text_x, self.aim_first_click_y * 1.2, note, ha=ha, fontsize=font_size, color='magenta')
+        else:
+            if xmax > xmin:
+                self.aim_temp_line, = self.figure_manager.ax.plot([xmin, xmax], [self.aim_first_click_y, self.aim_second_click_y], color='magenta', linewidth=1.5, linestyle='--')
+                text_pos = self.figure_manager.data_manager.user_preferences['aim_text_position']
+                pos_x, pos_y, ha, angle, self.slope, text_offset_x, text_offset_y = self.figure_manager.data_manager.get_aim_slope_text(text_pos,
+                                                                                                          xmin,
+                                                                                                          xmax,
+                                                                                                          self.aim_first_click_y,
+                                                                                                          self.aim_second_click_y,
+                                                                                                          self.figure_manager.Chart.x_to_day_count,
+                                                                                                          )
+                self.aim_temp_note = self.figure_manager.ax.annotate(self.slope, xy=(pos_x, pos_y), xytext=(text_offset_x, text_offset_y), textcoords='offset fontsize', ha=ha, va='bottom', rotation=angle, rotation_mode='anchor', color='magenta', fontsize=font_size)
+            else:
+                self.aim_cleanup()
+
     def aim_click_info(self, event, note):
-        # Handling for Weekly
-        x_i = self.figure_manager.data_manager.find_closest_x(int(event.xdata), self.figure_manager.Chart.date_to_pos)
-        if x_i is not None:
-            if self.aim_temp_line:
-                self.aim_temp_line.remove()
-                self.aim_temp_line = None
-            if self.aim_temp_note:
-                self.aim_temp_note.remove()
-                self.aim_temp_note = None
+        if event.xdata is not None:
 
-            self.aim_y = round(event.ydata, 4)
-            if self.aim_first_click_x is None:
-                self.aim_first_click_x = x_i
+            # Handling for Weekly
+            x_i = self.figure_manager.data_manager.find_closest_x(int(event.xdata), self.figure_manager.Chart.date_to_pos)
 
-                self.aim_first_click_indicator, = self.figure_manager.ax.plot(self.aim_first_click_x, self.aim_y, marker='o', color='magenta')
+            if x_i is not None:
+                if self.aim_temp_line:
+                    self.aim_temp_line.remove()
+                    self.aim_temp_line = None
+                if self.aim_temp_note:
+                    self.aim_temp_note.remove()
+                    self.aim_temp_note = None
 
-                self.figure_manager.refresh()
-                return None
+                self.aim_target = round(event.ydata, 4)
+                if self.aim_first_click_x is None:
+                    self.aim_first_click_x = x_i
+                    self.aim_first_click_y = self.figure_manager.data_manager.format_y_value(event.ydata)
+                    self.aim_first_click_indicator, = self.figure_manager.ax.plot(self.aim_first_click_x, self.aim_target, marker='o', color='magenta')
+                    d1 = self.figure_manager.x_to_date[self.aim_first_click_x]
+                    self.figure_manager.refresh()
+                    return 'first', self.aim_first_click_y, d1
 
-            elif self.aim_second_click_x is None:
-                self.aim_second_click_x = x_i
+                elif self.aim_second_click_x is None:
+                    self.aim_second_click_x = x_i
+                    self.aim_second_click_y = self.figure_manager.data_manager.format_y_value(event.ydata)
 
-                xmin = min(self.aim_first_click_x, self.aim_second_click_x)
-                xmax = max(self.aim_first_click_x, self.aim_second_click_x)
+                    self.aim_temp_line_n_text(self.aim_first_click_x, self.aim_second_click_x, note)
 
-                self.aim_temp_line = self.figure_manager.ax.hlines(xmin=xmin, xmax=xmax, y=self.aim_y, colors="magenta", linewidth=1.5, linestyle="--")
-                self.aim_temp_note = self.figure_manager.ax.text(xmax, self.aim_y, note, bbox=dict(facecolor='white', edgecolor='magenta', linestyle='--'), ha="left", va="bottom", fontsize=self.figure_manager.aim_font)
+                    if self.aim_second_click_x:
+                        d2 = self.figure_manager.x_to_date[self.aim_second_click_x]
+                    else:
+                        return
 
-                d1 = self.figure_manager.x_to_date[xmin]
-                d2 = self.figure_manager.x_to_date[xmax]
+                    self.aim_first_click_x = None
+                    self.aim_second_click_x = None
 
-                self.aim_first_click_x = None
-                self.aim_second_click_x = None
+                    if self.aim_first_click_indicator:
+                        self.aim_first_click_indicator.remove()
+                        self.aim_first_click_indicator = None
 
-                if self.aim_first_click_indicator:
-                    self.aim_first_click_indicator.remove()
-                    self.aim_first_click_indicator = None
+                    self.figure_manager.refresh()
 
-                self.figure_manager.refresh()
-
-                return d1, d2, self.aim_y
+                    return 'second', d2, self.aim_first_click_y, self.aim_second_click_y
 
 
 class TrendManager:
@@ -1261,8 +1308,13 @@ class TrendManager:
         self.figure_manager.refresh()
         return self.trend_temp_line
 
-    def plot_trend_est(self, x_slice_mean, trend_vals_mean, cel_est, color, adjust=2):
-        self.trend_temp_est = self.figure_manager.ax.text(int(x_slice_mean), trend_vals_mean * adjust, cel_est, fontsize=self.figure_manager.trend_est_font, color=color, ha="center", weight="bold")
+    def plot_trend_est(self, corr, x_slice_mean, trend_vals_mean, cel_est, color, adjust=2):
+        if corr:
+            trend_font_size = self.figure_manager.data_manager.default_corr_trend_style['font_size']
+        else:
+            trend_font_size = self.figure_manager.data_manager.default_err_trend_style['font_size']
+
+        self.trend_temp_est = self.figure_manager.ax.text(int(x_slice_mean), trend_vals_mean * adjust, cel_est, fontsize=trend_font_size, color=color, ha="center", weight="bold")
         self.figure_manager.refresh()
         return self.trend_temp_est
 
@@ -1346,7 +1398,7 @@ class TrendManager:
             x1 = self.trend_temp_first_marker.get_xdata()[0]
             x2 = self.trend_temp_second_marker.get_xdata()[0]
 
-            result = self.figure_manager.data_manager.get_trend(x1, x2, corr, self.figure_manager.Chart.date_to_pos, self.figure_manager.Chart.x_to_day_count)
+            result = self.figure_manager.data_manager.get_trend(x1, x2, corr, self.figure_manager.Chart.x_to_day_count)
             if result:
                 trend_vals, cel_slope_label, x_slice, upper_bounce, lower_bounce, bounce_est_label, x_min_lim, x_max_lim = result
                 self.trend_temp_fit_on = True
@@ -1356,7 +1408,7 @@ class TrendManager:
                 self.trend_temp_second_marker.set_xdata([x_max_lim])
 
                 self.plot_trend_line(x_slice, trend_vals, 'magenta')
-                self.plot_trend_est(np.mean(x_slice), np.mean(trend_vals), cel_slope_label, 'magenta')
+                self.plot_trend_est(corr, np.mean(x_slice), np.mean(trend_vals), cel_slope_label, 'magenta')
 
                 if upper_bounce is not None and lower_bounce is not None:
                     self.upper_bounce_temp_line, = self.figure_manager.ax.plot(x_slice, upper_bounce, linestyle="--", linewidth=1, color='magenta')
@@ -1436,6 +1488,7 @@ class TrendManager:
             trend['text_y'] = est_y
             trend['fit_method'] = self.figure_manager.data_manager.user_preferences['fit_method']
             trend['bounce_envelope'] = self.figure_manager.data_manager.user_preferences['bounce_envelope']
+            trend['forward_projection'] = self.figure_manager.data_manager.user_preferences['forward_projection']
 
             self.figure_manager.data_manager.save_plot_item(item=trend, item_type=data)
             self.trend_cleanup()  # Remove all temp stuff
