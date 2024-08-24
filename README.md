@@ -87,7 +87,7 @@ Bitcoin Lightning (LNURL): pigeon@getalby.com<br>
 - Share this tool with others who might find it useful.
 - If you use this in an official capacity, please acknowledge by linking to my GitHub: https://github.com/SJV-S/OpenCelerator
 
-I am also looking for work! I have a PhD in behavior analysis and obviously know a little bit about coding. Happy to relocate. Will share CV upon request.<br>
+I am also looking for work! I have a PhD in behavior analysis and obviously know a little bit about coding. Able to relocate on short notice. Will share CV upon request.<br>
 
 
 
