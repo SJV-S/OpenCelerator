@@ -14,7 +14,7 @@ Contact: opencelerator.9qpel@simplelogin.com
 - [Download & Installation](#download--installation)
 - [Import Formatting](#import-formatting)
 - [Images](#images)
-- [Support the project](#Support-the-project)
+- [Support the developer](#Support-the-developer)
 
 ## Features
 - Data import and export
@@ -71,7 +71,7 @@ _Note_. By version 0.8.0, importing raw data only needs to be done once for a pa
 
 ![Example Chart2](images/example_chart2.png)
 
-## Support the project
+## Support the developer
 
 **OpenCelerator will forever remain free and open-source**
 
