@@ -35,7 +35,7 @@ The latest version 0.8.0 can be [downloaded here](https://github.com/SJV-S/OpenC
 #### FAQ
 - “Which file(s) should I download?” To run the app, you only need one file with the name of your operating system. Ignore the source code files.
 - “Which version do I need?” Packages on older versions should work on newer versions, but not the reverse. For example, the Windows 10 version should work on 11, the Ventura version should work on Sonoma, and so on.
-- "I am getting a scary warning when installing." This is normal and inevitable when running unregistered third-party apps. The only way to avoid this is by purchasing a security certificate. That would cost a lot of time and money, and is unnecessary when the code is open-source. I am also transparent about my identity. See the "About me" link above. Feel free to contact me if you have questions.
+- "I am getting a scary warning when installing." This is normal and inevitable when running unregistered third-party apps. The only way to avoid this is by purchasing a security certificate. That would cost a lot of time and money, and is unnecessary when the code is open-source. I am also transparent about my identity. See the "About me" link above.
 
 
 #### Mac
@@ -49,7 +49,7 @@ How to install on Windows: [video](https://youtu.be/u8ugPqEv8LM)
 
 #### Linux
 
-These instructions assume the Linux user is a bit more technical than the average Windows or Mac user. That said, feel free to reach out if you have questions. OpenCelerator is available as an AppImage and Flatpak, so FUSE or Flatpak need to be installed. If using the AppImage, do not place it in privileged directories. Tahoma is used as the default font on Windows and Mac, so consider installing Tahoma if you want the exact same chart appearance as the majority of users. Otherwise, DejaVu Sans is the fallback, which is likely fine in most cases.
+These instructions assume the Linux user is a bit more technical than the average Windows or Mac user. OpenCelerator is available as an AppImage and Flatpak, so FUSE or Flatpak need to be installed. If using the AppImage, do not place it in privileged directories. Tahoma is used as the default font on Windows and Mac, so consider installing Tahoma if you want the exact same chart appearance as the majority of users. Otherwise, DejaVu Sans is the fallback, which is likely fine in most cases.
 
 ## Import Formatting
 
