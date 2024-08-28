@@ -49,7 +49,7 @@ How to install on Windows: [video](https://youtu.be/u8ugPqEv8LM)
 
 #### Linux
 
-These instructions assume the Linux user is a bit more technical than the average Windows or Mac user. OpenCelerator is available as an AppImage and Flatpak, so FUSE or Flatpak need to be installed. If using the AppImage, do not place it in privileged directories. Tahoma is used as the default font on Windows and Mac, so consider installing Tahoma if you want the exact same chart appearance as the majority of users. Otherwise, DejaVu Sans is the fallback, which is likely fine in most cases.
+OpenCelerator is available as an AppImage and Flatpak, so FUSE or Flatpak need to be installed. If using the AppImage, do not place it in privileged directories. Tahoma is used as the default font on Windows and Mac, so consider installing Tahoma if you want the exact same chart appearance as the majority of users. Otherwise, DejaVu Sans is the fallback, which is likely fine in most cases.
 
 ## Import Formatting
 
