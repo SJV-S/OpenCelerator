@@ -34,7 +34,7 @@ The latest version 0.8.0 can be [downloaded here](https://github.com/SJV-S/OpenC
 #### FAQ
 - “Which file(s) should I download?” To run the app, you only need one single file with the name of your operating system. Normal uses can ignore the source code and manifest files.
 - “Which version do I need?” Packages on older versions should work on newer versions, but not the reverse. For example, the Windows 10 version should work on 11, the Ventura version should work on Sonoma, and so on.
-- "I am getting a scary warning when installing." This is normal and inevitable when running unregistered third-party apps. The only way to avoid this is by purchasing a security certificate. That would cost a lot of time and money, and is unnecessary when the code is open-source. I am also transparent about my identity. See the "About me" link above.
+- "I am getting a scary warning when installing." This is normal and inevitable when running unregistered third-party apps. The only way to avoid this is by purchasing a security certificate. That would cost a lot of time and money, and is unnecessary when the code is open-source. I am also transparent about my identity in the "About me" link above.
 
 
 #### Mac
