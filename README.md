@@ -78,7 +78,7 @@ _Note_. By version 0.8.0, importing raw data only needs to be done once for a pa
 
 About half a year's work has gone into this project. There is no team or funding behind it. Just me. If you find the app useful and would like to see its development continue, please consider donating.
 
-PayPal: https://paypal.me/devpigeon
+PayPal: https://paypal.me/devpigeon<br>
 Patreon: https://www.patreon.com/johanpigeon/membership<br>
 Bitcoin (base chain): bc1qg8y5pxv5g86mhj59xdk89r6tr70zdw6rh6rwh4<br>
 Bitcoin Lightning (LNURL): pigeon@getalby.com<br>
