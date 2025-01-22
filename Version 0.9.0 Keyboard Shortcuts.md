@@ -25,5 +25,3 @@
   Show crosshairs with data values
 - Hold `Alt/Option` + mouse movement over chart -  
   Show crosshairs without data values
-
-The main changes are the line breaks after each section and the two-space indentation after long lines in the Data Highlighting section.
