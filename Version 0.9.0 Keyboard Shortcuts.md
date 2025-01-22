@@ -1,17 +1,17 @@
 ## Version 0.9.0 Keyboard Shortcuts
 
 ### Mode Selection (Shift + key)
-- `V` - View mode
-- `T` - Style mode 
-- `P` - Phase mode 
-- `A` - Aim mode 
-- `C` - Celeration mode
-- `M` - Note mode
+- `V` - View
+- `T` - Style
+- `P` - Phase
+- `A` - Aim
+- `C` - Celeration
+- `M` - Note
 
 ### Tab Navigation (Shift + key)
-- `H` - Home tab
-- `F` - Files tab
-- `O` - Config tab
+- `H` - Home
+- `F` - Files
+- `O` - Config
 
 ### File Operations (Shift + key)
 - `D` - Import data
