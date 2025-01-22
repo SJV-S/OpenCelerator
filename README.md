@@ -52,6 +52,8 @@ OpenCelerator is available as an AppImage and Flatpak, so FUSE or Flatpak need t
 
 ## Import Formatting
 
+* This section is obsolete with version 0.9.0. Special column names are no longer necessary. Just import your raw data and select the columns you will be using. That's it!
+
 To import raw data, click the _Data_ button (not to be conflated with the _Load_ button for loading complete charts). You can import data from csv, xls, xlsx, and ods, files. OpenCelerator will only look at sheet 1 if you have multiple sheets and only the first 7 columns. All subsequent columns will be ignored – you can use these extra columns for notes and other stuff. The app will also only look at the first letter in the column name and ignore case when determining the data type. Additional letters in the column name can be added for human readability or labeling purposes. For example, you could write "cMyBehaviorLabel" or "c_my_behavior_label". In these two examples, the app will only use "c" to determine the data type.
 
 1) *Date column*. Any column name starting with "d" will be interpreted as the date column. This column must contain full dates – day, month, and year. OpenCelerator should be quite flexible with exactly how the dates are formatted in the column, provided they are complete dates. If you still get import errors or strange date behaviors, try this format: yyyy-mm-dd (for instance, 2024-04-19). Adding rows for dates with no data is not necessary.
