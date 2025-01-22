@@ -23,5 +23,11 @@
         <file>../images/circle-regular.svg</file>
         <file>../images/circle-dot-regular-disabled.svg</file>
         <file>../images/circle-regular-disabled.svg</file>
+        <file>../images/note-sticky-regular.svg</file>
+        <file>../images/note-sticky-solid.svg</file>
+        <file>../images/PayPal_icon.png</file>
+        <file>../images/style-svgrepo-com.svg</file>
+        <file>../images/annotation.svg</file>
+        <file>../images/circle-question-regular.svg</file>
     </qresource>
 </RCC>
