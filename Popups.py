@@ -1,9 +1,13 @@
 from resources.resources_rc import *
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QRadioButton, QDialogButtonBox, QGroupBox, QHBoxLayout, QLineEdit, QLabel, QPushButton, QGridLayout, QSpinBox, QScrollArea, QComboBox, QListWidget,
-                               QColorDialog, QListWidgetItem, QDoubleSpinBox, QApplication, QFrame, QStackedLayout, QTabWidget, QSizePolicy, QWidget, QStackedWidget)
+                               QColorDialog, QListWidgetItem, QDoubleSpinBox, QApplication, QFrame, QStackedLayout, QTextEdit, QMessageBox, QFormLayout, QWidget, QSizePolicy)
 from PySide6.QtCore import Qt, QUrl, QTimer
-from PySide6.QtGui import QIcon, QDesktopServices, QPixmap, QClipboard
+from PySide6.QtGui import QIcon, QDesktopServices, QPixmap
+from EventBus import EventBus
+import pandas as pd
+import re
+import warnings
 
 from DataManager import DataManager
 import calendar
@@ -64,7 +68,7 @@ class InputDialog(QDialog):
 class SaveImageDialog(QDialog):
     def __init__(self, parent=None):
         super(SaveImageDialog, self).__init__(parent)
-        self.setWindowTitle('Format & resolution')
+        self.setWindowTitle('Format')
 
         # Create layout
         layout = QVBoxLayout(self)
@@ -72,34 +76,16 @@ class SaveImageDialog(QDialog):
         # Format selection group
         format_group = QGroupBox('Format')
         format_layout = QVBoxLayout()
-        self.radio_png = QRadioButton('PNG')
         self.radio_pdf = QRadioButton('PDF')
+        self.radio_png = QRadioButton('PNG')
         self.radio_jpg = QRadioButton('JPG')
         self.radio_svg = QRadioButton('SVG')
         self.radio_pdf.setChecked(True)  # Default option
-        format_layout.addWidget(self.radio_png)
         format_layout.addWidget(self.radio_pdf)
+        format_layout.addWidget(self.radio_png)
         format_layout.addWidget(self.radio_jpg)
         format_layout.addWidget(self.radio_svg)
         format_group.setLayout(format_layout)
-
-        # Connect format radio buttons to update resolution state
-        self.radio_png.toggled.connect(self.update_resolution_state)
-        self.radio_pdf.toggled.connect(self.update_resolution_state)
-        self.radio_jpg.toggled.connect(self.update_resolution_state)
-        self.radio_svg.toggled.connect(self.update_resolution_state)
-
-        # Resolution selection group
-        resolution_group = QGroupBox('Resolution')
-        resolution_layout = QVBoxLayout()
-        self.radio_high = QRadioButton('High (300 dpi)')
-        self.radio_medium = QRadioButton('Medium (200 dpi)')
-        self.radio_low = QRadioButton('Low (100 dpi)')
-        self.radio_medium.setChecked(True)  # Default option
-        resolution_layout.addWidget(self.radio_high)
-        resolution_layout.addWidget(self.radio_medium)
-        resolution_layout.addWidget(self.radio_low)
-        resolution_group.setLayout(resolution_layout)
 
         # Dialog buttons
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel, self)
@@ -108,45 +94,25 @@ class SaveImageDialog(QDialog):
 
         # Add groups to layout
         layout.addWidget(format_group)
-        layout.addWidget(resolution_group)
         layout.addWidget(buttons)
         self.setLayout(layout)
-
-        # Store resolution group to enable/disable it
-        self.resolution_group = resolution_group
-
-        # Initial state update
-        self.update_resolution_state()
 
     def get_selected_options(self):
         # Get the selected format
         if self.radio_png.isChecked():
             format_selected = 'png'
+            resolution_selected = 300  # Default for raster formats
         elif self.radio_pdf.isChecked():
             format_selected = 'pdf'
+            resolution_selected = None  # Not applicable for vector formats
         elif self.radio_jpg.isChecked():
             format_selected = 'jpg'
+            resolution_selected = 300  # Default for raster formats
         elif self.radio_svg.isChecked():
             format_selected = 'svg'
-
-        # Get the selected resolution
-        if self.radio_high.isChecked():
-            resolution_selected = 300
-        elif self.radio_medium.isChecked():
-            resolution_selected = 200
-        elif self.radio_low.isChecked():
-            resolution_selected = 100
-        else:
-            resolution_selected = None  # For PDF and SVG, resolution is not applicable
+            resolution_selected = None  # Not applicable for vector formats
 
         return format_selected, resolution_selected
-
-    def update_resolution_state(self):
-        # Enable or disable the resolution group based on the selected format
-        is_vector_format_selected = self.radio_pdf.isChecked() or self.radio_svg.isChecked()
-        self.radio_high.setEnabled(not is_vector_format_selected)
-        self.radio_medium.setEnabled(not is_vector_format_selected)
-        self.radio_low.setEnabled(not is_vector_format_selected)
 
 
 class StartDateDialog(QDialog):
@@ -215,7 +181,7 @@ class StartDateDialog(QDialog):
         if day > max_day:
             day = max_day
 
-        return f'{day}-{month}-{year}'
+        return f'{year}-{month}-{day}'
 
 
 class ConfigureTemplateDialog(QDialog):
@@ -670,8 +636,7 @@ class SupportDevDialog(QDialog):
             "p.center { text-align: center; }"
             "</style>"
             "<p class='center'><b>OpenCelerator will forever remain free and open-source </b></p>"
-            "<p> About half a year's work has gone into this project. There is no team or funding behind it. Just me. "
-            "If you find the app useful and would like to see its development continue, please consider donating.</p>"
+            "<p> An incredible amount of work has gone into this project. If you find the app useful and would like to see its development continue, please consider donating. The project is only kept alive thanks to your support.</p>"
             "<p>Other ways to contribute:</p>"
             "<ul>"
             "<li>Provide feedback. Let me know what you like, what can be improved, report bugs, do testing, and so on. The software is still in alpha. </li>"
@@ -679,7 +644,8 @@ class SupportDevDialog(QDialog):
             "<li>If you use this in an official capacity, please acknowledge by linking to my GitHub: "
             "<a href='https://github.com/SJV-S/OpenCelerator'>https://github.com/SJV-S/OpenCelerator</a></li>"
             "</ul>"
-            "<p>I am also looking for work! I have a PhD in behavior analysis and obviously know a little bit about coding. Happy to relocate. Will share CV upon request.</p>"
+            "<p>The email below can also be used to contact me about other job opportunities.</p>"
+            "<p>You can also send me a request to join the OpenCelerator group chat.</p>"
             "<p>Contact: <a href='mailto:opencelerator.9qpel@simplelogin.com'>opencelerator.9qpel@simplelogin.com</a></p>"
         )
 
@@ -688,6 +654,12 @@ class SupportDevDialog(QDialog):
 
         # Button to perform an action, e.g., open a link or close the dialog
         btn_layout = QHBoxLayout()
+
+        # Add the PayPal button
+        paypal_btn = QPushButton('PayPal')
+        paypal_icon = QIcon(':/images/PayPal_icon.png')
+        paypal_btn.setIcon(paypal_icon)
+        paypal_btn.clicked.connect(self.paypal_btn_clicked)
 
         patreon_btn = QPushButton('Patreon')
         patreon_icon = QIcon(':/images/patreon_logo.png')
@@ -702,6 +674,7 @@ class SupportDevDialog(QDialog):
         # exit_btn = QPushButton('Exit')
         # exit_btn.clicked.connect(self.exit_btn_clicked)
 
+        btn_layout.addWidget(paypal_btn)
         btn_layout.addWidget(patreon_btn)
         btn_layout.addWidget(bitcoin_btn)
         # btn_layout.addWidget(exit_btn)
@@ -712,6 +685,11 @@ class SupportDevDialog(QDialog):
 
     def patreon_btn_clicked(self):
         url = QUrl('https://www.patreon.com/johanpigeon/membership')
+        if not QDesktopServices.openUrl(url):
+            print("Failed to open URL")
+
+    def paypal_btn_clicked(self):
+        url = QUrl('https://paypal.me/devpigeon')
         if not QDesktopServices.openUrl(url):
             print("Failed to open URL")
 
@@ -744,6 +722,7 @@ class BitcoinDonationPopup(QDialog):
         self.first_layout = QVBoxLayout(self.first_frame)
 
         first_label = QLabel("Bitcoin (Base chain)", self)
+        first_label.setStyleSheet('font-size: 16px; font-style: normal')
         first_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.first_layout.addWidget(first_label)
 
@@ -762,6 +741,7 @@ class BitcoinDonationPopup(QDialog):
         self.second_layout = QVBoxLayout(self.second_frame)
 
         second_label = QLabel("Lightning (LNURL)", self)
+        second_label.setStyleSheet('font-size: 16px; font-style: normal')
         second_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.second_layout.addWidget(second_label)
 
@@ -818,5 +798,417 @@ class BitcoinDonationPopup(QDialog):
         super().closeEvent(event)
 
 
+class NoteDialog(QDialog):
+    def __init__(self, x_date, y, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Note")
+        self.setGeometry(500, 500, 300, 200)  # Set the dialog dimensions
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.x_date = x_date
+        self.y = y
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #fff8b8;
+                border: 3px solid #e6d180;
+                border-radius: 5px;
+            }
+            QTextEdit {
+                background-color: transparent;
+                border: none;
+                font-size: 12pt;
+                padding: 10px;
+            }
+            QPushButton {
+                background-color: transparent;
+                border: 2px solid #e6d180;
+                border-radius: 15px;
+                padding: 5px 15px;
+                color: #756319;
+                min-width: 80px;
+                margin: 5px;
+            }
+            QPushButton:hover {
+                background-color: #fff4a1;
+            }
+            QPushButton:pressed {
+                background-color: #e6d180;
+            }
+        """)
+
+        # Create data manager instance
+        self.data_manager = DataManager()
+        self.event_bus = EventBus()
+
+        # Layout
+        main_layout = QVBoxLayout()
+        button_layout = QHBoxLayout()
+
+        # Text Box
+        self.text_edit = QTextEdit(self)
+        main_layout.addWidget(self.text_edit)
+
+        # Buttons
+        save_button = QPushButton("Save", self)
+        cancel_button = QPushButton('Cancel', self)
+        save_button.clicked.connect(self.save_note)
+        cancel_button.clicked.connect(self.cancel_note)
+
+        # Add buttons to layout
+        button_layout.addWidget(save_button)
+        button_layout.addWidget(cancel_button)
+
+        # Nested layouts
+        main_layout.addLayout(button_layout)
+        self.setLayout(main_layout)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self.drag_position)
+            event.accept()
+
+    def save_note(self):
+        note_content = self.text_edit.toPlainText()
+        note_content = note_content.replace('|', '')  # If the user used pipe character
+        note_data = f"{note_content}|{self.x_date}|{self.y}"  # Pipe as separator
+        self.data_manager.chart_data['notes'].append(note_data)
+        self.event_bus.emit('refresh_note_listbox')
+        self.event_bus.emit('refresh_note_locations')
+        self.accept()
+
+    def cancel_note(self):
+        self.accept()
+
+
+class DataColumnMappingDialog(QDialog):
+    column_placeholder = "-- Select Column --"
+    date_pattern = r'^(?=.*\d{2})(?:[^-/.\n]*[-/.]){2}[^-/.\n]*$'
+    numeric_pattern = r'^\s*-?\d+(\.\d+)?\s*$'
+
+    date_format_map = {
+        'YYYY-MM-DD': '%Y-%m-%d',
+        'YY-MM-DD': '%y-%m-%d',
+        'MM-DD-YYYY': '%m-%d-%Y',
+        'MM-DD-YY': '%m-%d-%y',
+        'DD-MM-YYYY': '%d-%m-%Y',
+        'DD-MM-YY': '%d-%m-%y'
+    }
+
+    field_explanations = {
+        'Date': 'Must contain complete dates – day, month, and year. The exact date format should be handled automatically in most cases.',
+        'Dot': 'Expected to be raw counts. Will be divided by the timing floor automatically when using minute charts.',
+        'X': 'Expected to be raw counts. Will be divided by the timing floor automatically when using minute charts.',
+        'Floor': 'Expected to be minutes. Decimal values work fine. The inverse is charted automatically.',
+        'Misc': 'Any other extra data you want. It will not be divided by the timing floor.',
+        'date_format': "The date format could not be inferred. A qualified guess has been made.",
+    }
+
+    def __init__(self, parent, file_path):
+        super().__init__(parent)
+        self.data_manager = DataManager()
+        self.event_bus = EventBus()
+        self.file_path = file_path
+        self.dropdowns_dict = {}
+
+        self._setup_ui()
+        self._load_data()
+        self._setup_column_filters()
+        self._create_date_controls()
+        self._create_field_dropdowns()
+
+    def _setup_ui(self):
+        self.setStyleSheet("""QWidget {font-size: 12pt; font-style: normal;}""")
+
+        self.setWindowTitle("Column Mapping")
+        self.setFixedSize(350, 350)
+
+        layout = QVBoxLayout()
+        layout.setSpacing(10)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        title = QLabel("What data columns will you be using?")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        self.form_layout = QFormLayout()
+        self.form_layout.setSpacing(10)
+        self.form_layout.setContentsMargins(0, 10, 0, 10)
+        layout.addLayout(self.form_layout)
+
+        self._add_button_row(layout)
+        self.setLayout(layout)
+
+    def _load_data(self):
+        try:
+            if self.file_path.endswith('.csv'):
+                self.df = pd.read_csv(self.file_path)
+            elif self.file_path.endswith(('.xls', '.xlsx', '.ods')):
+                self.df = pd.read_excel(self.file_path)
+            else:
+                raise ValueError("Unsupported file format")
+
+            self.df = self.df.loc[:, ~self.df.columns.str.contains('^Unnamed')]
+            self.df = self.df[self.df.columns[:20]]
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to import data file: {str(e)}")
+            self.reject()
+
+    def _setup_column_filters(self):
+        self.date_columns = self._lazy_check(self.df, pattern=self.date_pattern)
+        self.numeric_columns = self._lazy_check(self.df, pattern=self.numeric_pattern)
+
+    def _create_info_label(self, tooltip_text):
+        info_label = QLabel()
+        info_label.setPixmap(QPixmap(":/images/circle-question-regular.svg").scaled(16, 16, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        info_label.setToolTip(f"<p style='white-space: normal; width: 300px;'>{tooltip_text}</p>")
+        return info_label
+
+    def _create_dropdown_row(self, field_name, items, on_change=None):
+        dropdown = QComboBox()
+        dropdown.setStyleSheet("QComboBox { background-color: white;}")
+        dropdown.addItem(self.column_placeholder)
+        dropdown.addItems(items)
+        if on_change:
+            dropdown.currentTextChanged.connect(on_change)
+
+        info_label = self._create_info_label(self.field_explanations[field_name])
+
+        row_layout = QHBoxLayout()
+        row_layout.addWidget(dropdown)
+        row_layout.addWidget(info_label)
+
+        self.form_layout.addRow(QLabel(f"{field_name}: "), row_layout)
+        return dropdown
+
+    def _create_date_controls(self):
+        self.date_dropdown = self._create_dropdown_row('Date', self.date_columns, self.check_date_format_warning)
+
+        # Date format controls
+        self.date_format_row = QWidget()
+        date_format_layout = QHBoxLayout(self.date_format_row)
+        date_format_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.date_format_dropdown = QComboBox()
+        self.date_format_dropdown.setStyleSheet("QComboBox { background-color: white;}")
+        self.date_format_dropdown.addItem("Automatic")
+        self.date_format_dropdown.addItems(list(self.date_format_map.keys()))
+
+        date_format_info = self._create_info_label(self.field_explanations['date_format'])
+
+        date_format_layout.addWidget(self.date_format_dropdown)
+        date_format_layout.addWidget(date_format_info)
+
+        self.format_label = QLabel("Format:")
+        self.form_layout.addRow(self.format_label, self.date_format_row)
+
+        self.format_label.hide()
+        self.date_format_row.hide()
+
+    def _create_field_dropdowns(self):
+        for field in ['Dot', 'X', 'Floor', 'Misc']:
+            dropdown = self._create_dropdown_row(field, self.numeric_columns,
+                                                 lambda *args, f=field: self.on_dropdown_changed(f))
+            self.dropdowns_dict[field] = dropdown
+
+    def _add_button_row(self, layout):
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
+
+        confirm_button = QPushButton("Confirm")
+        confirm_button.clicked.connect(self.confirm_mapping)
+
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+
+        button_layout.addStretch()
+        button_layout.addWidget(confirm_button)
+        button_layout.addWidget(cancel_button)
+        button_layout.addStretch()
+
+        layout.addLayout(button_layout)
+
+    @staticmethod
+    def _lazy_check(df, pattern, threshold=0.8, check_limit=10):
+        matching_columns = []
+        for col in df.columns:
+            matches = 0
+            to_check = df[col][:check_limit]
+            total = len(to_check)
+
+            for cell in to_check.astype(str):
+                if re.search(pattern, cell):
+                    matches += 1
+
+            if matches / total > threshold:
+                matching_columns.append(col)
+
+        return matching_columns
+
+    def on_dropdown_changed(self, field_changed):
+        # Block all dropdowns to prevent recursion
+        for dropdown in self.dropdowns_dict.values():
+            dropdown.blockSignals(True)
+
+        # Get all selected columns
+        all_selected_columns = []
+        for field in self.dropdowns_dict.keys():
+            selected_column = self.dropdowns_dict[field].currentText()
+            if selected_column != self.column_placeholder:
+                all_selected_columns.append(selected_column)
+
+        # Update options in fields
+        for field in self.dropdowns_dict.keys():
+            if field != field_changed:
+                dropdown = self.dropdowns_dict[field]
+                selected = dropdown.currentText()
+                if selected == self.column_placeholder:
+                    dropdown.clear()
+
+                    col_options = [col for col in self.numeric_columns if col not in all_selected_columns]
+                    new_items = [self.column_placeholder] + col_options
+                    dropdown.addItems(new_items)
+
+                    if len(col_options) == 0:
+                        dropdown.setEnabled(False)
+                        dropdown.setStyleSheet("QComboBox { background-color: #f0f0f0; color: #808080; }")
+                    else:
+                        dropdown.setEnabled(True)
+                        dropdown.setStyleSheet("QComboBox { background-color: white; }")
+
+        # Unblock all dropdowns
+        for dropdown in self.dropdowns_dict.values():
+            dropdown.blockSignals(False)
+
+    def check_date_format_warning(self):
+        """
+        Check if the selected date column needs manual format selection.
+        If pandas can't automatically infer the date format:
+        - Show the format selector and its label
+        - Try to detect the correct format
+        - Set that format in the dropdown
+        Otherwise hide the format selector and its label.
+        """
+        date_col = self.date_dropdown.currentText()
+
+        # Hide everything if placeholder is selected
+        if date_col == self.column_placeholder:
+            self.format_label.hide()
+            self.date_format_row.hide()
+            self.date_format_dropdown.setCurrentText('Automatic')
+            return False
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            try:
+                pd.to_datetime(self.df[date_col])
+                falls_back_to_dateutil = any("Could not infer format" in str(warning.message) for warning in w)
+            except Exception:
+                falls_back_to_dateutil = True
+
+        if falls_back_to_dateutil:
+            # Show both label and controls when format needed
+            self.format_label.show()
+            self.date_format_row.show()
+
+            # Try each format to find a match
+            for label, format_string in self.date_format_map.items():
+                sample_date = self.df[date_col].dropna().iloc[0]
+                try:
+                    separator = next(char for char in sample_date if char in '/-.')
+                    adjusted_format = format_string.replace('-', separator)
+                    pd.to_datetime(self.df[date_col], format=adjusted_format, errors='raise')
+                    self.date_format_dropdown.setCurrentText(label)
+                    break
+                except Exception:
+                    continue
+        else:
+            # Hide both label and controls when format not needed
+            self.format_label.hide()
+            self.date_format_row.hide()
+            self.date_format_dropdown.setCurrentText('Automatic')
+
+        return falls_back_to_dateutil
+
+    def confirm_mapping(self):
+        column_keys = ['c', 'i', 'm', 'o']
+        column_map = {'d': self.date_dropdown.currentText()}
+
+        for dropdown, key in zip(self.dropdowns_dict.values(), column_keys):
+            if dropdown.currentText() != self.column_placeholder:
+                column_map[key] = dropdown.currentText()
+
+        if self.date_format_dropdown.currentText() == 'Automatic':
+            date_format = None
+        else:
+            date_format = self.date_format_map[self.date_format_dropdown.currentText()]
+            # Modify seperator if necessary
+            date_col = column_map['d']
+            sample_date = self.df[date_col].dropna().iloc[0]
+            separator = next(char for char in sample_date if char in '/-.')
+            date_format = date_format.replace('-', separator)
+
+        # Save in chart data
+        self.data_manager.chart_data['column_map'] = column_map
+        self.data_manager.chart_data['date_format'] = date_format
+
+        self.accept()
+
+
+class UserPrompt(QDialog):
+    def __init__(self, title="Message", message="", choice=False, parent=None):
+        super().__init__(parent)
+        self._setup_window(title)
+        self._create_layout()
+        self._add_message_label(message)
+        self._add_button_box(choice)
+        self._apply_styles()
+
+    def _setup_window(self, title):
+        self.setWindowTitle(title)
+
+    def _create_layout(self):
+        self.layout = QVBoxLayout(self)
+        self.layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout.setSizeConstraint(QVBoxLayout.SizeConstraint.SetFixedSize)
+
+    def _add_message_label(self, message):
+        self.message_label = QLabel(message)
+        self.message_label.setWordWrap(True)
+        self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.message_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.layout.addWidget(self.message_label)
+
+    def _add_button_box(self, choice):
+        buttons = (QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel if choice else QDialogButtonBox.StandardButton.Ok)
+        self.button_box = QDialogButtonBox(buttons, self)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        self.layout.addWidget(self.button_box)
+
+    def _apply_styles(self):
+        self.message_label.setStyleSheet("font-size: 16px; padding: 10px; font-style: normal;")
+        self.button_box.setStyleSheet("""
+            QPushButton {
+                font-size: 14px;
+                padding: 8px 16px;
+            }
+        """)
+        self.setStyleSheet("QDialog { padding: 20px; }")
+
+    def display(self):
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+
+        self.setWindowFlags(
+            Qt.WindowType.Dialog |
+            Qt.WindowType.CustomizeWindowHint |
+            Qt.WindowType.WindowTitleHint
+        )
+
+        return self.exec() == QDialog.DialogCode.Accepted
 
 

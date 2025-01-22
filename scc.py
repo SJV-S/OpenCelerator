@@ -6,15 +6,6 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import numpy as np
 import pandas as pd
 
-'''
-x = math.pow(10, math.tan(math.radians(angle))*math.log10(2)/math.tan(math.radians(34)))
-där "angle" är vinkeln i grader på en passlinje.
-
-Formel för att beräkna storleken på den vinkel a som motsvarar förstoringen x.
-angle = math.degrees(math.atan(math.log10(x)/(math.log10(2)/math.tan(math.radians(34)))))
-
-'''
-
 
 class Chart:
     def __init__(self, date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, style_color='#5a93cc', custom_grid_color='#71B8FF', credit_line_space=True):
@@ -33,6 +24,7 @@ class Chart:
         self.style_color = style_color
         self.font = self.get_system_font()
         self.general_fontsize = width * 1.2
+        self.general_fontsize_minor_scaling = 0.7
         self.credit_fontsize = width * 0.92
         self.right_y_axis_fontsize = width * 0.85
         self.top_x_label_pad = width * 1
@@ -50,15 +42,6 @@ class Chart:
         # Fan control variables
         self.div_text_objects = []
         self.mult_text_objects = []
-        self.fan_dict = {'DailyMinute': (-15, 0.1, "per week"),
-                    'Daily': (158, 14500, "per week"),
-                    'WeeklyMinute': (-11, 0.1, "per month"),
-                    'Weekly': (113, 14500, "per month"),
-                    'MonthlyMinute': (-13, 0.1, 'per 6 months'),
-                    'Monthly': (135.5, 14500, 'per 6 months'),
-                    'YearlyMinute': (-11, 0.1, 'per 5 years'),
-                    'Yearly': (113, 14500, 'per 5 years'),
-                    }
 
         self.major_grid_line_objects = []
         self.floor_grid_line_objects = []
@@ -145,14 +128,25 @@ class Chart:
                 self.major_grid_line_objects.append(g3)
 
     def add_cel_fan(self, chart_type, div_decrease, line_length=0.95, text_pos=0.70):
-        def getAngle(celeration):
-            return np.degrees(np.atan(np.log10(celeration) / (np.log10(2) / np.tan(np.radians(34)))))
+        minute_x_pos = -0.1 * self.xmax
+        minute_y_pos = 0.1
+        non_minute_y_pos = 10**(np.log10(1) + 0.692 * (np.log10(self.ymax) - np.log10(1)))
+        non_minute_x_pos = 1.16 * self.xmax
+        fan_dict = {'DailyMinute': (minute_x_pos, minute_y_pos, "per week"),
+                    'WeeklyMinute': (minute_x_pos, minute_y_pos, "per month"),
+                    'MonthlyMinute': (minute_x_pos, minute_y_pos, 'per 6 months'),
+                    'YearlyMinute': (minute_x_pos, minute_y_pos, 'per 5 years'),
+                    'Daily': (non_minute_x_pos, non_minute_y_pos, "per week"),
+                    'Weekly': (non_minute_x_pos, non_minute_y_pos, "per month"),
+                    'Monthly': (non_minute_x_pos, non_minute_y_pos, 'per 6 months'),
+                    'Yearly': (non_minute_x_pos, non_minute_y_pos, 'per 5 years'),
+                    }
 
         # Clear any previous text objects
         self.div_text_objects = []
         self.mult_text_objects = []
 
-        x, y, per_unit_str = self.fan_dict[chart_type]
+        x, y, per_unit_str = fan_dict[chart_type]
         fig_width = self.width * 10
 
         # Convert (x, y) from data coordinates to figure coordinates
@@ -190,7 +184,7 @@ class Chart:
         cels = sorted(cels, reverse=True)
 
         for c, div_text, mult_text in zip(cels, div_strs, mult_strs):
-            angle = getAngle(c)
+            angle = np.degrees(np.atan(np.log10(c) / (np.log10(2) / np.tan(np.radians(34)))))
             x = np.cos(np.radians(angle))
             y = np.sin(np.radians(angle))
             inset_ax.plot([0, line_length * x], [0, line_length * y], color=self.custom_grid_color, linewidth=1)
@@ -288,7 +282,7 @@ class DailyTemplate(Chart):
         self.ax2.set_xticks(self.top_x_ticks)
         self.ax2.set_xticklabels(self.dates, fontsize=self.general_fontsize, fontname=self.font, color=self.style_color, weight='bold')
         self.ax2.tick_params(axis='both', which='both', color=self.style_color)
-        self.ax2.set_xlabel("SUCCESSIVE                       CALENDAR                        WEEKS", fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, weight="bold", labelpad=self.top_x_label_pad)
+        self.ax2.set_xlabel("SUCCESSIVE CALENDAR WEEKS", fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, weight="bold", labelpad=self.top_x_label_pad)
 
         self.trans = transforms.blended_transform_factory(self.ax.transData, self.ax.transAxes)
         for tick, date in zip(self.top_x_ticks, self.month_dates):
@@ -335,7 +329,7 @@ class DailyTemplate(Chart):
 
         for label in self.ax.get_yticklabels():
             if '5' in label.get_text():
-                label.set_fontsize(self.general_fontsize * 0.8)
+                label.set_fontsize(self.general_fontsize * self.general_fontsize_minor_scaling)
             else:
                 label.set_fontsize(self.general_fontsize)
 
@@ -535,7 +529,7 @@ class WeeklyTemplate(Chart):
 
         for label in self.ax.get_yticklabels():
             if '5' in label.get_text():
-                label.set_fontsize(self.general_fontsize * 0.8)
+                label.set_fontsize(self.general_fontsize * self.general_fontsize_minor_scaling)
             else:
                 label.set_fontsize(self.general_fontsize)
 
@@ -558,7 +552,7 @@ class WeeklyTemplate(Chart):
         self.ax2.set_xticks(self.bottom_x_ticks)
         self.ax2.set_xticklabels(self.top_x_tick_labels, fontsize=self.general_fontsize, fontname=self.font, color=self.style_color, weight='bold')
         self.ax2.tick_params(axis='both', which='both', color=self.custom_grid_color, length=self.top_x_tick_length, width=self.major_grid_width)
-        self.ax2.set_xlabel("SUCCESSIVE                       CALENDAR                        MONTHS", fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, weight="bold", labelpad=self.top_x_label_pad)
+        self.ax2.set_xlabel("SUCCESSIVE CALENDAR MONTHS", fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, weight="bold", labelpad=self.top_x_label_pad)
         self.trans = transforms.blended_transform_factory(self.ax.transData, self.ax.transAxes)
         for tick, label in zip(np.arange(0, 100, 5), self.month_labels):
             horizontal_off_set = 2.5
@@ -743,7 +737,7 @@ class MonthlyTemplate(Chart):
         self.ax2.set_xticks(self.top_x_ticks)
         self.ax2.set_xticklabels(self.top_x_tick_labels, fontsize=self.general_fontsize, fontname=self.font, color=self.style_color, weight='bold')
         self.ax2.tick_params(axis='both', which='both', color=self.custom_grid_color, length=self.top_x_tick_length, width=self.major_grid_width)
-        self.ax2.set_xlabel("SUCCESSIVE                       CALENDAR                        YEARS",
+        self.ax2.set_xlabel("SUCCESSIVE CALENDAR YEARS",
                             fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, weight="bold", labelpad=self.top_x_label_pad)
         self.trans = transforms.blended_transform_factory(self.ax.transData, self.ax.transAxes)
         for tick in self.top_x_ticks[:-1]:
@@ -778,7 +772,7 @@ class MonthlyTemplate(Chart):
 
         for label in self.ax.get_yticklabels():
             if '5' in label.get_text():
-                label.set_fontsize(self.general_fontsize * 0.8)
+                label.set_fontsize(self.general_fontsize * self.general_fontsize_minor_scaling)
             else:
                 label.set_fontsize(self.general_fontsize)
 
@@ -960,7 +954,7 @@ class YearlyTemplate(Chart):
         self.ax2.set_xticks(self.top_x_ticks)
         self.ax2.set_xticklabels(self.top_x_tick_labels, fontsize=self.general_fontsize, fontname=self.font, color=self.style_color, weight='bold')
         self.ax2.tick_params(axis='both', which='both', color=self.custom_grid_color, length=self.top_x_tick_length, width=self.major_grid_width)
-        self.ax2.set_xlabel("SUCCESSIVE                       CALENDAR                        DECADES", fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, weight="bold", labelpad=self.top_x_label_pad)
+        self.ax2.set_xlabel("SUCCESSIVE CALENDAR DECADES", fontname=self.font, fontsize=self.general_fontsize, color=self.style_color, weight="bold", labelpad=self.top_x_label_pad)
         self.trans = transforms.blended_transform_factory(self.ax.transData, self.ax.transAxes)
         for tick in self.top_x_ticks[:-1]:
             year = self.all_dates[tick].year
@@ -994,7 +988,7 @@ class YearlyTemplate(Chart):
 
         for label in self.ax.get_yticklabels():
             if '5' in label.get_text():
-                label.set_fontsize(self.general_fontsize * 0.8)
+                label.set_fontsize(self.general_fontsize * self.general_fontsize_minor_scaling)
             else:
                 label.set_fontsize(self.general_fontsize)
 

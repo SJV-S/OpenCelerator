@@ -1,12 +1,13 @@
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QGroupBox, QRadioButton, QLineEdit, QLabel, QDateEdit, QListWidget, QFileDialog, QCheckBox,
                                QButtonGroup, QDialog, QComboBox, QMessageBox, QGridLayout, QStackedWidget, QSpinBox,
-                               QSpacerItem, QSizePolicy, QDoubleSpinBox, QColorDialog)
+                               QSpacerItem, QSizePolicy, QDoubleSpinBox, QColorDialog, QListWidgetItem)
 from PySide6.QtGui import QDoubleValidator, QFont, QIcon
 from PySide6.QtCore import Qt, QDate
 
-from Popups import InputDialog, ConfigurePhaseLinesDialog, ConfigureAimLinesDialog, ConfigureTrendLinesDialog
+from Popups import InputDialog, ConfigurePhaseLinesDialog, ConfigureAimLinesDialog, ConfigureTrendLinesDialog, NoteDialog
 from DataManager import DataManager
+from EventBus import EventBus
 
 
 class ModeWidget(QWidget):
@@ -17,6 +18,9 @@ class ModeWidget(QWidget):
         self.layout = QVBoxLayout(self)
         self.layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.init_ui()
+
+        # Initialize event bus instance for all mode widgets
+        self.event_bus = EventBus()
 
     def init_ui(self):
         pass
@@ -421,17 +425,17 @@ class ViewModeWidget(ModeWidget):
             self.dialog.credit_row1 = r1
             self.dialog.credit_row2 = r2
             self.dialog.credit_row3 = r3
-            self.figure_manager.view_update_credit_lines(r1, r2, r3)
+            self.figure_manager.data_manager.chart_data['credit'] = (r1, r2, r3)
+            self.event_bus.emit('view_update_credit_lines')
 
     def update_timing_checkboxes(self):
-        # Replace the following condition with your actual condition
-        condition = 'Minute' in self.data_manager.user_preferences['chart_type']
+        condition = 'Minute' in self.data_manager.chart_data['type']
         self.timing_floor_check.setEnabled(condition)
         self.timing_grid_check.setEnabled(condition)
 
     def toggle_credit_lines(self, status):
         self.data_manager.chart_data['view_check']['credit_spacing'] = bool(status)
-        self.figure_manager.update_chart()
+        self.event_bus.emit('new_chart', self.data_manager.chart_data['start_date'])
 
 
 class PhaseModeWidget(ModeWidget):
@@ -829,6 +833,8 @@ class TrendModeWidget(ModeWidget):
         self.trend_method_combo.addItem('Least-squares')
         self.trend_method_combo.addItem('Quarter-intersect')
         self.trend_method_combo.addItem('Split-middle-line')
+        self.trend_method_combo.addItem('Mean')
+        self.trend_method_combo.addItem('Median')
         self.trend_method_combo.setCurrentText(self.data_manager.user_preferences['fit_method'])
         self.trend_method_combo.currentIndexChanged.connect(lambda index: self.data_manager.user_preferences.update({'fit_method': self.trend_method_combo.currentText()}))
 
@@ -846,6 +852,7 @@ class TrendModeWidget(ModeWidget):
         self.envelope_method_combo.addItem('5-95 percentile')
         self.envelope_method_combo.addItem('Interquartile range')
         self.envelope_method_combo.addItem('Standard deviation')
+        self.envelope_method_combo.addItem('90% confidence interval')
         self.envelope_method_combo.setCurrentText(self.data_manager.user_preferences.get('bounce_envelope', 'None'))
         self.envelope_method_combo.currentIndexChanged.connect(lambda index: self.data_manager.user_preferences.update({'bounce_envelope': self.envelope_method_combo.currentText()}))
 
@@ -911,3 +918,148 @@ class TrendModeWidget(ModeWidget):
     def configure_trends(self):
         dialog = ConfigureTrendLinesDialog(self.trend_radio_dot.isChecked(), self.figure_manager, self)
         dialog.exec()
+
+
+class NoteModeWidget(ModeWidget):
+    def __init__(self, figure_manager):
+        super().__init__(figure_manager)
+
+        # Update notes
+        self.event_bus.subscribe('refresh_note_listbox', self.refresh_note_listbox, has_data=False)
+
+    def init_ui(self):
+        # Main layout
+        main_layout = QVBoxLayout()
+
+        # Header section
+        header_widget = QWidget()
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(10, 5, 10, 5)
+
+        # Header labels
+        date_label = QLabel("Date")
+        text_label = QLabel("Text")
+        date_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_layout.addWidget(date_label, stretch=1)
+        header_layout.addWidget(text_label, stretch=1)
+
+        # List widget
+        self.note_list = QListWidget()
+        self.note_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self.note_list.itemClicked.connect(self.clicked_on_note)
+        self.note_list.itemDoubleClicked.connect(self.double_clicked_on_note)
+        self.note_list.setStyleSheet("""
+            QListWidget {
+                font-size: 14px;
+            }
+            QListWidget::item {
+                padding: 5px;
+                text-align: center;
+                margin: 3px 0px;
+            }
+            
+            QListWidget::item:hover {
+            background-color: #96deeb;
+            }
+                
+            QListWidget::item:selected {
+                background-color: #05c3de;
+                color: white;
+            }
+        """)
+
+        # Button layout
+        button_layout = QHBoxLayout()
+        remove_note_btn = QPushButton()
+        remove_note_btn.setIcon(QIcon(':/images/minus-solid.svg'))
+        remove_note_btn.setStyleSheet("""
+           QPushButton {
+               border: 1px solid #ccc !important;
+               border-radius: 16px !important;
+               margin: 0px !important;
+               padding: 0px !important;
+               min-width: 32px !important;
+               min-height: 32px !important;
+               max-width: 32px !important; 
+               max-height: 32px !important;
+           }
+           QPushButton:hover {
+               background-color: #e0e0e0 !important;
+           }
+        """)
+        button_layout.addWidget(remove_note_btn)
+
+        # Combine all layouts
+        main_layout.addWidget(header_widget)  # Header
+        main_layout.addWidget(self.note_list)  # List widget
+        main_layout.addLayout(button_layout)  # Buttons
+
+        # Set layout for the widget
+        self.layout.addLayout(main_layout)
+
+        # Connect button actions
+        remove_note_btn.clicked.connect(self.remove_note)
+
+    def refresh_note_listbox(self):
+        self.note_list.clear()
+        all_notes = self.data_manager.chart_data['notes']
+        for note in all_notes:
+            text, date_str, y_val = note.split('|')
+            text_to_show = f'{text[:8]}...' if len(text) > 8 else text
+            note_details_to_show = f'{date_str}\t{text_to_show}'
+            item = QListWidgetItem(note_details_to_show)
+            self.note_list.addItem(item)
+
+    def remove_note(self):
+        current_item = self.note_list.currentItem()  # Get the selected listbox item
+        notes = self.data_manager.chart_data['notes']
+
+        if current_item:
+            # Get index
+            idx = self.note_list.row(current_item)
+
+            # Remove from listbox
+            row = self.note_list.row(current_item)
+            self.note_list.takeItem(row)
+
+            # Remove from chart data
+            if idx < len(notes):
+                del notes[idx]
+
+            self.event_bus.emit('refresh_note_locations')
+            self.event_bus.emit('clear_previous_individual_note_object', data={'refresh': True})
+
+    def clicked_on_note(self, item):
+        if item:
+            # Get the index of the clicked item
+            index = self.note_list.row(item)
+            # Get the full note data using the same index
+            full_note = self.data_manager.chart_data['notes'][index]
+            text, date_str, y_val = full_note.split('|')
+
+            # # Emit event with the full note data
+            self.event_bus.emit('show_individual_note_locations', data={'date_str': date_str, 'note_y': y_val})
+
+    def double_clicked_on_note(self, item):
+        if item:
+            # Get the index of the clicked item
+            index = self.note_list.row(item)
+            # Get the full note data
+            full_note = self.data_manager.chart_data['notes'][index]
+            text, date_str, y_val = full_note.split('|')
+
+            # Create and show the note dialog
+            dialog = NoteDialog(date_str, float(y_val), self)
+            dialog.text_edit.setPlainText(text)  # Set the existing note text
+
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                # Get the new text from the dialog
+                new_text = dialog.text_edit.toPlainText().replace('|', '')
+                if new_text != text:  # Only update if the text changed
+                    # Remove old note
+                    del self.data_manager.chart_data['notes'][index]
+                    # The new note will have been added by the dialog's save_note method
+                    self.refresh_note_listbox()
+
+

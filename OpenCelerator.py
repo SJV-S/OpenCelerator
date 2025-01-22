@@ -12,7 +12,8 @@ from pathlib import Path
 from urllib.parse import urlparse, unquote
 from FigureManager import FigureManager
 from DataManager import DataManager
-from Popups import SaveImageDialog, StartDateDialog, SupportDevDialog
+from Popups import SaveImageDialog, StartDateDialog, SupportDevDialog, NoteDialog, DataColumnMappingDialog, UserPrompt
+from EventBus import EventBus
 import styles
 import Modes as chart_mode
 import warnings
@@ -50,14 +51,29 @@ class ChartApp(QMainWindow):
         # Initialize and add the Matplotlib widget to the right panel
         self.data_manager = DataManager()
         self.figure_manager = FigureManager(self)
+        self.event_bus = EventBus()
+
+        # Event subscriptions without data
+        self.event_bus.subscribe("view_mode_selected", lambda: self.change_mode(0), has_data=False)
+        self.event_bus.subscribe("style_mode_selected", lambda: self.change_mode(1), has_data=False)
+        self.event_bus.subscribe("phase_mode_selected", lambda: self.change_mode(2), has_data=False)
+        self.event_bus.subscribe("aim_mode_selected", lambda: self.change_mode(3), has_data=False)
+        self.event_bus.subscribe("celeration_mode_selected", lambda: self.change_mode(4), has_data=False)
+        self.event_bus.subscribe("note_mode_selected", lambda: self.change_mode(5), has_data=False)
+        self.event_bus.subscribe('sync_view_settings', self.sync_view_settings)
+
+        # Event subscriptions with data
+        self.event_bus.subscribe('save_decision', self.save_decision, has_data=True)
+
+        # Event triggers
+        self.event_bus.add_event_trigger('new_chart', 'cleanup_after_chart_update')
 
         # Setup interaction handling
         self.current_connection = None
         self.previous_mode = None
-        self.loaded_chart_path = None
         self.manual_mode_widget = None
         # Initialize the main window properties
-        self.window_title_str = 'OpenCelerator v0.8.0'
+        self.window_title_str = 'OpenCelerator v0.9.0'
         self.setWindowTitle(self.window_title_str)
         self.setWindowIcon(QIcon(':/images/opencelerator_logo_no_text.svg'))
 
@@ -83,6 +99,11 @@ class ChartApp(QMainWindow):
         self.tab_home = QWidget()
         self.tab_settings = QWidget()
 
+        # Crosshair control variables
+        self.shift_key_down = False
+        self.alt_key_down = False
+        QApplication.instance().installEventFilter(self)
+
         # Set up home tab
         self.home_layout = QVBoxLayout()  # Main layout for the home tab
         self.main_layout.addWidget(self.figure_manager)
@@ -95,14 +116,6 @@ class ChartApp(QMainWindow):
         self.tabs.addTab(self.tab_home, 'Home')
         self.tabs.addTab(self.files_tab, 'Files')  # Use the FilesTab instance
         self.tabs.addTab(self.tab_settings, 'Config')
-
-        # Create keyboard shortcuts for tab menu
-        self.shortcut_home = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_H), self)
-        self.shortcut_home.activated.connect(lambda: self.tabs.setCurrentIndex(0))
-        self.shortcut_files = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_F), self)
-        self.shortcut_files.activated.connect(lambda: self.tabs.setCurrentIndex(1))
-        self.shortcut_config = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_O), self)
-        self.shortcut_config.activated.connect(lambda: self.tabs.setCurrentIndex(2))
 
         # Set view interaction mode
         self.mode = 0  # View mode by default
@@ -117,22 +130,90 @@ class ChartApp(QMainWindow):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setFocus()  # Set focus to the main window
 
-        # Create keyboard shortcuts for switching modes
+        # Mode key bindings
         self.shortcut_view = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_V), self)
-        self.shortcut_view.activated.connect(lambda: self.change_mode(0))
-        self.shortcut_manual = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_D), self)
-        self.shortcut_manual.activated.connect(lambda: self.change_mode(1))
+        self.shortcut_manual = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_T), self)
         self.shortcut_phase = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_P), self)
-        self.shortcut_phase.activated.connect(lambda: self.change_mode(2))
         self.shortcut_aim = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_A), self)
-        self.shortcut_aim.activated.connect(lambda: self.change_mode(3))
         self.shortcut_trend = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_C), self)
-        self.shortcut_trend.activated.connect(lambda: self.change_mode(4))
+        self.shortcut_note = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_M), self)
+        self.shortcut_view.activated.connect(lambda: [self.event_bus.emit('view_mode_selected'), self.tabs.setCurrentIndex(0)])
+        self.shortcut_manual.activated.connect(lambda: [self.event_bus.emit('style_mode_selected'), self.tabs.setCurrentIndex(0)])
+        self.shortcut_phase.activated.connect(lambda: [self.event_bus.emit('phase_mode_selected'), self.tabs.setCurrentIndex(0)])
+        self.shortcut_aim.activated.connect(lambda: [self.event_bus.emit('aim_mode_selected'), self.tabs.setCurrentIndex(0)])
+        self.shortcut_trend.activated.connect(lambda: [self.event_bus.emit('celeration_mode_selected'), self.tabs.setCurrentIndex(0)])
+        self.shortcut_note.activated.connect(lambda: [self.event_bus.emit('note_mode_selected'), self.tabs.setCurrentIndex(0)])
+
+        # Tab key bindings
+        self.shortcut_home = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_H), self)
+        self.shortcut_home.activated.connect(lambda: self.tabs.setCurrentIndex(0))
+        self.shortcut_files = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_F), self)
+        self.shortcut_files.activated.connect(lambda: self.tabs.setCurrentIndex(1))
+        self.shortcut_config = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_O), self)
+        self.shortcut_config.activated.connect(lambda: self.tabs.setCurrentIndex(2))
+
+        # File keybindings
+        self.shortcut_import = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_D), self)
+        self.shortcut_import.activated.connect(lambda: self.event_handlers.import_data())
+        self.shortcut_load = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_L), self)
+        self.shortcut_load.activated.connect(lambda: self.event_handlers.load_chart(None))
+        self.shortcut_export = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_E), self)
+        self.shortcut_export.activated.connect(self.event_handlers.save_image)
+        self.shortcut_new = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_N), self)
+        self.shortcut_new.activated.connect(self.files_tab.new_chart_dialog)
+        self.shortcut_save = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_S), self)
+        self.shortcut_save.activated.connect(lambda: self.event_handlers.save_chart())
 
         # Control variables
         self.current_connection = None
         self.xy_coord = None
         self.save_preferences_upon_close = True
+
+    def eventFilter(self, obj, event):
+        # Check if the event is a key press event
+        if event.type() == QEvent.Type.KeyPress:
+            if (event.key() == Qt.Key.Key_Shift and not self.shift_key_down) or \
+                    (event.key() == Qt.Key.Key_Alt and not self.alt_key_down):
+
+                # Set appropriate key state
+                if event.key() == Qt.Key.Key_Shift:
+                    self.shift_key_down = True
+                    self.figure_manager.hover_manager.show_lines = True
+                else:  # Alt key
+                    self.alt_key_down = True
+                    self.figure_manager.hover_manager.show_lines = False
+
+                # Save the background for blitting using hover manager
+                self.figure_manager.hover_manager.save_crosshair_background()
+
+                # Connect mouse motion event to update hover coordinates
+                self.figure_manager.canvas.mpl_connect('motion_notify_event', self.update_hover_coordinates)
+
+        # Check if the event is a key release event
+        elif event.type() == QEvent.Type.KeyRelease:
+            if (event.key() == Qt.Key.Key_Shift and self.shift_key_down) or \
+                    (event.key() == Qt.Key.Key_Alt and self.alt_key_down):
+
+                # Reset appropriate key state
+                if event.key() == Qt.Key.Key_Shift:
+                    self.shift_key_down = False
+                else:  # Alt key
+                    self.alt_key_down = False
+
+                # Clear the crosshairs using hover manager
+                self.figure_manager.hover_manager.clear_crosshair_blit()
+
+        return super().eventFilter(obj, event)
+
+    def update_hover_coordinates(self, event):
+        ax = event.inaxes
+        if (self.shift_key_down and QApplication.keyboardModifiers() == Qt.KeyboardModifier.ShiftModifier) or \
+                (self.alt_key_down and QApplication.keyboardModifiers() == Qt.KeyboardModifier.AltModifier):
+            if ax and event.xdata is not None and event.ydata is not None:
+                x, y = event.xdata, event.ydata
+                x = self.figure_manager.data_manager.find_closest_x(int(x), self.figure_manager.Chart.date_to_pos)
+                y = self.data_manager.format_y_value(y)
+                self.figure_manager.hover_manager.crosshair_blit(x, y)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasText():
@@ -210,6 +291,12 @@ class ChartApp(QMainWindow):
         self.button_phase.setStyleSheet(self.get_mode_button_style(selected if index == 2 else non_selected))
         self.button_aim.setStyleSheet(self.get_mode_button_style(selected if index == 3 else non_selected))
         self.button_trend.setStyleSheet(self.get_mode_button_style(selected if index == 4 else non_selected))
+        self.button_note.setStyleSheet(self.get_mode_button_style(selected if index == 5 else non_selected))
+
+        # Refresh note listbox when switching to note mode
+        if index == 5:
+            self.event_bus.emit('refresh_note_listbox')
+            self.event_bus.emit('refresh_note_locations')
 
         # Cleanup edit objects from previous mode
         if self.previous_mode == 2:
@@ -221,6 +308,10 @@ class ChartApp(QMainWindow):
         elif self.previous_mode == 1:
             self.figure_manager.data_styling_cleanup()
             self.event_handlers.reset_data_styling_date_range()
+        elif self.previous_mode == 5:
+            self.figure_manager.hover_manager.disable_note_crosshair()
+            self.event_bus.emit('remove_note_locations')
+            self.event_bus.emit('clear_previous_individual_note_object', data={'refresh': True})
 
     def setup_home_tab(self):
         self.tab_home.setContentsMargins(0, 0, 0, 0)  # Add this line to remove margins from the tab
@@ -233,25 +324,26 @@ class ChartApp(QMainWindow):
         mode_selection_layout.setContentsMargins(0, 0, 0, 0)
 
         # Helper function to create a button with an icon above the text
-        def create_icon_text_button(icon_path, text, color='black'):
+        def create_icon_text_button(icon_path, text, color='black', icon_width=16, icon_height=16, button_height=50):
             button = QPushButton()
             layout = QHBoxLayout()
 
-            icon_pixmap = QPixmap(icon_path)  # Create QPixmap from icon path
-            colored_pixmap = QPixmap(icon_pixmap.size())  # Create a new pixmap with the same size
-            colored_pixmap.fill(Qt.GlobalColor.transparent)  # Fill it with transparency
+            icon_pixmap = QPixmap(icon_path)
+            colored_pixmap = QPixmap(icon_pixmap.size())
+            colored_pixmap.fill(Qt.GlobalColor.transparent)
 
-            painter = QPainter(colored_pixmap)  # Start QPainter to draw on the new pixmap
+            painter = QPainter(colored_pixmap)
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
-            painter.drawPixmap(0, 0, icon_pixmap)  # Draw the original icon
+            painter.drawPixmap(0, 0, icon_pixmap)
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-            painter.setBrush(QColor(color))  # Set brush color
-            painter.setPen(QColor(color))  # Set pen color
-            painter.drawRect(colored_pixmap.rect())  # Draw a rectangle with the color
-            painter.end()  # End QPainter
+            painter.setBrush(QColor(color))
+            painter.setPen(QColor(color))
+            painter.drawRect(colored_pixmap.rect())
+            painter.end()
 
             icon_label = QLabel()
-            icon_label.setPixmap(colored_pixmap.scaled(16, 16, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            icon_label.setPixmap(colored_pixmap.scaled(icon_width, icon_height, Qt.AspectRatioMode.KeepAspectRatio,
+                                                       Qt.TransformationMode.SmoothTransformation))
             icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
             text_label = QLabel(text)
@@ -271,28 +363,31 @@ class ChartApp(QMainWindow):
             button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             button.setLayout(button_layout)
 
-            button.setFixedHeight(50)  # Adjust height as needed
+            button.setFixedHeight(button_height)
             return button
 
         # Create buttons with icons and text
         self.button_view = create_icon_text_button(':/images/eye-regular.svg', 'View ')
-        self.button_manual = create_icon_text_button(':/images/pen-to-square-regular.svg', 'Data ')
         self.button_phase = create_icon_text_button(':/images/flag-regular.svg', 'Phase ')
         self.button_aim = create_icon_text_button(':/images/crosshairs-solid.svg', 'Aim ')
         self.button_trend = create_icon_text_button(':/images/celeration.svg', 'Celeration ')
+        self.button_note = create_icon_text_button(':/images/note-sticky-regular.svg', 'Notes ')
+        self.button_manual = create_icon_text_button(':/images/style-svgrepo-com.svg', 'Style ')
 
         self.button_view.setStyleSheet(self.get_mode_button_style())
         self.button_manual.setStyleSheet(self.get_mode_button_style())
         self.button_phase.setStyleSheet(self.get_mode_button_style())
         self.button_aim.setStyleSheet(self.get_mode_button_style())
         self.button_trend.setStyleSheet(self.get_mode_button_style())
+        self.button_note.setStyleSheet(self.get_mode_button_style())
 
         # Add push buttons to the mode selection layout with vertical alignment
         mode_selection_layout.addWidget(self.button_view)
-        mode_selection_layout.addWidget(self.button_manual)
         mode_selection_layout.addWidget(self.button_phase)
         mode_selection_layout.addWidget(self.button_aim)
         mode_selection_layout.addWidget(self.button_trend)
+        mode_selection_layout.addWidget(self.button_note)
+        mode_selection_layout.addWidget(self.button_manual)
 
         self.mode_dict = {
             0: 'view',
@@ -300,6 +395,7 @@ class ChartApp(QMainWindow):
             2: 'phase',
             3: 'aim',
             4: 'trend',
+            5: 'note'
         }
 
         # Add mode selection layout directly to the home layout
@@ -316,19 +412,22 @@ class ChartApp(QMainWindow):
         self.phase_mode_widget = chart_mode.PhaseModeWidget(self.figure_manager)
         self.aim_mode_widget = chart_mode.AimModeWidget(self.figure_manager)
         self.trend_mode_widget = chart_mode.TrendModeWidget(self.figure_manager)
+        self.note_mode_widget = chart_mode.NoteModeWidget(self.figure_manager)
 
         self.stacked_widget.addWidget(self.view_mode_widget)
         self.stacked_widget.addWidget(self.manual_mode_widget)
         self.stacked_widget.addWidget(self.phase_mode_widget)
         self.stacked_widget.addWidget(self.aim_mode_widget)
         self.stacked_widget.addWidget(self.trend_mode_widget)
+        self.stacked_widget.addWidget(self.note_mode_widget)
 
         # Connect push buttons to set interaction mode
-        self.button_view.clicked.connect(lambda: self.change_mode(0))
-        self.button_manual.clicked.connect(lambda: self.change_mode(1))
-        self.button_phase.clicked.connect(lambda: self.change_mode(2))
-        self.button_aim.clicked.connect(lambda: self.change_mode(3))
-        self.button_trend.clicked.connect(lambda: self.change_mode(4))
+        self.button_view.clicked.connect(lambda: self.event_bus.emit("view_mode_selected"))
+        self.button_manual.clicked.connect(lambda: self.event_bus.emit("style_mode_selected"))
+        self.button_phase.clicked.connect(lambda: self.event_bus.emit('phase_mode_selected'))
+        self.button_aim.clicked.connect(lambda: self.event_bus.emit('aim_mode_selected'))
+        self.button_trend.clicked.connect(lambda: self.event_bus.emit('celeration_mode_selected'))
+        self.button_note.clicked.connect(lambda: self.event_bus.emit('note_mode_selected'))
 
         # Stretch at the bottom to push everything up
         self.home_layout.addStretch(1)
@@ -362,44 +461,6 @@ class ChartApp(QMainWindow):
 
         preferences_group_layout.addWidget(settings_decreasing_frequency_label)
         preferences_group_layout.addWidget(settings_decreasing_frequency_handling)
-
-        # Zero counts below timing floor or don't display
-        settings_zero_count_handling_label = QLabel('Zero counts')
-        settings_zero_count_handling = QComboBox()
-        settings_zero_count_handling.setToolTip('Set before importing data')
-        settings_zero_count_handling.addItem('Place below floor', True)
-        settings_zero_count_handling.addItem('Do not show', False)
-
-        # Set default selection based on bool_type
-        if self.data_manager.user_preferences['place_below_floor']:
-            settings_zero_count_handling.setCurrentIndex(0)  # Select 'Place below floor'
-        else:
-            settings_zero_count_handling.setCurrentIndex(1)  # Select 'Do not show'
-
-        preferences_group_layout.addWidget(settings_zero_count_handling_label)
-        preferences_group_layout.addWidget(settings_zero_count_handling)
-        settings_zero_count_handling.currentIndexChanged.connect(
-            lambda index: self.event_handlers.update_zero_count_handling(settings_zero_count_handling.itemData(index)))
-
-        settings_layout.addWidget(preferences_group)
-
-        # Set chart aggregation
-        settings_data_agg_label = QLabel('Data aggregation')
-        self.settings_data_agg = QComboBox()
-        self.settings_data_agg.addItem('Sum', 'sum')
-        self.settings_data_agg.addItem('Mean', 'mean')
-        self.settings_data_agg.addItem('Median', 'median')
-        self.settings_data_agg.addItem('Stack', 'stack')
-
-        # Load preference
-        current_value = self.data_manager.user_preferences['chart_data_agg']
-        index = self.settings_data_agg.findData(current_value)
-        if index != -1:
-            self.settings_data_agg.setCurrentIndex(index)
-
-        preferences_group_layout.addWidget(settings_data_agg_label)
-        preferences_group_layout.addWidget(self.settings_data_agg)
-        self.settings_data_agg.currentIndexChanged.connect(self.event_handlers.on_agg_current_index_changed)
 
         # Autosave
         settings_autosave_label = QLabel('Autosave charts')
@@ -437,23 +498,62 @@ class ChartApp(QMainWindow):
         chart_type_label = QLabel("Type")
         chart_type_settings_layout.addWidget(chart_type_label)
         self.chart_type_settings_dropdown = QComboBox()
-        self.chart_type_settings_dropdown.addItem('DailyMinute', 'DailyMinute')  # Adding item with data
         self.chart_type_settings_dropdown.addItem('Daily', 'Daily')
-        self.chart_type_settings_dropdown.addItem('WeeklyMinute', 'WeeklyMinute')
         self.chart_type_settings_dropdown.addItem('Weekly', 'Weekly')
-        self.chart_type_settings_dropdown.addItem('MonthlyMinute', 'MonthlyMinute')
         self.chart_type_settings_dropdown.addItem('Monthly', 'Monthly')
-        self.chart_type_settings_dropdown.addItem('YearlyMinute', 'YearlyMinute')
         self.chart_type_settings_dropdown.addItem('Yearly', 'Yearly')
+        self.chart_type_settings_dropdown.addItem('DailyMinute', 'DailyMinute')
+        self.chart_type_settings_dropdown.addItem('WeeklyMinute', 'WeeklyMinute')
+        self.chart_type_settings_dropdown.addItem('MonthlyMinute', 'MonthlyMinute')
+        self.chart_type_settings_dropdown.addItem('YearlyMinute', 'YearlyMinute')
         chart_type_settings_layout.addWidget(self.chart_type_settings_dropdown)
 
         # Load chart preference
-        chart_type = self.data_manager.user_preferences['chart_type']
+        chart_type = self.data_manager.chart_data['type']
         index = self.chart_type_settings_dropdown.findData(chart_type)
         if index != -1:
             self.chart_type_settings_dropdown.setCurrentIndex(index)
         self.chart_type_settings_dropdown.currentIndexChanged.connect(self.event_handlers.change_chart_type)
         settings_layout.addWidget(chart_type_settings_group)
+
+        # Set chart aggregation
+        settings_data_agg_label = QLabel('Data aggregation')
+        self.settings_data_agg = QComboBox()
+        self.settings_data_agg.addItem('Sum', 'sum')
+        self.settings_data_agg.addItem('Mean', 'mean')
+        self.settings_data_agg.addItem('Median', 'median')
+        self.settings_data_agg.addItem('Max', 'max')
+        self.settings_data_agg.addItem('Min', 'min')
+        self.settings_data_agg.addItem('Stack', 'stack')
+        # Load chart setting
+        current_value = self.data_manager.chart_data['chart_data_agg']
+        index = self.settings_data_agg.findData(current_value)
+        if index != -1:
+            self.settings_data_agg.setCurrentIndex(index)
+        # Add to layout
+        chart_type_settings_layout.addWidget(settings_data_agg_label)
+        chart_type_settings_layout.addWidget(self.settings_data_agg)
+        # Connect function
+        self.settings_data_agg.currentIndexChanged.connect(self.event_handlers.on_agg_current_index_changed)
+
+        # Zero counts below timing floor or don't display
+        settings_zero_count_handling_label = QLabel('Zero counts')
+        self.settings_zero_count_handling = QComboBox()
+        self.settings_zero_count_handling.addItem('Place below floor', True)
+        self.settings_zero_count_handling.addItem('Do not show', False)
+        # Set default selection based on bool_type
+        if self.data_manager.chart_data['place_below_floor']:
+            # Select 'Place below floor'
+            self.settings_zero_count_handling.setCurrentIndex(0)
+        else:
+            # Select 'Do not show'
+            self.settings_zero_count_handling.setCurrentIndex(1)
+
+        chart_type_settings_layout.addWidget(settings_zero_count_handling_label)
+        chart_type_settings_layout.addWidget(self.settings_zero_count_handling)
+        self.settings_zero_count_handling.currentIndexChanged.connect(
+            lambda index: self.event_handlers.update_zero_count_handling(self.settings_zero_count_handling.itemData(index)))
+        settings_layout.addWidget(preferences_group)
 
         # SpinBox for chart size
         chart_size_label = QLabel("Width (6 - 15)")
@@ -544,6 +644,8 @@ class ChartApp(QMainWindow):
             self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.aim_click)
         elif self.mode == 4:  # Trend mode
             self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.trend_click)
+        elif self.mode == 5:
+            self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.note_click)
 
     def trend_adjust_dates(self):
         result = self.figure_manager.trend_adjust_dates()
@@ -579,6 +681,18 @@ class ChartApp(QMainWindow):
         self.view_mode_widget.credit_check.setChecked(settings['credit_spacing'])
         self.view_mode_widget.credit_check.blockSignals(False)
 
+        # Prevent double run
+        self.settings_data_agg.blockSignals(True)
+        index = self.settings_data_agg.findData(self.data_manager.chart_data['chart_data_agg'])
+        self.settings_data_agg.setCurrentIndex(index)
+        self.settings_data_agg.blockSignals(False)
+
+        # Prevent double run
+        self.settings_zero_count_handling.blockSignals(True)
+        index = 0 if self.data_manager.chart_data['place_below_floor'] else 1
+        self.settings_zero_count_handling.setCurrentIndex(index)
+        self.settings_zero_count_handling.blockSignals(False)
+
         # Update view checks
         refresh = False
         self.figure_manager.view_minor_gridlines(settings['minor_grid'], refresh=refresh)
@@ -602,9 +716,11 @@ class ChartApp(QMainWindow):
 
     def save_decision(self, event=None):
         autosave = self.data_manager.user_preferences['autosave']
+        chart_file_path = self.data_manager.chart_data['chart_file_path']
+        data_exists = self.data_manager.df_raw is not None and not self.data_manager.df_raw.empty
 
-        if self.loaded_chart_path and not autosave:
-            file_name = os.path.splitext(os.path.basename(self.loaded_chart_path))[0]
+        if chart_file_path and not autosave:
+            file_name = os.path.splitext(os.path.basename(chart_file_path))[0]
 
             if event:
                 reply = QMessageBox.question(self, 'Save Chart',
@@ -619,24 +735,29 @@ class ChartApp(QMainWindow):
                                              QMessageBox.StandardButton.No)
 
             if reply == QMessageBox.StandardButton.Yes:
-                self.event_handlers.save_chart(self.loaded_chart_path)
+                self.event_handlers.save_chart(chart_file_path)
             elif reply == QMessageBox.StandardButton.Cancel:
                 if event:
                     event.ignore()
 
-        elif autosave and self.loaded_chart_path:
-                self.event_handlers.save_chart(self.loaded_chart_path)
+        elif autosave and chart_file_path:
+                self.event_handlers.save_chart(chart_file_path)
                 if event:
                     event.accept()
 
-        elif autosave and not self.loaded_chart_path and not self.data_manager.chart_data['raw_df'].empty:
-            self.event_handlers.save_chart(self.loaded_chart_path)
+        elif autosave and not chart_file_path and data_exists:
+            data = {'title': "No chart file",
+                    'message': 'Save this chart?',
+                    'choice': True}
+            accepted = self.event_bus.emit('trigger_user_prompt', data)
+            if accepted:
+                self.event_handlers.save_chart(chart_file_path)
             if event:
                 event.accept()
 
     def closeEvent(self, event):
         # Stuff to do before closing application
-        self.save_decision(event)
+        self.event_bus.emit('save_decision', data=event)
 
         # Save current preferences
         if self.save_preferences_upon_close:
@@ -649,6 +770,11 @@ class FilesTab(QWidget):
         self.chart_app = chart_app
         self.event_handlers = event_handlers
         self.data_manager = data_manager
+        self.event_bus = EventBus()
+
+        # Event bus subscriptions without data
+        self.event_bus.subscribe('refresh_recent_charts_list', self.refresh_recent_charts_list)
+
         self.setup_ui()
 
     def setup_ui(self):
@@ -661,11 +787,11 @@ class FilesTab(QWidget):
         btn_new = QPushButton('New')
         btn_new.setToolTip('Get default chart')
         btn_import_delete = QPushButton('Data')
-        btn_import_delete.setToolTip('Raw data from xls, xlsx, ods, or csv')
+        btn_import_delete.setToolTip('Import raw data onto existing chart')
         btn_load = QPushButton('Load')
-        btn_load.setToolTip('Load data and chart configs from json')
+        btn_load.setToolTip('Load chart file')
         btn_save = QPushButton('Save')
-        btn_save.setToolTip('Save data and chart configs as json')
+        btn_save.setToolTip('Save chart file (data plus chart settings)')
         btn_image = QPushButton('Export')
         btn_image.setToolTip('Export chart as png, jpeg, pdf, or svg')
         layout_chart.addWidget(btn_new)
@@ -687,29 +813,34 @@ class FilesTab(QWidget):
 
         self.lst_recent_charts.setStyleSheet("""
             QListWidget {
-                font-size: 14px;  /* Set font size for the entire QListWidget */
+                font-size: 14px;
             }
             QListWidget::item {
-                margin: 3px 0px;  /* Margin to increase space between items */
+                padding: 5px;
+                text-align: center;
+                margin: 3px 0px;
             }
+            
             QListWidget::item:hover {
-                background-color: #96deeb;  /* Background when hovering over an item */
+            background-color: #96deeb;
             }
+                
             QListWidget::item:selected {
-                background-color: #05c3de;  /* Background when an item is selected */
+                background-color: #05c3de;
+                color: white;
             }
         """)
 
-        self.lst_recent_charts.setFixedHeight(250)
+        self.lst_recent_charts.setFixedHeight(500)
         files_layout.addWidget(lbl_recent_charts)
         files_layout.addWidget(self.lst_recent_charts)
 
         # Populate recents for listboxes
-        self.refresh_recent_charts_list()
+        self.event_bus.emit('refresh_recent_charts_list')
 
         # Button connections
-        btn_import_delete.clicked.connect(lambda: self.event_handlers.import_data(None))
-        btn_new.clicked.connect(self.files_show_dialog)
+        btn_import_delete.clicked.connect(lambda: self.event_handlers.import_data())
+        btn_new.clicked.connect(self.new_chart_dialog)
         btn_image.clicked.connect(self.event_handlers.save_image)
         btn_save.clicked.connect(self.event_handlers.save_chart)
         btn_load.clicked.connect(lambda: self.event_handlers.load_chart(None))
@@ -720,18 +851,6 @@ class FilesTab(QWidget):
         self.lst_recent_charts.installEventFilter(self)
 
         files_layout.addStretch()  # Prevents the buttons from vertically filling the whole panel
-
-        # Create keyboard shortcuts for Import, Load, and Chart-Export buttons
-        self.shortcut_import = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_I), self)
-        self.shortcut_import.activated.connect(btn_import_delete.click)
-        self.shortcut_load = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_L), self)
-        self.shortcut_load.activated.connect(btn_load.click)
-        self.shortcut_export = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_E), self)
-        self.shortcut_export.activated.connect(btn_image.click)
-        self.shortcut_new = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_N), self)
-        self.shortcut_new.activated.connect(btn_new.click)
-        self.shortcut_save = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_S), self)
-        self.shortcut_save.activated.connect(btn_save.click)
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.KeyPress:
@@ -767,9 +886,9 @@ class FilesTab(QWidget):
             self.event_handlers.load_chart(chart_path)
         else:
             self.data_manager.user_preferences['recent_charts'].remove(chart_path)
-        self.refresh_recent_charts_list()
+        self.event_bus.emit('refresh_recent_charts_list')
 
-    def files_show_dialog(self):
+    def new_chart_dialog(self):
         # Create a QMessageBox
         msg_box = QMessageBox()
         msg_box.setWindowTitle("New chart")
@@ -783,19 +902,19 @@ class FilesTab(QWidget):
         if response == QMessageBox.StandardButton.Yes:
 
             # Decide whether to save chart
-            self.chart_app.save_decision()
+            self.event_bus.emit('save_decision', data=None)
 
             # Save current chart if any and if autosave is enabled
             autosave = self.data_manager.user_preferences['autosave']
-            if self.chart_app.loaded_chart_path and autosave:
-                self.event_handlers.save_chart(self.chart_app.loaded_chart_path)
+            if self.data_manager.chart_data['chart_file_path'] and autosave:
+                self.event_handlers.save_chart(self.data_manager.chart_data['chart_file_path'])
 
-            self.chart_app.loaded_chart_path = None  # Prevents from accidentally saving default chart
+            # Prevents from accidentally saving default chart
+            self.data_manager.chart_data['chart_file_path'] = None
             self.chart_app.figure_manager.back_to_default()
 
             # Remove display name of imported/loaded chart
             self.chart_app.setWindowTitle(self.chart_app.window_title_str)
-
 
 
 class EventHandlers:
@@ -803,6 +922,16 @@ class EventHandlers:
         self.chart_app = chart_app
         self.figure_manager = figure_manager
         self.data_manager = data_manager
+        self.event_bus = self.chart_app.event_bus
+
+        # Event subscriptions without data
+        self.event_bus.subscribe('cleanup_after_chart_update', self.cleanup_after_chart_update)
+        self.event_bus.subscribe('select_import_path', self.select_import_path)
+
+        # Event subscriptions with data
+        self.event_bus.subscribe('column_map_dialog', self.column_map_dialog, has_data=True)
+        self.event_bus.subscribe('save_chart_as_recent', self.save_recent, has_data=True)
+        self.event_bus.subscribe('trigger_user_prompt', self.trigger_user_prompt, has_data=True)
 
     def reset_data_styling_date_range(self):
         d1 = self.figure_manager.x_to_date[0].strftime(self.data_manager.standard_date_string)
@@ -814,42 +943,53 @@ class EventHandlers:
         dialog = StartDateDialog(self.chart_app)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_start_date = dialog.get_date()
-            self.figure_manager.settings_change_start_date(new_start_date)
-            self.chart_app.set_interaction_mode()
-            self.reset_data_styling_date_range()
+            self.data_manager.chart_data['start_date'] = new_start_date
+            self.event_bus.emit('new_chart', new_start_date)
 
-    def save_recent(self, file_path, recent_type):
-        max_recent = 10
+    def save_recent(self, data):
+        file_path = data['file_path']
+        recent_type = data['recent_type']
+        max_recent = 25
         if file_path in self.data_manager.user_preferences[recent_type]:
             self.data_manager.user_preferences[recent_type].remove(file_path)
         self.data_manager.user_preferences[recent_type].insert(0, file_path)
         self.data_manager.user_preferences[recent_type] = self.data_manager.user_preferences[recent_type][:max_recent]
 
-    def import_data(self, file_path):
+    def column_map_dialog(self, file_path):
+        dialog = DataColumnMappingDialog(self.chart_app, file_path)
+        dialog.exec()
+
+    def select_import_path(self, file_path=None):
         if file_path is None:
             # Open file dialog with support for CSV and Excel files
-            file_path, _ = QFileDialog.getOpenFileName(self.chart_app, 'Select file',
+            file_path, _ = QFileDialog.getOpenFileName(self.chart_app, 'Select data set',
                                                        self.data_manager.user_preferences['home_folder'],
                                                        'CSV, Excel, ODS files (*.csv *.xls *.xlsx *.ods)')
 
-        if file_path:
-            try:
-                self.figure_manager.fig_import_data(file_path, self.chart_app.loaded_chart_path)
-                self.data_manager.chart_data['import_path'] = file_path
-            except:
-                msg_box = QMessageBox()
-                msg_box.setWindowTitle('Failed to import data')
-                msg_box.setIcon(QMessageBox.Icon.Warning)
-                msg_box.setText('Likely reason: The data sheet is incorrectly formatted.')
-                msg_box.setInformativeText("Solution: Check out formatting instructions on <a href='https://github.com/SJV-S/OpenCelerator/blob/main/README.md#import-formatting'>https://github.com/SJV-S/OpenCelerator/blob/main/README.md#import-formatting</a>.")
-                msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
-                msg_box.setStyleSheet("QLabel{ font-style: normal; }")
-                msg_box.exec()
+            if file_path:
+                # Save import path
+                unix_id = self.data_manager.user_preferences['unix_id']
+                import_paths = self.data_manager.chart_data['import_path']
+                import_paths[unix_id] = file_path
 
-        self.chart_app.set_interaction_mode()  # Make sure current mode is enabled for key handling
+            return file_path
 
-        # Reset data styling range based new chart
-        self.reset_data_styling_date_range()
+    def import_data(self):
+        file_path = self.select_import_path()
+        if not file_path:
+            return
+
+        # Create raw df for chart_data
+        self.data_manager.chart_data['column_map'] = None  # If re-importing
+        self.event_bus.emit('column_mapped_raw_data_import', file_path)
+
+        # Will be None if user canceled import
+        if self.data_manager.chart_data['column_map'] is not None:
+            # Make sure the user doesn't end up with a blank chart
+            start_date = self.data_manager.prevent_blank_chart()
+
+            # Get new chart
+            self.event_bus.emit('new_chart', start_date)
 
     def save_image(self):
         dialog = SaveImageDialog(self.chart_app)
@@ -874,7 +1014,7 @@ class EventHandlers:
 
         # Make sure empty strings are not saved. User will generate empty string if selecting Cancel in file explorer
         if name:
-            self.chart_app.loaded_chart_path = file_path
+            self.data_manager.chart_data['chart_file_path'] = file_path
             self.data_manager.save_chart(file_path, self.figure_manager.Chart.start_date)
 
             # Display name of chart saved
@@ -882,52 +1022,30 @@ class EventHandlers:
             self.chart_app.setWindowTitle(f'{self.chart_app.window_title_str} – {file_name}')
 
             # Save to recents and refresh list
-            self.save_recent(file_path, 'recent_charts')
-            self.chart_app.files_tab.refresh_recent_charts_list()
+            self.event_bus.emit('save_chart_as_recent', data={'file_path': file_path, 'recent_type': 'recent_charts'})
+            self.event_bus.emit('refresh_recent_charts_list')
+
+            # Save chart file path
+            self.data_manager.chart_data['chart_file_path'] = file_path
 
     def load_chart(self, file_path):
-
-        self.chart_app.save_decision()
+        # Decide whether to save data
+        self.event_bus.emit('save_decision', data=None)
 
         if file_path is None:
-            file_path, _ = QFileDialog.getOpenFileName(self.chart_app, 'Open file',
+            file_path, _ = QFileDialog.getOpenFileName(self.chart_app, 'Select chart file',
                                                        self.data_manager.user_preferences['home_folder'],
                                                        'JSON files (*.json);;All files (*.*)')
         if file_path:
-            self.chart_app.loaded_chart_path = file_path
-            self.figure_manager.fig_load_chart(file_path)
-
-            # Save to recents and refresh list
-            self.save_recent(file_path, 'recent_charts')
-            self.chart_app.files_tab.refresh_recent_charts_list()
-
-            # Update the chart type dropdown to reflect the loaded chart type
-            chart_type = self.data_manager.chart_data['type']
-            index = self.chart_app.chart_type_settings_dropdown.findData(chart_type)
-            if index != -1:
-                # Update chart dropdown without double creation of the canvas
-                self.chart_app.chart_type_settings_dropdown.blockSignals(True)
-                self.chart_app.chart_type_settings_dropdown.setCurrentIndex(index)  # Normally, this would also create a new canvas because the chart type was changed
-                self.chart_app.chart_type_settings_dropdown.blockSignals(False)
-
-            self.chart_app.set_interaction_mode()  # Make sure current mode is enabled for key handling
-
-        # Display name of loaded chart file
-        file_name = os.path.splitext(os.path.basename(file_path))[0]
-        self.chart_app.setWindowTitle(f'{self.chart_app.window_title_str} – {file_name}')
-
-        # Reset data styling range based new chart
-        self.reset_data_styling_date_range()
+            self.data_manager.load_chart_file(file_path)
 
     def update_zero_count_handling(self, bool_type):
-        self.data_manager.user_preferences['place_below_floor'] = bool_type
+        self.data_manager.chart_data['place_below_floor'] = bool_type
         self.figure_manager.new_chart(self.data_manager.chart_data['start_date'])
         self.chart_app.set_interaction_mode()  # Make sure current mode is enabled for key handling
 
     def update_cel_fan(self, status):
         self.data_manager.user_preferences['div_deceleration'] = bool(status)
-        # self.figure_manager.new_chart(self.data_manager.chart_data['start_date'])
-        # self.chart_app.set_interaction_mode()  # Make sure current mode is enabled for key handling
         self.figure_manager.Chart.change_deceleration_symbol(bool(status))
         self.figure_manager.refresh()
 
@@ -939,26 +1057,51 @@ class EventHandlers:
             self.data_manager.user_preferences['home_folder'] = folder_path
 
     def on_agg_current_index_changed(self, index):
-        self.data_manager.user_preferences.update({'chart_data_agg': self.chart_app.settings_data_agg.itemData(index)})
-        self.figure_manager.change_chart_type(self.data_manager.user_preferences['chart_type'])
-        self.chart_app.set_interaction_mode()  # Making sure current mode is enabled for key handling
+        self.data_manager.chart_data.update({'chart_data_agg': self.chart_app.settings_data_agg.itemData(index)})
+        self.event_bus.emit('new_chart', self.data_manager.chart_data['start_date'])
 
     def change_chart_type(self, index):
-        self.figure_manager.change_chart_type(self.chart_app.chart_type_settings_dropdown.itemData(index)),
+        new_type = self.chart_app.chart_type_settings_dropdown.itemData(index)
+        self.data_manager.chart_data['type'] = new_type
+        self.event_bus.emit('new_chart', self.data_manager.chart_data['start_date'])
 
+    def cleanup_after_chart_update(self):
         # Make sure current mode is enabled for key handling
         self.chart_app.set_interaction_mode()
-
-        # Update timing and floor checkboxes
-        self.chart_app.view_mode_widget.update_timing_checkboxes()
-
         # Reset data styling range based new chart
         self.reset_data_styling_date_range()
+        # Enable or disable timing checkboxes for view mode
+        self.chart_app.view_mode_widget.update_timing_checkboxes()
+
+        # Update the chart type dropdown to reflect the loaded chart type
+        chart_type = self.data_manager.chart_data['type']
+        index = self.chart_app.chart_type_settings_dropdown.findData(chart_type)
+        if index != -1:
+            current_index = self.chart_app.chart_type_settings_dropdown.currentIndex()
+            if current_index != index:
+                self.chart_app.chart_type_settings_dropdown.blockSignals(True)
+                self.chart_app.chart_type_settings_dropdown.setCurrentIndex(index)
+                self.chart_app.chart_type_settings_dropdown.blockSignals(False)
+
+        # Display name of loaded chart file
+        file_path = self.data_manager.chart_data['chart_file_path']
+        unix_id = self.data_manager.user_preferences['unix_id']
+        all_import_paths = self.data_manager.chart_data['import_path']
+        if unix_id in all_import_paths.keys():
+            import_path = all_import_paths[unix_id]
+        else:
+            import_path = ''
+
+        if file_path:
+            file_name = os.path.splitext(os.path.basename(file_path))[0]
+            truncated_import_path = os.path.sep.join(import_path.split(os.path.sep)[-3:])
+            new_window_title = f"{self.chart_app.window_title_str} | {file_name} | {truncated_import_path}"
+            if self.chart_app.windowTitle() != new_window_title:
+                self.chart_app.setWindowTitle(new_window_title)
 
     def change_width(self, new_width):
         self.data_manager.user_preferences['width'] = new_width
-        self.figure_manager.settings_change_chart_width()
-        self.chart_app.set_interaction_mode()
+        self.event_bus.emit('new_chart', self.data_manager.chart_data['start_date'])
 
     def phase_click(self, event):
         # Update phase line form
@@ -1001,6 +1144,16 @@ class EventHandlers:
         self.figure_manager.trend_on_click(event)
         self.chart_app.trend_adjust_dates()
 
+    def note_click(self, event):
+        x, y = event.xdata, event.ydata
+        if x and y:  # Check if valid coordinates are passed
+            y = self.data_manager.format_y_value(y)
+            x = int(x)
+            if x in self.figure_manager.x_to_date.keys():
+                x_date = self.figure_manager.x_to_date[x].strftime(self.data_manager.standard_date_string)
+                dialog = NoteDialog(x_date, y, self.chart_app)  # Pass the main window as parent
+                dialog.exec()
+
     def point_click(self, event):
         self.figure_manager.point_on_click(event)  # Paint temporary magenta lines
         self.data_adjust_dates()
@@ -1028,11 +1181,20 @@ class EventHandlers:
         QColorDialog.setCustomColor(3, QColor('#71B8FF'))  # My original choice of font color
         QColorDialog.setCustomColor(4, QColor('#5a93cc'))  # My original choice of grid color
         color = QColorDialog.getColor(initial_color)
+        # Carl Binder's grid choice on fluency.org: #55AAFF (font was just black)
 
         if color.isValid():
             self.data_manager.user_preferences[color_category] = color.name()
-            self.figure_manager.update_chart()
+            self.event_bus.emit('new_chart', self.data_manager.chart_data['start_date'])
             self.chart_app.set_interaction_mode()
+
+    def trigger_user_prompt(self, data):
+        prompt = UserPrompt(
+            title=data['title'],
+            message=data['message'],
+            choice=data['choice']
+        )
+        return prompt.display()
 
 
 app = QApplication(sys.argv)
@@ -1040,4 +1202,3 @@ app.setStyleSheet(styles.general_stylesheet)
 window = ChartApp()
 window.show()
 sys.exit(app.exec())
-

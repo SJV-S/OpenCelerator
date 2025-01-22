@@ -4,12 +4,13 @@ import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from PySide6.QtWidgets import QWidget, QVBoxLayout
+from PySide6.QtCore import QTimer
 import scc
 from DataManager import DataManager
+from EventBus import EventBus
 import copy
-import json
 import re
-import os
+import textwrap
 
 
 class FigureManager(QWidget):
@@ -17,12 +18,13 @@ class FigureManager(QWidget):
         super(FigureManager, self).__init__(parent)
         self.main_app = parent  # Assuming parent is an instance of ChartApp
         self.data_manager = DataManager()
+        self.event_bus = EventBus()
 
         self.fig_init = False  # Control variables for replot
         self.test_angle = False
         self.fan_ax = None  # Control variable for celeration fan
 
-        # Mode managers
+        # Managers
         self.phase_manager = PhaseManager(self)
         self.aim_manager = AimManager(self)
         self.trend_manager = TrendManager(self)
@@ -67,7 +69,14 @@ class FigureManager(QWidget):
         self.deceleration_as_division = True
         self.credit_lines_space = True
 
-        self.new_chart(start_date=pd.to_datetime('today'))
+        self.new_chart(start_date=pd.to_datetime('today').normalize())
+
+        # Other managers for which self.ax is expected to be defined
+        self.note_manager = NoteManager(self)
+        self.hover_manager = Hover(self)
+
+        # Event subscriptions
+        self.event_bus.subscribe('new_chart', self.new_chart, has_data=True)
 
     def init_state(self, start_date=None):
         # Close any previously created figure
@@ -75,7 +84,7 @@ class FigureManager(QWidget):
             plt.close(self.figure)
 
         # Select chart type
-        chart_type = self.data_manager.user_preferences['chart_type']
+        chart_type = self.data_manager.chart_data['type']
         chart_width = self.data_manager.user_preferences['width']
         chart_font_color = self.data_manager.user_preferences['chart_font_color']
         chart_grid_color = self.data_manager.user_preferences['chart_grid_color']
@@ -112,10 +121,7 @@ class FigureManager(QWidget):
             self.replot()
         else:
             self.fig_init = True
-            # Enable default credit lines
-            rows = self.data_manager.chart_data['credit']
-            r1, r2, r3 = rows
-            self.view_update_credit_lines(r1, r2, r3)
+            self.event_bus.emit('view_update_credit_lines')
             self.Chart.floor_grid_lines(False)
 
         # Control variables
@@ -141,6 +147,9 @@ class FigureManager(QWidget):
         self.canvas.draw()  # Draw the initial state of the figure
 
     def replot(self):
+        self.data_manager.get_replot_points(self.Chart.date_to_pos)
+        self.event_bus.emit('view_update_credit_lines')
+
         # Reset graph objects
         self.chart_objects = {'corr_obj': [],
                               'err_obj': [],
@@ -156,10 +165,15 @@ class FigureManager(QWidget):
                               'trend_err_bounce_obj': [],
                               }
 
-        self.data_manager.get_replot_points(self.Chart.date_to_pos)
-        self.create_point_style_arrays()
-        self.point_styles_replot()
+        if self.data_manager.df_plot is not None and not self.data_manager.df_plot.empty:
+            self.create_point_style_arrays()
+            self.point_styles_replot()
 
+        self.replot_chart_objects()
+
+        self.event_bus.emit('sync_view_settings')
+
+    def replot_chart_objects(self):
         for phase in self.data_manager.chart_data['phase']:
             self.phase_replot(phase)
 
@@ -171,16 +185,6 @@ class FigureManager(QWidget):
 
         for trend in self.data_manager.chart_data['trend_err']:
             self.trend_replot(trend, corr=False)
-
-        # # Add credit lines if any
-        rows = self.data_manager.chart_data['credit']
-        if rows:
-            r1, r2, r3 = rows
-            self.view_update_credit_lines(r1, r2, r3)
-
-        # Enable view configurations
-        if self.main_app:
-            self.main_app.sync_view_settings()
 
     def plot_corr_points(self, x, y):
         # Remove any previous plot and scatter objects
@@ -581,7 +585,7 @@ class FigureManager(QWidget):
         self.chart_objects['err_obj'].append(err_scatter)
 
     def plot_floor_points(self, x, y):
-        if "Minute" in self.data_manager.user_preferences['chart_type']:
+        if "Minute" in self.data_manager.chart_data['type']:
             # Remove any previous plot and scatter objects
             for floor_obj in self.chart_objects['floor_obj']:
                 floor_obj.remove()
@@ -717,7 +721,7 @@ class FigureManager(QWidget):
                                          trend['text'],
                                          fontsize=trend['font_size'],
                                          color=trend['font_color'],
-                                         ha="center",
+                                         ha="left",
                                          weight="bold")
 
                 self.chart_objects[trend_type + '_obj'].append(trend_line)
@@ -785,15 +789,6 @@ class FigureManager(QWidget):
     def safe_float_convert(self, input):
         return self.manual_manager.safe_float_convert(input)
 
-    def manual_plot_form_minutes(self, count, hour, min_, sec, date):
-        self.manual_manager.manual_plot_form_minutes(count, hour, min_, sec, date)
-
-    def manual_plot_form_date(self, count, date):
-        self.manual_manager.manual_plot_form_date(count, date)
-
-    def manual_undo_point(self):
-        self.manual_manager.manual_undo_point()
-
     def phase_line_from_form(self, text, date):
         self.phase_manager.phase_line_from_form(text, date)
 
@@ -850,10 +845,6 @@ class FigureManager(QWidget):
 
     def view_x_est(self, show, refresh=True):
         self.view_manager.view_x_est(show, refresh)
-
-    def view_update_credit_lines(self, row1, row2, row3):
-        if self.credit_lines_space:
-            self.view_manager.view_update_credit_lines(row1, row2, row3)
 
     def view_update_celeration_fan(self, status, refresh=True):
         self.data_manager.chart_data['view_check']['fan'] = bool(status)
@@ -942,71 +933,26 @@ class FigureManager(QWidget):
 
         self.refresh()
 
-    def settings_change_start_date(self, new_start_date):
-        self.data_manager.chart_data['start_date'] = new_start_date
-        new_start_date = pd.to_datetime(new_start_date, format='%d-%m-%Y')
-        self.new_chart(start_date=new_start_date)
-
-    def settings_change_chart_width(self):
-        self.new_chart(start_date=self.Chart.start_date)
-
-    def fig_import_data(self, file_path, keep_current_start_date=False):
-        self.data_manager.data_import_raw(file_path)
-
-        if keep_current_start_date:
-            start_date = self.data_manager.chart_data['start_date']
-        else:
-            start_date = self.data_manager.chart_data['raw_df']['d'].min()
-
-        self.new_chart(start_date=start_date)
-
     def back_to_default(self):
+        # Go back to default on everything except the active chart type
+        chart_type = self.data_manager.chart_data['type']
         self.data_manager.chart_data = copy.deepcopy(self.data_manager.chart_data_default)
-        self.new_chart(start_date=pd.to_datetime('today'))
+        self.data_manager.chart_data['type'] = chart_type
+
+        # Clear data
+        self.data_manager.df_raw = None
+        self.data_manager.df_plot = None
+
+        self.new_chart(start_date=pd.to_datetime('today').normalize())
 
     def fig_save_image(self, full_path, format, dpi):
         if not full_path.endswith('.' + format):
             full_path += '.' + format
-        plt.savefig(full_path, format=format, dpi=dpi)
-
-    def fig_load_chart(self, full_path):
-        with open(full_path, 'r') as file:
-            default_chart = self.data_manager.default_chart
-            loaded_chart = json.load(file)
-
-            loaded_chart = self.data_manager.ensure_backwards_compatibility(loaded_chart, default_chart)
-            self.data_manager.chart_data = loaded_chart
-
-        # Handling for setting the start date
-        start_date = self.data_manager.chart_data['start_date']
-        # Set chart type
-        self.data_manager.user_preferences['chart_type'] = self.data_manager.chart_data['type']
-
-        # Update df if an import path can be found
-        import_path = self.data_manager.chart_data['import_path']
-        if import_path and os.path.exists(import_path):
-            # Will set raw df with the latest data set
-            self.data_manager.data_import_raw(import_path)
-        else:
-            # Create raw_df from json
-            df = pd.DataFrame.from_dict(self.data_manager.chart_data["raw_data"])
-            df['d'] = pd.to_datetime(df['d'])  # Convert back to a datetime column with no time or timezone information
-            self.data_manager.chart_data['raw_df'] = df
-
-            # Ensure backwards compatibility for missing o
-            if 'o' not in df.columns:
-                df['o'] = 0  # Add the column with zeros
-
-        # Generate chart
-        self.new_chart(start_date=start_date)
-
-    def change_chart_type(self, new_type):
-        self.data_manager.chart_data['type'] = new_type
-        self.data_manager.user_preferences['chart_type'] = new_type
-        self.new_chart(start_date=self.data_manager.chart_data['start_date'])
-
-    def update_chart(self):
-        self.new_chart(start_date=self.data_manager.chart_data['start_date'])
+        try:
+            plt.savefig(full_path, format=format, dpi=dpi)
+        except PermissionError:
+            raise PermissionError(
+                f"Permission denied when saving to {full_path}. Please check file/directory permissions.")
 
     def data_styling_cleanup(self):
         self.manual_manager.manual_cleanup()
@@ -1200,7 +1146,7 @@ class AimManager:
 
     def aim_temp_line_n_text(self, xmin, xmax, note):
         text_mode = self.figure_manager.data_manager.user_preferences['aim_line_type']
-        font_size = self.figure_manager.data_manager.default_aim_style['font_size']
+        font_size = copy.deepcopy(self.figure_manager.data_manager.user_preferences['aim_style']['font_size'])
         if text_mode == 'Flat':
             text_x, ha = self.aim_get_text_pos(xmin, xmax)
             self.aim_temp_line = self.figure_manager.ax.hlines(xmin=xmin, xmax=xmax, y=self.aim_first_click_y, colors="magenta", linewidth=1.5, linestyle="--")
@@ -1314,7 +1260,7 @@ class TrendManager:
         else:
             trend_font_size = self.figure_manager.data_manager.default_err_trend_style['font_size']
 
-        self.trend_temp_est = self.figure_manager.ax.text(int(x_slice_mean), trend_vals_mean * adjust, cel_est, fontsize=trend_font_size, color=color, ha="center", weight="bold")
+        self.trend_temp_est = self.figure_manager.ax.text(int(x_slice_mean), trend_vals_mean * adjust, cel_est, fontsize=trend_font_size, color=color, ha="left", weight="bold")
         self.figure_manager.refresh()
         return self.trend_temp_est
 
@@ -1535,6 +1481,10 @@ class TrendManager:
 class ViewManager:
     def __init__(self, figure_manager):
         self.figure_manager = figure_manager
+        self.event_bus = figure_manager.event_bus
+
+        # Event subscriptions
+        self.event_bus.subscribe('view_update_credit_lines', self.view_update_credit_lines)
 
     def view_dot_est(self, show, refresh=True):
         for est in self.figure_manager.chart_objects['trend_corr_est_obj']:
@@ -1650,7 +1600,7 @@ class ViewManager:
         self.figure_manager.fan_ax.set_visible(status)
 
         # Adjust right y-label if dealing with a minute chart
-        chart_type = self.figure_manager.data_manager.user_preferences['chart_type']
+        chart_type = self.figure_manager.data_manager.chart_data['type']
         if 'Minute' in chart_type:
             if status:
                 self.figure_manager.Chart.ax.yaxis.set_label_coords(-0.1, 0.7)
@@ -1660,18 +1610,24 @@ class ViewManager:
         if refresh:
             self.figure_manager.refresh()
 
-    def view_update_credit_lines(self, row1, row2, row3):
+    def view_update_credit_lines(self):
         # Clean up previous credit lines
         if self.figure_manager.credit_lines_object:
             self.figure_manager.credit_lines_object.remove()
 
-        credit = row1 + '\n\n' + row2 + '\n\n' + row3
-        x_start = -5
-        self.figure_manager.credit_lines_object = self.figure_manager.ax.text(x_start, self.figure_manager.Chart.credit_vert_pos, credit, transform=self.figure_manager.Chart.trans, fontsize=self.figure_manager.Chart.credit_fontsize, color=self.figure_manager.Chart.style_color, ha='left', va='center')
-        self.figure_manager.data_manager.chart_data['credit'] = (row1, row2, row3)
+        show_credits = self.figure_manager.data_manager.chart_data['view_check']['credit_spacing']
+        if show_credits:
+            # Add credit lines if any
+            rows = self.figure_manager.data_manager.chart_data['credit']
+            if rows:
+                r1, r2, r3 = rows
+                credit = r1 + '\n\n' + r2 + '\n\n' + r3
+                x_start = -5
+                self.figure_manager.credit_lines_object = self.figure_manager.ax.text(x_start, self.figure_manager.Chart.credit_vert_pos, credit, transform=self.figure_manager.Chart.trans, fontsize=self.figure_manager.Chart.credit_fontsize, color=self.figure_manager.Chart.style_color, ha='left', va='center')
+                self.figure_manager.data_manager.chart_data['credit'] = (r1, r2, r3)
 
-        if hasattr(self.figure_manager, 'canvas'):
-            self.figure_manager.refresh()
+                if hasattr(self.figure_manager, 'canvas'):
+                    self.figure_manager.refresh()
 
 
 class ManualManager:
@@ -1746,5 +1702,473 @@ class ManualManager:
         self.figure_manager.refresh()
 
 
+class NoteManager:
+    def __init__(self, figure_manager):
+        self.figure_manager = figure_manager
+        self.event_bus = self.figure_manager.event_bus
+        self.note_objects = None
+        self.individual_note_object = None
+
+        # Event subscriptions
+        self.event_bus.subscribe('remove_note_locations', self.remove_note_locations)
+        self.event_bus.subscribe('refresh_note_locations', self.refresh_note_locations)
+        self.event_bus.subscribe('show_individual_note_locations', self.show_individual_note_location, has_data=True)
+        self.event_bus.subscribe('clear_previous_individual_note_object', self.clear_previous_individual_note_object, has_data=True)
+
+    def refresh_note_locations(self):
+        self.remove_note_locations()
+        self.show_note_locations()
+
+    def show_note_locations(self):
+        all_notes = self.figure_manager.data_manager.chart_data['notes']
+        xs, ys = [], []
+        for note in all_notes:
+            text, date_str, y_val = note.split('|')
+            x_pos = self.figure_manager.Chart.date_to_pos[pd.to_datetime(date_str)]
+            xs.append(x_pos)
+            ys.append(float(y_val))
+
+        if xs and ys:
+            self.note_objects = self.figure_manager.ax.scatter(xs, ys,
+                                                        marker='s',
+                                                        linestyle='',
+                                                        facecolors='none',
+                                                        edgecolors='purple',
+                                                        s=100)
+        if self.note_objects:
+            self.figure_manager.refresh()
+
+    def remove_note_locations(self):
+        if self.note_objects:
+            self.note_objects.remove()
+            self.note_objects = None
+            self.figure_manager.refresh()
+
+    def show_individual_note_location(self, data):
+        self.clear_previous_individual_note_object()
+        date_str = data['date_str']
+        note_x = self.figure_manager.Chart.date_to_pos[pd.to_datetime(date_str)]
+        note_y = float(data['note_y'])
+        self.individual_note_object = self.figure_manager.ax.scatter(note_x, note_y,
+                                                           marker='s',
+                                                           linestyle='',
+                                                           facecolors='purple',
+                                                           edgecolors='purple',
+                                                           s=100)
+        self.figure_manager.refresh()
+
+    def clear_previous_individual_note_object(self, data=None):
+        if self.individual_note_object:
+            self.individual_note_object.remove()
+            self.individual_note_object = None
+        if data and data['refresh']:
+            self.figure_manager.refresh()
 
 
+class Hover:
+    def __init__(self, figure_manager):
+        self.figure_manager = figure_manager
+
+        # Crosshair elements
+        self.show_lines = True
+        self.crosshair_vline = None
+        self.crosshair_hline = None
+        self.crosshair_background = None
+        self.crosshair_annotation = None
+        self.corr_marker = None
+        self.err_marker = None
+        self.floor_marker = None
+        self.misc_marker = None
+        self.previous_cross_hair_x_y = (None, None)
+        self.draw_crosshair = False
+        self.note_dates = None
+        self.note_annotations = []
+        self.note_lines = []
+
+        # Note-specific elements
+        self.note_crosshair_connection = None
+        self.note_dates = None
+
+        # Timer for rate limiting
+        self.crosshair_timer = QTimer()
+        self.crosshair_timer.setSingleShot(True)
+        self.crosshair_rate_limit = 20  # Rate limit in milliseconds
+
+    def crosshair_blit(self, x, y):
+        # Updates the crosshair position with rate limiting.
+        if self.crosshair_timer.isActive():
+            return  # Skip if the timer is still active
+
+        # Execute the crosshair logic
+        self._update_crosshair_blit(x, y)
+
+        # Start the timer to enforce rate limiting
+        self.crosshair_timer.start(self.crosshair_rate_limit)
+
+    def _get_data_values(self, x):
+        df = self.figure_manager.data_manager.df_plot
+        chart_type = self.figure_manager.data_manager.chart_data['type'].lower()
+        view_check = self.figure_manager.data_manager.chart_data['view_check']
+
+        # Get values from dataframe
+        if df is not None and not df.empty:
+            rows = df[df['x'] == x]
+
+            # Handle multiple values
+            if len(rows) > 20:
+                # Use median for safety if too many points
+                corr_freqs = [rows['corr_freq'].median()] if not rows['corr_freq'].dropna().empty else [0]
+                err_freqs = [rows['err_freq'].median()] if not rows['err_freq'].dropna().empty else [0]
+                floor_freqs = [rows['floor'].median()] if not rows['floor'].dropna().empty else [0]
+                misc_freqs = [rows['o'].median()] if not rows['o'].dropna().empty else [0]
+            else:
+                # Get all values
+                corr_freqs = rows['corr_freq'].values[rows['corr_not_zero'].values] if not rows['corr_freq'].empty else [0]
+                err_freqs = rows['err_freq'].values[rows['err_not_zero'].values] if not rows['err_freq'].empty else [0]
+                floor_freqs = rows['floor'].values if not rows['floor'].empty else [0]
+                misc_freqs = rows['o'].values if not rows['o'].empty else [0]
+
+            # Format all values
+            corr_freqs = [self.figure_manager.data_manager.format_y_value(freq) if freq else 0 for freq in corr_freqs]
+            err_freqs = [self.figure_manager.data_manager.format_y_value(freq) if freq else 0 for freq in err_freqs]
+            floor_freqs = [self.figure_manager.data_manager.format_y_value(freq) if freq else 0 for freq in floor_freqs]
+            misc_freqs = [self.figure_manager.data_manager.format_y_value(freq) if freq else 0 for freq in misc_freqs]
+        else:
+            corr_freqs = [0]
+            err_freqs = [0]
+            floor_freqs = [0]
+            misc_freqs = [0]
+
+        # Determine visibility based on thresholds and view settings
+        threshold = 0 if 'minute' in chart_type else 0.99
+        show_corr = any(freq > threshold for freq in corr_freqs) and view_check['dots']
+        show_err = any(freq > threshold for freq in err_freqs) and view_check['xs']
+        show_floor = any(freq > threshold for freq in floor_freqs) and 'minute' in chart_type and view_check['timing_floor']
+        show_misc = any(freq > threshold for freq in misc_freqs) and view_check['misc']
+
+        values = (corr_freqs, err_freqs, floor_freqs, misc_freqs)
+        visibility = (show_corr, show_err, show_floor, show_misc)
+
+        return values, visibility
+
+    def _format_date_label(self, x):
+        date = self.figure_manager.x_to_date[int(x)]
+        day = date.strftime('%a, %d')
+        month = date.strftime('%b, %m')
+        year = date.strftime("%Y")
+
+        width = ' ' * 20
+        chart_type = self.figure_manager.data_manager.chart_data['type'].lower()
+        return date, day, month, year, width, chart_type
+
+    def _format_data_label(self, day, month, year, x, y, values, visibility):
+        corr_freqs, err_freqs, floor_freqs, misc_freqs = values
+        show_corr, show_err, show_floor, show_misc = visibility
+
+        data_parts = []
+        if show_corr:
+            median_corr = np.median(corr_freqs)
+            median_corr = median_corr if not median_corr.is_integer() else int(median_corr)
+            data_parts.append(f"dot = {median_corr}")
+        if show_err:
+            median_err = np.median(err_freqs)
+            median_err = median_err if not median_err.is_integer() else int(median_err)
+            data_parts.append(f"x = {median_err}")
+        if show_floor:
+            median_floor = np.median(floor_freqs)
+            floor = self.figure_manager.data_manager.format_y_value(1 / median_floor)
+            data_parts.append(f"floor = {floor}")
+        if show_misc:
+            median_misc = np.median(misc_freqs)
+            median_misc = median_misc if not median_misc.is_integer() else int(median_misc)
+            data_parts.append(f"misc = {median_misc}")
+
+        width = ' ' * 20
+        base_str = (r"$\bf{Date}$" + f"\n{day}\n{month}\n{year}\n\n"
+                                     r"$\bf{Cursor}$" + f"\nx = {x}\ny = {y}")
+
+        if data_parts:
+            return base_str + "\n\n" + r"$\bf{Data}$" + "\n" + "\n".join(data_parts) + f"\n{width}"
+        return base_str + f"\n{width}"
+
+    def _initialize_crosshair_elements(self, x, y):
+        if self.crosshair_vline is None and self.crosshair_hline is None:
+
+            self.crosshair_vline = self.figure_manager.ax.axvline(x=x, color='gray', linestyle='--', animated=True, linewidth=1)
+            self.crosshair_hline = self.figure_manager.ax.axhline(y=y, color='gray', linestyle='--', animated=True, linewidth=1)
+
+            y_ann = 0.5 if 'minute' in self.figure_manager.data_manager.chart_data['type'].lower() else 0.22
+
+            self.crosshair_annotation = self.figure_manager.ax.text(
+                -0.165, y_ann, '', transform=self.figure_manager.ax.transAxes,
+                ha='center', va='bottom', weight='normal',
+                fontsize=self.figure_manager.Chart.general_fontsize * 0.8,
+                color='black', animated=True, clip_on=False,
+                bbox=dict(facecolor='white', edgecolor='black', boxstyle='round, pad=0.5')
+            )
+
+            # Markers to highlight
+            self.corr_marker, = self.figure_manager.ax.plot([], [], 'o', color='green', alpha=0.4, animated=True, markersize=10)
+            self.err_marker, = self.figure_manager.ax.plot([], [], 'o', color='red', alpha=0.4, animated=True, markersize=10)
+            self.floor_marker, = self.figure_manager.ax.plot([], [], 'v', color='purple', alpha=0.4, animated=True, markersize=7)
+            self.misc_marker, = self.figure_manager.ax.plot([], [], 's', color='orange', alpha=0.4, animated=True, markersize=10)
+
+            # Create initial lists for note elements
+            max_notes = len(self.figure_manager.data_manager.chart_data['notes'])
+            for _ in range(max_notes):
+                note_ann = self.figure_manager.ax.text(
+                    0, 0, '',
+                    ha='center', va='center',
+                    fontsize=self.figure_manager.Chart.general_fontsize * 0.8,
+                    color='black', animated=True, clip_on=False,
+                    bbox=dict(
+                        facecolor='#FFFFA0',
+                        edgecolor='#B8860B',
+                        boxstyle='round,pad=0.5',
+                        mutation_scale=1.2
+                    )
+                )
+                self.note_annotations.append(note_ann)
+
+                note_line, = self.figure_manager.ax.plot(
+                    [], [], color='purple', linestyle='-',
+                    linewidth=1, animated=True)
+                self.note_lines.append(note_line)
+
+    def _handle_notes(self, date):
+        hover_date_str = date.strftime(self.figure_manager.data_manager.standard_date_string)
+        all_notes = self.figure_manager.data_manager.chart_data['notes']
+        hover_date_notes = [note for note in all_notes if note.split('|')[1] == hover_date_str]
+
+        for idx, date_note in enumerate(hover_date_notes):
+            text, d, note_y = date_note.split('|')
+            note_y = float(note_y)
+
+            # Format text while preserving user added line breaks if any
+            lines = text.split('\n')
+            wrapped_lines = [textwrap.fill(line, width=40) for line in lines]
+            wrapped_text = '\n'.join(wrapped_lines)
+            self.note_annotations[idx].set_text(wrapped_text)
+            self.note_annotations[idx].set_horizontalalignment('left')
+
+            note_width = self.note_annotations[idx].get_window_extent().width
+            note_height = self.note_annotations[idx].get_window_extent().height
+
+            # Placement logic and calculations
+            mid_x = self.figure_manager.Chart.xmax / 2
+            mid_y = 10 ** ((np.log10(self.figure_manager.Chart.ymax) + np.log10(self.figure_manager.Chart.ymin)) / 2)
+            note_x = self.figure_manager.Chart.date_to_pos[pd.to_datetime(hover_date_str)]
+            x_adjust = note_width * 0.1 if (note_width * 0.1) > 10 else 10
+            y_adjust = note_height * 0.2 if (note_height * 0.2) > 2.5 else 2.5
+            note_x2 = note_x + x_adjust if note_x < mid_x else note_x - x_adjust
+            note_y2 = note_y * y_adjust if note_y < mid_y else note_y / y_adjust
+
+            self.note_annotations[idx].set_position((note_x2, note_y2))
+            self.note_lines[idx].set_data([note_x, note_x2], [note_y, note_y2])
+
+        # Clear unused elements
+        for idx in range(len(hover_date_notes), len(self.note_annotations)):
+            self.note_annotations[idx].set_text('')
+            self.note_lines[idx].set_data([], [])
+
+        return hover_date_str
+
+    def _update_and_draw_elements(self, x, y, data_label, values, visibility, hover_date_str):
+        corr_freqs, err_freqs, floor_freqs, misc_freqs = values
+        show_corr, show_err, show_floor, show_misc = visibility
+
+        # Update positions for all markers
+        self.crosshair_vline.set_xdata([x])
+        self.crosshair_hline.set_ydata([y])
+
+        # Set data for all markers with multiple points
+        if show_corr:
+            self.corr_marker.set_data([x] * len(corr_freqs), corr_freqs)
+        else:
+            self.corr_marker.set_data([], [])
+
+        if show_err:
+            self.err_marker.set_data([x] * len(err_freqs), err_freqs)
+        else:
+            self.err_marker.set_data([], [])
+
+        if show_floor:
+            self.floor_marker.set_data([x] * len(floor_freqs), floor_freqs)
+        else:
+            self.floor_marker.set_data([], [])
+
+        if show_misc:
+            self.misc_marker.set_data([x] * len(misc_freqs), misc_freqs)
+        else:
+            self.misc_marker.set_data([], [])
+
+        self.crosshair_annotation.set_text(data_label)
+
+        # Restore background and draw
+        self.figure_manager.canvas.restore_region(self.crosshair_background)
+
+        # Draw all elements
+        self.figure_manager.ax.draw_artist(self.crosshair_annotation)
+        if self.show_lines:
+            self.figure_manager.ax.draw_artist(self.crosshair_vline)
+            self.figure_manager.ax.draw_artist(self.crosshair_hline)
+
+        if show_corr:
+            self.figure_manager.ax.draw_artist(self.corr_marker)
+        if show_err:
+            self.figure_manager.ax.draw_artist(self.err_marker)
+        if show_floor:
+            self.figure_manager.ax.draw_artist(self.floor_marker)
+        if show_misc:
+            self.figure_manager.ax.draw_artist(self.misc_marker)
+
+        # Draw note elements if present
+        if hover_date_str in self.note_dates:
+            for note_line, note_ann in zip(self.note_lines, self.note_annotations):
+                if note_ann.get_text():
+                    self.figure_manager.ax.draw_artist(note_line)
+                    self.figure_manager.ax.draw_artist(note_ann)
+
+        self.figure_manager.canvas.blit(self.figure_manager.figure.bbox)
+
+    def _update_crosshair_blit(self, x, y):
+        values, visibility = self._get_data_values(x)
+        date, day, month, year, width, chart_type = self._format_date_label(x)
+        data_label = self._format_data_label(day, month, year, x, y, values, visibility)
+        self._initialize_crosshair_elements(x, y)
+        hover_date_str = self._handle_notes(date)
+        self._update_and_draw_elements(x, y, data_label, values, visibility, hover_date_str)
+
+    def save_crosshair_background(self):
+        # Captures the figure background for blitting. Runs once when shift is pressed
+        self.note_dates = []
+        for note in self.figure_manager.data_manager.chart_data['notes']:
+            t, d, y = note.split('|')
+            self.note_dates.append(d)
+
+        self.crosshair_background = self.figure_manager.canvas.copy_from_bbox(
+            self.figure_manager.figure.bbox
+        )
+
+    def clear_crosshair_blit(self):
+        # Complete cleanup
+        if self.crosshair_vline is not None:
+            self.crosshair_vline.set_xdata([None])
+            self.crosshair_vline = None
+
+        if self.crosshair_hline is not None:
+            self.crosshair_hline.set_ydata([None])
+            self.crosshair_hline = None
+
+        # Clear all marker elements
+        if self.corr_marker is not None:
+            self.corr_marker.set_data([], [])
+            self.corr_marker = None
+
+        if self.err_marker is not None:
+            self.err_marker.set_data([], [])
+            self.err_marker = None
+
+        if self.floor_marker is not None:
+            self.floor_marker.set_data([], [])
+            self.floor_marker = None
+
+        if self.misc_marker is not None:
+            self.misc_marker.set_data([], [])
+            self.misc_marker = None
+
+        # Clear annotation
+        if self.crosshair_annotation is not None:
+            self.crosshair_annotation.set_text('')
+            self.crosshair_annotation = None
+
+        # Clear note-related elements
+        for note_ann in self.note_annotations:
+            note_ann.set_text('')
+        self.note_annotations = []
+
+        for note_line in self.note_lines:
+            note_line.set_data([], [])
+        self.note_lines = []
+
+        # Reset coordinates
+        self.previous_cross_hair_x_y = (None, None)
+
+        # Force redraw
+        self.figure_manager.canvas.draw_idle()
+
+    def note_crosshair_blit(self, x):
+        # Draw a vertical purple line for note mode crosshair.
+        if self.crosshair_timer.isActive():
+            return  # Skip if the timer is still active
+
+        # Execute the crosshair logic
+        self._update_note_crosshair_blit(x)
+
+        # Start the timer to enforce rate limiting
+        self.crosshair_timer.start(self.crosshair_rate_limit)
+
+    def _update_note_crosshair_blit(self, x):
+        # Internal method to update note crosshair position.
+        date = self.figure_manager.x_to_date[int(x)]
+        day = date.strftime('%a, %d')
+        month = date.strftime('%b, %m')
+        year = date.strftime("%Y")
+
+        width = ' ' * 20
+        date_label = (r"$\bf{Date}$" + f"\n{day}\n{month}\n{year}\n{width}")
+
+        # Create or update the crosshair and text annotation
+        if self.crosshair_vline is None:
+            self.crosshair_vline = self.figure_manager.ax.axvline(
+                x=x, color='purple', linestyle='-', animated=True, linewidth=2, alpha=0.4
+            )
+
+            # Create a text annotation with white background
+            self.crosshair_annotation = self.figure_manager.ax.text(
+                -0.165, 0.5, '', transform=self.figure_manager.ax.transAxes,
+                ha='center', va='bottom', weight='normal',
+                fontsize=self.figure_manager.Chart.general_fontsize * 0.8,
+                color='black', animated=True, clip_on=False,
+                bbox=dict(facecolor='white', edgecolor='black', boxstyle='round, pad=0.5')
+            )
+
+        # Update the position of the vertical line
+        self.crosshair_vline.set_xdata([x])
+
+        # Update the text annotation
+        self.crosshair_annotation.set_text(date_label)
+
+        # Restore the saved background
+        self.figure_manager.canvas.restore_region(self.crosshair_background)
+
+        # Redraw the crosshair and annotation
+        self.figure_manager.ax.draw_artist(self.crosshair_vline)
+        self.figure_manager.ax.draw_artist(self.crosshair_annotation)
+
+        # Blit the entire figure
+        self.figure_manager.canvas.blit(self.figure_manager.figure.bbox)
+
+    def enable_note_crosshair(self):
+        # Enable note mode crosshair.
+        self.save_crosshair_background()
+        self.note_crosshair_connection = self.figure_manager.canvas.mpl_connect(
+            'motion_notify_event',
+            self.update_note_hover_coordinates
+        )
+
+    def disable_note_crosshair(self):
+        # Disable note mode crosshair.
+        if hasattr(self, 'note_crosshair_connection'):
+            self.figure_manager.canvas.mpl_disconnect(self.note_crosshair_connection)
+            self.clear_crosshair_blit()
+
+    def update_note_hover_coordinates(self, event):
+        # Update crosshair position based on mouse movement in note mode.
+        ax = event.inaxes
+        if ax and event.xdata is not None:
+            x = self.figure_manager.data_manager.find_closest_x(
+                int(event.xdata),
+                self.figure_manager.Chart.date_to_pos
+            )
+            self.note_crosshair_blit(x)
