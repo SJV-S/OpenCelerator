@@ -20,8 +20,7 @@
 - `N` - New chart
 - `S` - Save chart
 
-### Data Highlighting
-- Hold `Shift` + mouse movement over chart -  
-  Show crosshairs with data values
-- Hold `Alt/Option` + mouse movement over chart -  
-  Show crosshairs without data values
+### Data Analysis
+- Hold `Shift` + mouse movement - Show crosshairs and data value annotations 
+- Hold `Alt/Option` + mouse movement - Show data value annotations without crosshairs
+
