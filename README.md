@@ -39,12 +39,14 @@ The latest version 0.8.0 can be [downloaded here](https://github.com/SJV-S/OpenC
 
 #### Mac
 
-How to install on MacOS: [video](https://youtu.be/Z7QvzlWNH2M)
+How to run Ventura and Sonoma: [video](https://youtu.be/Z7QvzlWNH2M)
+Note that the video instructs you to run the app the first time by right-clicking and selecting "Open" instead of left-clicking.
 
+How to run on Sequoia: [video](https://www.youtube.com/watch?v=scdAMJDGJvA)
 
 #### Windows
 
-How to install on Windows: [video](https://youtu.be/u8ugPqEv8LM)
+How to run on Windows 10 and 11: [video](https://youtu.be/u8ugPqEv8LM)
 
 #### Linux
 
