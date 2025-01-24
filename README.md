@@ -40,7 +40,7 @@ The latest version 0.8.0 can be [downloaded here](https://github.com/SJV-S/OpenC
 #### Mac
 
 How to run Ventura and Sonoma: [video](https://youtu.be/Z7QvzlWNH2M)<br>
-Note that the video instructs you to run the app the first time by right-clicking and selecting "Open" instead of left-clicking.
+NOTE: The video instructs you to run the app the first time by right-clicking and selecting "Open" instead of left-clicking.
 
 How to run on Sequoia: [video](https://www.youtube.com/watch?v=scdAMJDGJvA)
 
