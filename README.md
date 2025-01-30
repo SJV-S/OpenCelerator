@@ -47,18 +47,18 @@ How to run on Windows 10 and 11: [video](https://youtu.be/u8ugPqEv8LM)
 
 OpenCelerator is available as an AppImage and Flatpak, so FUSE or Flatpak need to be installed. If using the AppImage, do not place it in privileged directories. Tahoma is used as the default font on Windows and Mac, so consider installing Tahoma if you want the exact same chart appearance as the majority of users. Otherwise, DejaVu Sans is the fallback, which is likely fine in most cases.
 
-# For AppImage:
+Install dependencies for AppImage:
 sudo apt install fuse libfuse2     # Debian/Ubuntu/Mint
 sudo dnf install fuse-libs         # Fedora
 sudo pacman -S fuse2              # Arch/Manjaro
-sudo zypper install fuse          # openSUSE
+sudo zypper install fuse          # openSUSE<br>
 
-# For Flatpak:
+Install dependencies for Flatpak:
 sudo apt install flatpak          # Debian/Ubuntu/Mint
 sudo dnf install flatpak          # Fedora
 sudo pacman -S flatpak           # Arch/Manjaro
 sudo zypper install flatpak      # openSUSE
-flatpak install --user OpenCelerator.flatpak  # Install the app
+flatpak install --user OpenCelerator.flatpak      # Install (distro agnostic)
 
 ## Import Formatting
 
