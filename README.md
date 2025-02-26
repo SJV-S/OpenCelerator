@@ -50,9 +50,6 @@ OpenCelerator is available as an AppImage and Flatpak, so FUSE or Flatpak need t
 _AppImage_
 ```
 sudo apt install fuse libfuse2     # Debian/Ubuntu/Mint
-```
-```
-
 sudo dnf install fuse-libs         # Fedora
 sudo pacman -S fuse2              # Arch/Manjaro
 sudo zypper install fuse          # openSUSE
