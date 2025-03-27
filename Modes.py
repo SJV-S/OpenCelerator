@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QGroupBox, QRadioButton, QLineEdit, QLabel, QDateEdit, QListWidget, QFileDialog, QCheckBox,
                                QButtonGroup, QDialog, QComboBox, QMessageBox, QGridLayout, QStackedWidget, QSpinBox,
-                               QSpacerItem, QSizePolicy, QDoubleSpinBox, QColorDialog, QListWidgetItem)
+                               QSpacerItem, QSizePolicy, QDoubleSpinBox, QColorDialog, QListWidgetItem, QFrame)
 from PySide6.QtGui import QDoubleValidator, QFont, QIcon
 from PySide6.QtCore import Qt, QDate
 
@@ -28,414 +28,513 @@ class ModeWidget(QWidget):
 
 class DataModeWidget(ModeWidget):
     def __init__(self, figure_manager):
-        self.marker_style_map = {"Circle": "o", "Square": "s", "Triangle Up": "^", "Triangle Down": "v", "Star": "*",
-                                 "Plus": "+", "X": "x", "Underscore": "_", "NoMarker": ''}
+        self.marker_style_map = {
+            "Circle": "o", "Square": "s", "Triangle Up": "^", "Triangle Down": "v",
+            "Star": "*", "Plus": "+", "X": "x", "Underscore": "_", "NoMarker": ''
+        }
         self.line_style_map = {"Solid": "-", "Dashed": "--", "Dotted": ":", 'NoLine': ''}
-        self.current_button = None
+
+        self.ui_element_map = {
+            'marker_sizes': ('marker_size_spinbox', 'Marker Size'),
+            'markers': ('marker_style_combobox', 'Marker Style'),
+            'face_colors': ('marker_face_color_button', 'Marker Face Color'),
+            'edge_colors': ('marker_edge_color_button', 'Marker Edge Color'),
+            'line_colors': ('line_color_button', 'Line Color'),
+            'line_width': ('line_width_spinbox', 'Line Width'),
+            'line_styles': ('line_style_combobox', 'Line Style')
+        }
+
+        self.widgets = {}
+
         super().__init__(figure_manager)
-        self.populate_fields_with_defaults()
+
+        self.event_bus.subscribe('refresh_style_columns', self.refresh_style_columns)
+        self.event_bus.subscribe('highlight_style_user_col', self.highlight_style_user_col)
 
     def init_ui(self):
         main_layout = QVBoxLayout()
 
-        date1 = self.figure_manager.x_to_date[0].strftime(self.data_manager.standard_date_string)
-        date2 = self.figure_manager.x_to_date[max(self.figure_manager.Chart.date_to_pos.values())].strftime(
-            self.data_manager.standard_date_string)
-
-        self.date_range_label = QLabel(f'{date1} ~ {date2}')
-        self.date_range_label.setStyleSheet("font-style: normal;")
-        self.date_range_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        date_layout = QVBoxLayout()
-        date_layout.addWidget(self.date_range_label)
-        main_layout.addLayout(date_layout)
-
-        # Add a spacer item to create a larger margin
         spacer_item = QSpacerItem(10, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         main_layout.addItem(spacer_item)
 
-        # Create navigation buttons
-        nav_layout = QHBoxLayout()
-        nav_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
-        nav_layout.setSpacing(0)  # Remove spacing
+        self.column_selector = QComboBox()
+        self.column_selector.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.column_selector.currentTextChanged.connect(self.update_style_widgets)
+        self.column_selector.activated.connect(self.highlight_style_user_col)
+        main_layout.addWidget(self.column_selector)
 
-        self.dot_button = self.create_nav_button("Dot", 0)
-        self.x_button = self.create_nav_button("X", 1)
-        self.floor_button = self.create_nav_button("Floor", 2)
-        self.misc_button = self.create_nav_button("Misc", 3)
+        # Create all widgets
+        content_layout = QVBoxLayout()
 
-        nav_layout.addWidget(self.dot_button)
-        nav_layout.addWidget(self.x_button)
-        nav_layout.addWidget(self.floor_button)
-        nav_layout.addWidget(self.misc_button)
-        main_layout.addLayout(nav_layout)
+        # First color buttons
+        for style_key in ['face_colors', 'edge_colors', 'line_colors']:
+            widget_name, label = self.ui_element_map[style_key]
+            widget = self.create_widget(style_key)
+            self.widgets[widget_name] = widget
+            content_layout.addWidget(widget)
 
-        # Style group
-        style_layout = QVBoxLayout()
-
-        # Stacked widget for style categories
-        self.stacked_widget = QStackedWidget()
-        self.stacked_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-        # Add style categories to stacked widget
-        self.dot_category = self.add_style_category(self.stacked_widget, 'Dot', self.data_manager.user_preferences['corr_style'])
-        self.x_category = self.add_style_category(self.stacked_widget, 'X', self.data_manager.user_preferences['err_style'])
-        self.floor_category = self.add_style_category(self.stacked_widget, 'Floor', self.data_manager.user_preferences['floor_style'])
-        self.misc_category = self.add_style_category(self.stacked_widget, 'Misc', self.data_manager.user_preferences['misc_style'])
-
-        style_layout.addWidget(self.stacked_widget)
-        main_layout.addLayout(style_layout)
-
-        self.layout.addLayout(main_layout)  # Use existing layout
-
-        self.switch_category(0, self.dot_button)  # Set default selected category
-
-    def create_nav_button(self, text, index):
-        button = QPushButton(text)
-        button.setStyleSheet(f"""
-            QPushButton {{
-                border: none;
-                border-top: 1px solid black;
-                margin: 0;
-                padding: 10px;
-                background-color: #e7efff;
-                border-radius: 0; /* No rounded corners */
-            }}
-            QPushButton:checked {{
-                background-color: #6ad1e3; /* Background color when selected */
-            }}
-        """)
-        button.setCheckable(True)
-        button.clicked.connect(lambda: self.switch_category(index, button))
-        return button
-
-    def switch_category(self, index, button):
-        self.stacked_widget.setCurrentIndex(index)
-        if self.current_button:
-            self.current_button.setChecked(False)  # Uncheck the previous button
-        button.setChecked(True)  # Check the current button
-        self.current_button = button
-
-    def add_style_category(self, stacked_widget, category_name, default_values):
-        category_widget = QWidget()
-        category_layout = QVBoxLayout(category_widget)
-
-        # Choose marker size
-        marker_size_spinbox = QDoubleSpinBox()
-        marker_size_spinbox.setRange(1, 100)
-        marker_size_spinbox.setSingleStep(1)
-        marker_size_spinbox.valueChanged.connect(
-            lambda value, cat=category_name, field='markersize': self.update_data_point_styles(cat, field, value)
-        )
-        category_layout.addWidget(QLabel("Marker Size"))
-        category_layout.addWidget(marker_size_spinbox)
-
-        # Choose marker style
-        marker_style_combobox = QComboBox()
-        marker_style_combobox.addItems(self.marker_style_map.keys())
-        marker_style_combobox.currentTextChanged.connect(
-            lambda value, cat=category_name, field='marker': self.update_data_point_styles(cat, field,
-                                                                                           self.marker_style_map[value])
-        )
-        category_layout.addWidget(QLabel("Marker Style"))
-        category_layout.addWidget(marker_style_combobox)
-
-        # Marker face color
-        marker_face_color_button = QPushButton("Marker Face Color")
-        marker_face_color_button.clicked.connect(lambda: self.choose_marker_face_color(category_name))
-        category_layout.addWidget(marker_face_color_button)
-
-        # Marker edge color
-        marker_edge_color_button = QPushButton("Marker Edge Color")
-        marker_edge_color_button.clicked.connect(lambda: self.choose_marker_edge_color(category_name))
-        category_layout.addWidget(marker_edge_color_button)
-
-        # Line color
-        line_color_button = QPushButton("Line Color")
-        line_color_button.clicked.connect(lambda: self.choose_line_color(category_name))
-        category_layout.addWidget(line_color_button)
-
-        # Line width
-        line_width_spinbox = QDoubleSpinBox()
-        line_width_spinbox.setRange(0.1, 10.0)
-        line_width_spinbox.setSingleStep(0.1)
-        line_width_spinbox.valueChanged.connect(
-            lambda value, cat=category_name, field='linewidth': self.update_data_point_styles(cat, field, value)
-        )
-        category_layout.addWidget(QLabel("Line Width"))
-        category_layout.addWidget(line_width_spinbox)
-
-        # Line style
-        line_style_combobox = QComboBox()
-        line_style_combobox.addItems(self.line_style_map.keys())
-        line_style_combobox.currentTextChanged.connect(
-            lambda value, cat=category_name, field='linestyle': self.update_data_point_styles(cat, field, self.line_style_map[value]))
-        category_layout.addWidget(QLabel("Line Style"))
-        category_layout.addWidget(line_style_combobox)
-
-        # Add "Set as default" button
-        set_default_button = QPushButton("Set as default")
-        set_default_button.clicked.connect(lambda: self.change_default(category_name))
-
-        # Add vertical spacing before set-as-default button
         spacer = QSpacerItem(10, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        category_layout.addItem(spacer)
+        content_layout.addItem(spacer)
 
-        category_layout.addWidget(set_default_button)
+        # Then dropdowns with labels
+        for style_key in ['markers', 'line_styles']:
+            widget_name, label = self.ui_element_map[style_key]
+            widget = self.create_widget(style_key)
+            self.widgets[widget_name] = widget
+            content_layout.addWidget(QLabel(label))
+            content_layout.addWidget(widget)
+            widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        category_layout.addStretch()
-        stacked_widget.addWidget(category_widget)
+        # Finally spinboxes with labels
+        for style_key in ['marker_sizes', 'line_width']:
+            widget_name, label = self.ui_element_map[style_key]
+            widget = self.create_widget(style_key)
+            self.widgets[widget_name] = widget
+            content_layout.addWidget(QLabel(label))
+            content_layout.addWidget(widget)
 
-        return {
-            'marker_size_spinbox': marker_size_spinbox,
-            'marker_style_combobox': marker_style_combobox,
-            'marker_face_color_button': marker_face_color_button,
-            'marker_edge_color_button': marker_edge_color_button,
-            'line_color_button': line_color_button,
-            'line_width_spinbox': line_width_spinbox,
-            'line_style_combobox': line_style_combobox,
-            'set_default_button': set_default_button
-        }
+        spacer = QSpacerItem(10, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        content_layout.addItem(spacer)
+        content_layout.addStretch()
+
+        main_layout.addLayout(content_layout)
+        self.layout.addLayout(main_layout)
+
+    def highlight_style_user_col(self):
+        user_col = self.column_selector.currentText()
+        if user_col:
+            plot_columns = self.data_manager.plot_columns
+            col_instance = plot_columns[user_col]
+            col_instance.highlight()
+
+    def create_widget(self, style_key):
+        if style_key == 'marker_sizes':
+            widget = QDoubleSpinBox()
+            widget.setRange(2, 200)
+            widget.setSingleStep(2)
+            widget.valueChanged.connect(
+                lambda value: self.update_data_point_styles(style_key, value)
+            )
+        elif style_key == 'markers':
+            widget = QComboBox()
+            widget.addItems(self.marker_style_map.keys())
+            widget.activated.connect(
+                lambda: self.update_data_point_styles(style_key, self.marker_style_map[widget.currentText()])
+            )
+        elif style_key.endswith('colors'):
+            widget = QPushButton(self.ui_element_map[style_key][1])
+            widget.clicked.connect(
+                lambda checked, key=style_key: self.choose_color(key)
+            )
+        elif style_key == 'line_width':
+            widget = QDoubleSpinBox()
+            widget.setRange(0.1, 10.0)
+            widget.setSingleStep(0.1)
+            widget.valueChanged.connect(
+                lambda value: self.update_data_point_styles(style_key, value)
+            )
+        elif style_key == 'line_styles':
+            widget = QComboBox()
+            widget.addItems(self.line_style_map.keys())
+            widget.activated.connect(
+                lambda: self.update_data_point_styles(style_key, self.line_style_map[widget.currentText()])
+            )
+        return widget
+
+    def refresh_style_columns(self, *args):
+        current_text = self.column_selector.currentText()
+        self.column_selector.clear()
+
+        column_map = self.data_manager.chart_data['column_map']
+        if column_map:
+            data_columns = [v for k, v in column_map.items() if k != 'd']
+            if data_columns:
+                self.column_selector.addItems(data_columns)
+                index = self.column_selector.findText(current_text)
+                if index >= 0:
+                    self.column_selector.setCurrentIndex(index)
+                else:
+                    self.column_selector.setCurrentIndex(0)
+
+        self.update_style_widgets()
+
+    def update_style_widgets(self):
+        user_col = self.column_selector.currentText()
+        if not user_col:
+            return
+
+        column_instance = self.data_manager.plot_columns[user_col]
+        default_style = column_instance.column_default_style
+        self.populate_fields(default_style)
 
     def populate_fields_with_defaults(self):
-        self.populate_fields_for_category(self.dot_category, self.data_manager.user_preferences['corr_style'],
-                                          self.marker_style_map, self.line_style_map)
-        self.populate_fields_for_category(self.x_category, self.data_manager.user_preferences['err_style'],
-                                          self.marker_style_map, self.line_style_map)
-        self.populate_fields_for_category(self.floor_category, self.data_manager.user_preferences['floor_style'],
-                                          self.marker_style_map, self.line_style_map)
-        self.populate_fields_for_category(self.misc_category, self.data_manager.user_preferences['misc_style'],
-                                          self.marker_style_map, self.line_style_map)
+        user_col = self.column_selector.currentText()
+        if user_col:
+            column_instance = self.data_manager.plot_columns[user_col]
+            default_style = column_instance.column_default_style
+            self.populate_fields(default_style)
 
-    def populate_fields_for_category(self, category, default_values, marker_style_map, line_style_map):
-        self.block_signals(category, True)
-        category['marker_size_spinbox'].setValue(default_values['markersize'])
+    def block_signals(self, block):
+        for widget in self.widgets.values():
+            widget.blockSignals(block)
 
-        marker_style_key = next((key for key, value in marker_style_map.items() if value == default_values['marker']),
-                                None)
-        if marker_style_key is not None:
-            index = category['marker_style_combobox'].findText(marker_style_key)
-            category['marker_style_combobox'].setCurrentIndex(index)
+    def populate_fields(self, default_values):
+        key_mapping = {
+            'markersize': 'marker_sizes',
+            'marker': 'markers',
+            'marker_face_color': 'face_colors',
+            'marker_edge_color': 'edge_colors',
+            'line_color': 'line_colors',
+            'linewidth': 'line_width',
+            'linestyle': 'line_styles'
+        }
 
-        self.set_button_border_style(category['marker_face_color_button'], default_values['marker_face_color'])
-        self.set_button_border_style(category['marker_edge_color_button'], default_values['marker_edge_color'])
-        self.set_button_border_style(category['line_color_button'], default_values['line_color'])
-        category['line_width_spinbox'].setValue(default_values['linewidth'])
+        converted_values = {
+            new_key: default_values[old_key]
+            for old_key, new_key in key_mapping.items()
+        }
 
-        style_key = next((key for key, value in line_style_map.items() if value == default_values['linestyle']), None)
-        if style_key is not None:
-            index = category['line_style_combobox'].findText(style_key)
-            category['line_style_combobox'].setCurrentIndex(index)
-        self.block_signals(category, False)
+        self.block_signals(True)
 
-    def block_signals(self, category, block):
-        category['marker_size_spinbox'].blockSignals(block)
-        category['marker_style_combobox'].blockSignals(block)
-        category['marker_face_color_button'].blockSignals(block)
-        category['marker_edge_color_button'].blockSignals(block)
-        category['line_color_button'].blockSignals(block)
-        category['line_width_spinbox'].blockSignals(block)
-        category['line_style_combobox'].blockSignals(block)
+        self.widgets['marker_size_spinbox'].setValue(converted_values['marker_sizes'])
+        self.widgets['line_width_spinbox'].setValue(converted_values['line_width'])
 
-    def choose_marker_face_color(self, category_name):
-        button = self.get_category(category_name)['marker_face_color_button']
-        self.select_color(button)
-        color = self.get_color(button)
-        self.update_data_point_styles(category_name, 'marker_face_color', color)
+        marker_key = next(k for k, v in self.marker_style_map.items() if v == converted_values['markers'])
+        line_key = next(k for k, v in self.line_style_map.items() if v == converted_values['line_styles'])
 
-    def choose_marker_edge_color(self, category_name):
-        button = self.get_category(category_name)['marker_edge_color_button']
-        self.select_color(button)
-        color = self.get_color(button)
-        self.update_data_point_styles(category_name, 'marker_edge_color', color)
+        self.widgets['marker_style_combobox'].setCurrentText(marker_key)
+        self.widgets['line_style_combobox'].setCurrentText(line_key)
 
-    def choose_line_color(self, category_name):
-        button = self.get_category(category_name)['line_color_button']
-        self.select_color(button)
-        color = self.get_color(button)
-        self.update_data_point_styles(category_name, 'line_color', color)
+        for color_key in ['face_colors', 'edge_colors', 'line_colors']:
+            self.set_button_border_style(
+                self.widgets[self.ui_element_map[color_key][0]],
+                converted_values[color_key]
+            )
 
-    def select_color(self, button):
-        color = QColorDialog.getColor()
-        if color.isValid():
-            button.setStyleSheet(f"border: 3px solid {color.name()};")
+        self.block_signals(False)
 
     def set_button_border_style(self, button, color):
         button.setStyleSheet(f"border: 3px solid {color};")
 
-    def get_color(self, button):
-        style_sheet = button.styleSheet()
-        if (color := style_sheet.split(' ')[-1].strip(';')):
-            return color
-        return '#000000'  # Default to black if no color is set
+    def choose_color(self, style_key):
+        button = self.widgets[self.ui_element_map[style_key][0]]
+        color = QColorDialog.getColor()
+        if color.isValid():
+            self.set_button_border_style(button, color.name())
+            self.update_data_point_styles(style_key, color.name())
 
-    def get_category(self, category_name):
-        if category_name == 'Dot':
-            return self.dot_category
-        elif category_name == 'X':
-            return self.x_category
-        elif category_name == 'Floor':
-            return self.floor_category
-        elif category_name == 'Misc':
-            return self.misc_category
-        return None
-
-    def update_data_point_styles(self, point_category, input_field, value):
-        self.figure_manager.update_point_styles(point_category, input_field, value)
-
-    def change_default(self, category_name):
-        category = self.get_category(category_name)
-
-        default_values = {
-            'markersize': category['marker_size_spinbox'].value(),
-            'marker': self.marker_style_map[category['marker_style_combobox'].currentText()],
-            'marker_face_color': self.get_color(category['marker_face_color_button']),
-            'marker_edge_color': self.get_color(category['marker_edge_color_button']),
-            'line_color': self.get_color(category['line_color_button']),
-            'linewidth': category['line_width_spinbox'].value(),
-            'linestyle': self.line_style_map[category['line_style_combobox'].currentText()]
-        }
-
-        msg_box = QMessageBox()
-        msg_box.setIcon(QMessageBox.Icon.Question)
-        msg_box.setWindowTitle("Set Default")
-        msg_box.setText(f"Make current {category_name} settings default for all charts?")
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
-        result = msg_box.exec()
-
-        if result == QMessageBox.StandardButton.Yes:
-            if category_name == 'Dot':
-                self.data_manager.user_preferences['corr_style'] = default_values
-            elif category_name == 'X':
-                self.data_manager.user_preferences['err_style'] = default_values
-            elif category_name == 'Floor':
-                self.data_manager.user_preferences['floor_style'] = default_values
-            elif category_name == 'Misc':
-                self.data_manager.user_preferences['misc_style'] = default_values
+    def update_data_point_styles(self, style_category, style_value):
+        user_col = self.column_selector.currentText()
+        if user_col:
+            data = {'user_col': user_col, 'style_cat': style_category, 'style_val': style_value}
+            self.event_bus.emit('update_point_styles', data)
+            self.event_bus.emit('update_legend')
 
 
 class ViewModeWidget(ModeWidget):
     def init_ui(self):
         self.dialog = InputDialog()
+        self.event_bus = EventBus()
 
-        # Creating grid layout to organize the checkboxes
-        view_grid = QGridLayout()
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Headings for Dot and X settings
+        # Spacers
+        spacer_height = 10
+        spacer_width = 10
+        spacer1 = QSpacerItem(spacer_width, spacer_height, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        spacer2 = QSpacerItem(spacer_width, spacer_height, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+
+        # Dropdowns section with its own grid
+        dropdown_layout = QGridLayout()
+        dropdown_layout.setSpacing(10)
+
+        self.column_label = QLabel('Column')
+        self.column_dropdown = QComboBox()
+        group_label = QLabel("Group")
+        self.group_dropdown = QComboBox()
+        aggregate_label = QLabel("Aggregate")
+        self.aggregate_dropdown = QComboBox()
+
+        self.group_dropdown.addItems(['Day', 'Week', 'Month', 'Year'])
+        self.aggregate_dropdown.addItems(['raw', 'sum', 'mean', 'median', 'min', 'max'])
+        self.aggregate_dropdown.setCurrentText('median')
+        self.toggle_group_column()
+
+        column_wrapper = QVBoxLayout()
+        column_wrapper.addWidget(self.column_label)
+        column_wrapper.addWidget(self.column_dropdown)
+
+        dropdown_layout.addLayout(column_wrapper, 0, 0, 1, 2)
+        dropdown_layout.addWidget(group_label, 1, 0)
+        dropdown_layout.addWidget(self.group_dropdown, 1, 1)
+        dropdown_layout.addWidget(aggregate_label, 2, 0)
+        dropdown_layout.addWidget(self.aggregate_dropdown, 2, 1)
+
+        dropdown_widget = QWidget()
+        dropdown_widget.setLayout(dropdown_layout)
+        main_layout.addWidget(dropdown_widget)
+
+        # Add spacing between dropdown and checkbox sections
+        main_layout.addItem(spacer1)
+
+        # Checkbox sections with their own grid
+        checkbox_layout = QGridLayout()
+        checkbox_layout.setSpacing(10)
+
+        # Section headings
         font = QFont()
-        dot_heading = QLabel("Dot")
-        dot_heading.setFont(font)
-        dot_heading.setAlignment(Qt.AlignmentFlag.AlignBottom)  # Align label to the bottom of its grid cell
-        x_heading = QLabel("X")
-        x_heading.setFont(font)
-        x_heading.setAlignment(Qt.AlignmentFlag.AlignBottom)
-        grid_heading = QLabel("\nGrid")
-        grid_heading.setFont(font)
-        other_heading = QLabel("\nOther")
-        other_heading.setFont(font)
+        grid_heading = QLabel("Grid")
+        self.column_heading = QLabel("Column")
+        other_heading = QLabel("Other")
+        for heading in [grid_heading, self.column_heading, other_heading]:
+            heading.setFont(font)
 
-        # Placing the headings
-        view_grid.addWidget(dot_heading, 0, 0)
-        view_grid.addWidget(x_heading, 0, 1)
-        view_grid.addWidget(grid_heading, 6, 0)
-        view_grid.addWidget(other_heading, 6, 1)
+        # Column section
+        checkbox_layout.addWidget(self.column_heading, 0, 0)
+        self.data_check = QCheckBox('Data')
+        self.trend_check = QCheckBox('Trend')
+        self.bounce_check = QCheckBox('Bounce')
+        self.celtext_check = QCheckBox('CelText')
 
-        # Checkboxes for various view options
-        self.dots_check = QCheckBox('Data')
-        self.xs_check = QCheckBox('Data')
-        self.dot_trends_check = QCheckBox('Trend')
-        self.x_trends_check = QCheckBox('Trend')
-        self.dot_bounce_check = QCheckBox('Bounce')
-        self.x_bounce_check = QCheckBox('Bounce')
-        self.dot_est_check = QCheckBox('CelTxt')
-        self.x_est_check = QCheckBox('CelTxt')
+        checkbox_layout.addWidget(self.data_check, 1, 0)
+        checkbox_layout.addWidget(self.trend_check, 2, 0)
+        checkbox_layout.addWidget(self.bounce_check, 3, 0)
+        checkbox_layout.addWidget(self.celtext_check, 4, 0)
+
+        # Grid section
+        checkbox_layout.addWidget(grid_heading, 0, 1)
+        self.major_vertical_check = QCheckBox('Dates')
+        self.major_horizontal_check = QCheckBox('Counts')
         self.minor_grid_check = QCheckBox('Minor')
-        self.major_grid_check = QCheckBox('Major')
-        self.timing_floor_check = QCheckBox('Floor')
-        self.timing_grid_check = QCheckBox('Time')
-        self.phase_lines_check = QCheckBox('Phase')
-        self.aims_check = QCheckBox('Aim')
-        self.fan_check = QCheckBox('CelFan')
+        self.time_grid_check = QCheckBox('Timing')
+
+        checkbox_layout.addWidget(self.major_vertical_check, 1, 1)
+        checkbox_layout.addWidget(self.major_horizontal_check, 2, 1)
+        checkbox_layout.addWidget(self.minor_grid_check, 3, 1)
+        checkbox_layout.addWidget(self.time_grid_check, 4, 1)
+
+        # Other section
+        checkbox_layout.addWidget(other_heading, 5, 0, 1, 2)
+        self.phase_check = QCheckBox('Phase')
+        self.aim_check = QCheckBox('Aim')
+        self.celfan_check = QCheckBox('Fan')
         self.credit_check = QCheckBox('Credit')
-        self.misc_point_check = QCheckBox('MiscD')
+        self.legend_check = QCheckBox('Legend')
 
-        # Adding checkboxes to the grid
-        view_grid.addWidget(self.dots_check, 1, 0)
-        view_grid.addWidget(self.dot_trends_check, 3, 0)
-        view_grid.addWidget(self.dot_bounce_check, 4, 0)
-        view_grid.addWidget(self.dot_est_check, 5, 0)  # Add new checkbox for Dot Est
-        view_grid.addWidget(self.xs_check, 1, 1)
-        view_grid.addWidget(self.x_trends_check, 3, 1)
-        view_grid.addWidget(self.x_bounce_check, 4, 1)
-        view_grid.addWidget(self.x_est_check, 5, 1)  # Add new checkbox for X Est
-        view_grid.addWidget(self.minor_grid_check, 8, 0)
-        view_grid.addWidget(self.major_grid_check, 7, 0)
-        view_grid.addWidget(self.timing_grid_check, 9, 0)
-        view_grid.addWidget(self.aims_check, 7, 1)
-        view_grid.addWidget(self.timing_floor_check, 9, 1)
-        view_grid.addWidget(self.phase_lines_check, 8, 1)
-        view_grid.addWidget(self.fan_check, 10, 1)
-        view_grid.addWidget(self.credit_check, 11, 1)
-        view_grid.addWidget(self.misc_point_check, 12, 1)
+        checkbox_layout.addWidget(self.phase_check, 6, 0)
+        checkbox_layout.addWidget(self.aim_check, 6, 1)
+        checkbox_layout.addWidget(self.celfan_check, 7, 0)
+        checkbox_layout.addWidget(self.credit_check, 7, 1)
+        checkbox_layout.addWidget(self.legend_check, 8, 0)
 
-        # Set spacing between rows
-        view_grid.setSpacing(10)
+        checkbox_widget = QWidget()
+        checkbox_widget.setLayout(checkbox_layout)
+        main_layout.addWidget(checkbox_widget)
 
-        # Setting initial states of checkboxes
-        for checkbox in [self.minor_grid_check, self.major_grid_check, self.dots_check, self.xs_check,
-                         self.dot_trends_check, self.x_trends_check, self.phase_lines_check,
-                         self.aims_check, self.timing_floor_check, self.dot_bounce_check, self.x_bounce_check,
-                         self.dot_est_check, self.x_est_check, self.fan_check, self.credit_check, self.misc_point_check]:
+        # Add spacing between checkbox section and credit button
+        main_layout.addItem(spacer2)
+
+        # Credit button
+        self.credit_lines_btn = QPushButton("Credit lines")
+        self.credit_lines_btn.clicked.connect(self.credit_lines_popup)
+        main_layout.addWidget(self.credit_lines_btn)
+
+        self.layout.addLayout(main_layout)
+
+        for checkbox in [self.major_vertical_check, self.major_horizontal_check,
+                        self.minor_grid_check, self.data_check, self.trend_check,
+                        self.bounce_check, self.celtext_check, self.phase_check,
+                        self.aim_check, self.celfan_check, self.credit_check, self.legend_check]:
             checkbox.setChecked(True)
+        self.time_grid_check.setChecked(False)
 
-        for checkbox in [self.timing_grid_check]:
-            checkbox.setChecked(False)
+        # Connect signals
+        self.column_dropdown.activated.connect(self.handle_column_dropdown_changed)
+        self.group_dropdown.activated.connect(self.group_column_update)
+        self.aggregate_dropdown.activated.connect(self.agg_column_update)
 
-        # Connect checkboxes to figure manager methods for handling changes
-        self.dots_check.stateChanged.connect(self.figure_manager.view_dots)
-        self.xs_check.stateChanged.connect(self.figure_manager.view_xs)
-        self.minor_grid_check.stateChanged.connect(self.figure_manager.view_minor_gridlines)
-        self.major_grid_check.stateChanged.connect(self.figure_manager.view_major_gridlines)
-        self.timing_floor_check.stateChanged.connect(self.figure_manager.view_floor)
-        self.phase_lines_check.stateChanged.connect(self.figure_manager.view_phase_lines)
-        self.timing_grid_check.stateChanged.connect(self.figure_manager.view_floor_grid)
-        self.aims_check.stateChanged.connect(self.figure_manager.view_aims)
-        self.dot_trends_check.stateChanged.connect(self.figure_manager.view_dot_trend)
-        self.x_trends_check.stateChanged.connect(self.figure_manager.view_x_trend)
-        self.dot_bounce_check.stateChanged.connect(self.figure_manager.view_dot_bounce)
-        self.x_bounce_check.stateChanged.connect(self.figure_manager.view_x_bounce)
-        self.dot_est_check.stateChanged.connect(self.figure_manager.view_dot_est)
-        self.x_est_check.stateChanged.connect(self.figure_manager.view_x_est)
-        self.fan_check.stateChanged.connect(self.figure_manager.view_update_celeration_fan)
-        self.credit_check.stateChanged.connect(self.toggle_credit_lines)
-        self.misc_point_check.stateChanged.connect(self.figure_manager.view_misc_points)
+        self.data_check.stateChanged.connect(lambda state: self.set_data_visibility('data', state))
+        self.trend_check.stateChanged.connect(lambda state: self.set_data_visibility('trend_line', state))
+        self.bounce_check.stateChanged.connect(lambda state: self.set_data_visibility('bounce', state))
+        self.celtext_check.stateChanged.connect(lambda state: self.set_data_visibility('cel_label', state))
 
-        # Credit lines button
-        credit_lines_btn = QPushButton("Credit lines")
-        credit_lines_btn.clicked.connect(self.credit_lines_popup)
-        self.layout.addLayout(view_grid)
-        self.layout.addWidget(credit_lines_btn)
+        self.major_vertical_check.stateChanged.connect(lambda state: self.event_bus.emit('view_major_date_gridlines', state))
+        self.major_horizontal_check.stateChanged.connect(lambda state: self.event_bus.emit('view_major_count_gridlines', state))
+        self.minor_grid_check.stateChanged.connect(lambda state: self.event_bus.emit('view_minor_gridlines', state))
+        self.time_grid_check.stateChanged.connect(lambda state: self.event_bus.emit('view_floor_grid', state))
 
-        # Call the method to check the condition and update checkbox states
+        self.phase_check.stateChanged.connect(lambda state: self.event_bus.emit('view_phase_lines_toggle', state))
+        self.aim_check.stateChanged.connect(lambda state: self.event_bus.emit('view_aims_toggle', state))
+        self.celfan_check.stateChanged.connect(lambda state: self.event_bus.emit('view_cel_fan_toggle', state))
+        self.legend_check.stateChanged.connect(lambda state: self.event_bus.emit('view_legend_toggle', state))
+        self.credit_check.stateChanged.connect(lambda state: self.handle_credit_toggle(state))
+
+        # Event bus subscriptions
+        self.event_bus.subscribe('refresh_view_dropdown', self.refresh_view_dropdown)
+        self.event_bus.subscribe('view_column_dropdown_update_label', self.view_column_dropdown_update_label)
+        self.event_bus.subscribe('sync_grid_checkboxes', self.sync_grid_checkboxes)
+        self.event_bus.subscribe('sync_data_checkboxes', self.sync_data_checkboxes)
+        self.event_bus.subscribe('sync_misc_checkboxes', self.sync_misc_checkboxes)
+
         self.update_timing_checkboxes()
 
+    def handle_credit_toggle(self, state):
+        self.event_bus.emit('view_credit_lines_toggle', state)
+        self.credit_lines_btn.setVisible(bool(state))
+
+    def handle_column_dropdown_changed(self, index):
+        self.view_column_dropdown_update_label(index)
+        self.sync_data_checkboxes()
+
+        user_col = self.column_dropdown.currentText()
+        if not user_col:
+            return
+        column_instance = self.data_manager.plot_columns[user_col]
+        column_instance.highlight()
+
+    def set_data_visibility(self, element_type, show):
+        user_col = self.column_dropdown.currentText()
+        if not user_col:
+            return
+
+        column_instance = self.data_manager.plot_columns[user_col]
+        column_instance.set_visibility(element_type, show)
+        self.event_bus.emit('refresh_chart')
+
+    def sync_misc_checkboxes(self):
+        view_settings = self.data_manager.chart_data['view']['chart']
+        checkboxes = [
+            (self.phase_check, 'phase'),
+            (self.aim_check, 'aims'),
+            (self.celfan_check, 'cel_fan'),
+            (self.credit_check, 'credit'),
+            (self.legend_check, 'legend')
+        ]
+
+        for checkbox, key in checkboxes:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(view_settings[key])
+            checkbox.blockSignals(False)
+
+        self.credit_lines_btn.setVisible(view_settings['credit'])
+
+    def sync_grid_checkboxes(self):
+        view_settings = self.data_manager.chart_data['view']['chart']
+        checkboxes = [self.major_vertical_check, self.major_horizontal_check,
+                      self.minor_grid_check, self.time_grid_check]
+
+        for checkbox in checkboxes:
+            checkbox.blockSignals(True)
+
+        self.major_vertical_check.setChecked(view_settings['major_grid_dates'])
+        self.major_horizontal_check.setChecked(view_settings['major_grid_counts'])
+        self.minor_grid_check.setChecked(view_settings['minor_grid'])
+        self.time_grid_check.setChecked(view_settings['floor_grid'])
+
+        for checkbox in checkboxes:
+            checkbox.blockSignals(False)
+
+    def sync_data_checkboxes(self):
+        user_col = self.column_dropdown.currentText()
+        if not user_col:
+            # Use default view settings if no column is selected
+            default_view_settings = {
+                'calendar_group': self.data_manager.chart_data['type'][0],
+                'agg_type': 'median',
+                'data': True,
+                'trend_line': True,
+                'bounce': True,
+                'cel_label': True
+            }
+            view_settings = default_view_settings
+        else:
+            column_instance = self.data_manager.plot_columns[user_col]
+            view_settings = column_instance.view_settings
+
+        # Sync checkboxes
+        for checkbox, settings_key in [
+            (self.data_check, 'data'),
+            (self.trend_check, 'trend_line'),
+            (self.bounce_check, 'bounce'),
+            (self.celtext_check, 'cel_label')
+        ]:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(view_settings[settings_key])
+            checkbox.blockSignals(False)
+
+        # Sync dropdowns
+        self.group_dropdown.blockSignals(True)
+        self.aggregate_dropdown.blockSignals(True)
+        self.group_dropdown.setCurrentText(view_settings['calendar_group'])
+        self.aggregate_dropdown.setCurrentText(view_settings['agg_type'])
+        self.group_dropdown.blockSignals(False)
+        self.aggregate_dropdown.blockSignals(False)
+
+        # Update group dropdown state
+        self.toggle_group_column()
+
+    def toggle_group_column(self):
+        text = self.aggregate_dropdown.currentText()
+        if text == 'raw':
+            self.group_dropdown.setEnabled(False)
+            self.group_dropdown.setStyleSheet('QComboBox:disabled { color: gray; }')
+        else:
+            self.group_dropdown.setEnabled(True)
+            self.group_dropdown.setStyleSheet('')
+
+    def _update_column_settings(self, setting_key, setting_value):
+        user_col = self.column_dropdown.currentText()
+        if not user_col or user_col not in self.data_manager.plot_columns.keys():
+            return
+
+        column_instance = self.data_manager.plot_columns[user_col]
+        column_instance.view_settings[setting_key] = setting_value
+        sys_col = column_instance.sys_col
+
+        # Save view settings in chart data
+        key = f'{sys_col}|{user_col}'
+        view_dict = self.data_manager.chart_data['view']
+        view_dict[key] = column_instance.view_settings
+
+        column_instance.refresh_view()
+        self.event_bus.emit('refresh_chart')
+
+    def group_column_update(self):
+        calendar_group = self.group_dropdown.currentText()
+        self._update_column_settings('calendar_group', calendar_group)
+
+    def agg_column_update(self):
+        agg_type = self.aggregate_dropdown.currentText()
+        self._update_column_settings('agg_type', agg_type)
+        self.toggle_group_column()
+
+    def view_column_dropdown_update_label(self, index=0):
+        new_column_heading = self.column_dropdown.itemText(index)
+        if new_column_heading:
+            char_lim = 12
+            if len(new_column_heading) > char_lim:
+                new_column_heading = new_column_heading[:char_lim] + '...'
+            self.column_heading.setText(new_column_heading)
+
+    def refresh_view_dropdown(self):
+        self.column_dropdown.clear()
+        column_map = self.data_manager.chart_data['column_map']
+        if column_map:
+            self.column_dropdown.addItems([v for k, v in column_map.items() if k != 'd'])
+
     def credit_lines_popup(self):
-        if self.dialog.exec() == QDialog.DialogCode.Accepted:  # Check if the dialog was accepted
-            r1, r2, r3 = self.dialog.get_inputs()  # Retrieve the inputs
+        if self.dialog.exec() == QDialog.DialogCode.Accepted:
+            r1, r2 = self.dialog.get_inputs()
             self.dialog.credit_row1 = r1
             self.dialog.credit_row2 = r2
-            self.dialog.credit_row3 = r3
-            self.figure_manager.data_manager.chart_data['credit'] = (r1, r2, r3)
+            self.figure_manager.data_manager.chart_data['credit'] = (r1, r2)
             self.event_bus.emit('view_update_credit_lines')
+        self.event_bus.emit('refresh_chart')
 
     def update_timing_checkboxes(self):
         condition = 'Minute' in self.data_manager.chart_data['type']
-        self.timing_floor_check.setEnabled(condition)
-        self.timing_grid_check.setEnabled(condition)
-
-    def toggle_credit_lines(self, status):
-        self.data_manager.chart_data['view_check']['credit_spacing'] = bool(status)
-        self.event_bus.emit('new_chart', self.data_manager.chart_data['start_date'])
+        self.time_grid_check.setEnabled(condition)
 
 
 class PhaseModeWidget(ModeWidget):
@@ -762,24 +861,153 @@ class AimModeWidget(ModeWidget):
 
 class TrendModeWidget(ModeWidget):
     def init_ui(self):
-        # Creating a radio button group for selecting trend type
-        radio_group_layout = QHBoxLayout()
-        self.trend_radio_dot = QRadioButton("Dots")
-        trend_radio_x = QRadioButton("Xs")
-        trend_radio_group = QButtonGroup(self)
-        trend_radio_group.addButton(self.trend_radio_dot)
-        trend_radio_group.addButton(trend_radio_x)
-        self.trend_radio_dot.setChecked(True)
+        self.event_bus = EventBus()
 
-        radio_group_layout.addWidget(self.trend_radio_dot)
-        radio_group_layout.addWidget(trend_radio_x)
-        self.layout.addLayout(radio_group_layout)
+        # Define combo box items
+        self.trend_methods = ['Least-squares', 'Quarter-intersect', 'Split-middle-line', 'Mean', 'Median']
+        self.envelope_methods = ['None', '5-95 percentile', 'Interquartile range', 'Standard deviation', '90% confidence interval']
+        self.celeration_units = ['Daily', 'Weekly (standard)', 'Monthly (Weekly x4)', 'Yearly (Weekly x52)']
 
+        # Trend type selector
+        trend_col_label = QLabel('Column')
+        trend_type_layout = QHBoxLayout()
+        self.trend_type_combo = QComboBox()
+        trend_type_layout.addWidget(self.trend_type_combo)
+        self.layout.addWidget(trend_col_label)
+        self.layout.addLayout(trend_type_layout)
+
+        # Date inputs and buttons
+        self.layout.addLayout(self._create_date_inputs())
+        self.layout.addLayout(self._create_trend_buttons())
+
+        # Trend controls
+        self.layout.addSpacing(15)
+        for widget in self._init_trend_controls():
+            self.layout.addWidget(widget)
+        self.layout.addStretch()
+
+        # Signal connections
+        self.trend_type_combo.currentIndexChanged.connect(lambda: self.event_bus.emit('trend_cleanup'))
+        self.trend_type_combo.currentTextChanged.connect(self.highlight_selected_data_series)
+        self.trend_start_date_input.dateChanged.connect(self.figure_manager.trend_date1_changed)
+        self.trend_end_date_input.dateChanged.connect(self.figure_manager.trend_date2_changed)
+
+        # Event bus subscriptions
+        self.event_bus.subscribe('refresh_trend_column_list', self.refresh_trend_column_list, has_data=False)
+        self.event_bus.subscribe('set_celeration_unit', self.set_celeration_unit, has_data=True)
+        self.event_bus.subscribe('get_current_trend_column', self.get_current_trend_column)
+        self.event_bus.subscribe('highlight_selected_data_series', self.highlight_selected_data_series)
+
+    def get_current_trend_column(self):
+        return self.trend_type_combo.currentText()
+
+    def set_celeration_unit(self, data):
+        cel_unit = data['cel_unit']
+        self.celeration_unit_combo.setCurrentText(cel_unit)
+        self.data_manager.user_preferences['celeration_unit'] = cel_unit
+
+    def highlight_selected_data_series(self, user_col=None):
+        plot_columns = self.data_manager.plot_columns
+        if user_col is None:
+            user_col = self.get_current_trend_column()
+            if user_col in plot_columns.keys():
+                plot_columns[user_col].highlight()
+        else:
+            if user_col in plot_columns.keys():
+                plot_columns[user_col].highlight()
+
+    def refresh_trend_column_list(self):
+        self.trend_type_combo.blockSignals(True)
+
+        self.trend_type_combo.clear()
+        column_map = self.data_manager.chart_data['column_map']
+        if column_map:
+            for sys_col, user_col in column_map.items():
+                if sys_col not in ['d', 'm']:
+                    self.trend_type_combo.addItem(user_col)
+
+        self.trend_type_combo.blockSignals(False)
+
+    def _init_trend_controls(self):
+        # Create and configure combos
+        self.trend_method_combo = QComboBox()
+        self.trend_method_combo.addItems(self.trend_methods)
+        self.trend_method_combo.setCurrentText(self.data_manager.user_preferences['fit_method'])
+        self.trend_method_combo.currentIndexChanged.connect(
+            lambda index: self.data_manager.user_preferences.update(
+                {'fit_method': self.trend_method_combo.currentText()})
+        )
+
+        self.envelope_method_combo = QComboBox()
+        self.envelope_method_combo.addItems(self.envelope_methods)
+        self.envelope_method_combo.setCurrentText(self.data_manager.user_preferences.get('bounce_envelope', 'None'))
+        self.envelope_method_combo.currentIndexChanged.connect(
+            lambda index: self.data_manager.user_preferences.update(
+                {'bounce_envelope': self.envelope_method_combo.currentText()})
+        )
+
+        self.celeration_unit_combo = QComboBox()
+        self.celeration_unit_combo.addItems(self.celeration_units)
+        self.celeration_unit_combo.setCurrentText(
+            self.data_manager.user_preferences.get('celeration_unit', 'Weekly (standard)'))
+        self.celeration_unit_combo.currentIndexChanged.connect(
+            lambda index: self.data_manager.user_preferences.update(
+                {'celeration_unit': self.celeration_unit_combo.currentText()})
+        )
+
+        # Configure spinbox
+        self.forward_projection_spinbox = QSpinBox()
+        self.forward_projection_spinbox.setRange(0, 100)
+        self.forward_projection_spinbox.setValue(self.data_manager.user_preferences.get('forward_projection', 0))
+        self.forward_projection_spinbox.valueChanged.connect(
+            lambda value: self.data_manager.user_preferences.update({'forward_projection': value})
+        )
+
+        # Create labels
+        labels = {
+            'trend_method': "Fit method",
+            'forward_projection': "Forecast",
+            'envelope_method': "Bounce envelope",
+            'celeration_unit': "Celeration unit"
+        }
+
+        return [
+            QLabel(labels['trend_method']), self.trend_method_combo,
+            QLabel(labels['forward_projection']), self.forward_projection_spinbox,
+            QLabel(labels['envelope_method']), self.envelope_method_combo,
+            QLabel(labels['celeration_unit']), self.celeration_unit_combo
+        ]
+
+    def _create_trend_buttons(self):
+        trend_button_layout = QHBoxLayout()
+        self.trend_add_btn = QPushButton()
+        self.trend_fit_btn = QPushButton('Fit')
+        trend_undo_btn = QPushButton()
+        trend_configure_btn = QPushButton()
+
+        self.trend_add_btn.setIcon(QIcon(':/images/plus-solid-disabled.svg'))
+        self.trend_add_btn.setEnabled(False)
+        trend_undo_btn.setIcon(QIcon(':/images/minus-solid.svg'))
+        trend_configure_btn.setIcon(QIcon(':/images/gear-solid.svg'))
+
+        trend_button_layout.addWidget(self.trend_add_btn)
+        trend_button_layout.addWidget(trend_undo_btn)
+        trend_button_layout.addWidget(self.trend_fit_btn)
+        trend_button_layout.addWidget(trend_configure_btn)
+
+        # Connect buttons
+        self.trend_fit_btn.clicked.connect(self.fit_trend)
+        self.trend_add_btn.clicked.connect(self.add_trend)
+        trend_undo_btn.clicked.connect(self.undo_trend)
+        trend_configure_btn.clicked.connect(self.configure_trends)
+
+        return trend_button_layout
+
+    def _create_date_inputs(self):
         # Date inputs for the start and end of the trend, arranged vertically
         date_input_layout = QVBoxLayout()
 
         date1_layout = QVBoxLayout()
-        # Add vertical margin before Date 1 label
         date1_layout.addSpacing(10)
         trend_label_start_date = QLabel('Date 1')
         self.trend_start_date_input = QDateEdit()
@@ -802,112 +1030,28 @@ class TrendModeWidget(ModeWidget):
         date_input_layout.addLayout(date1_layout)
         date_input_layout.addLayout(date2_layout)
 
-        self.layout.addLayout(date_input_layout)
-
-        # Buttons for managing trends
-        trend_button_layout = QHBoxLayout()
-        self.trend_add_btn = QPushButton()
-        self.trend_fit_btn = QPushButton('Fit')
-        trend_undo_btn = QPushButton()
-        trend_configure_btn = QPushButton()
-
-        # Add icons
-        self.trend_add_btn.setIcon(QIcon(':/images/plus-solid-disabled.svg'))
-        self.trend_add_btn.setEnabled(False)
-        trend_undo_btn.setIcon(QIcon(':/images/minus-solid.svg'))
-        trend_configure_btn.setIcon(QIcon(':/images/gear-solid.svg'))
-
-        trend_button_layout.addWidget(self.trend_add_btn)
-        trend_button_layout.addWidget(trend_undo_btn)
-        trend_button_layout.addWidget(self.trend_fit_btn)
-        trend_button_layout.addWidget(trend_configure_btn)
-
-        self.layout.addLayout(trend_button_layout)
-
-        # Add vertical margin before Fit method label
-        self.layout.addSpacing(15)
-
-        # Combo box for selecting the trend calculation method
-        trend_method_label = QLabel("Fit method")
-        self.trend_method_combo = QComboBox()
-        self.trend_method_combo.addItem('Least-squares')
-        self.trend_method_combo.addItem('Quarter-intersect')
-        self.trend_method_combo.addItem('Split-middle-line')
-        self.trend_method_combo.addItem('Mean')
-        self.trend_method_combo.addItem('Median')
-        self.trend_method_combo.setCurrentText(self.data_manager.user_preferences['fit_method'])
-        self.trend_method_combo.currentIndexChanged.connect(lambda index: self.data_manager.user_preferences.update({'fit_method': self.trend_method_combo.currentText()}))
-
-        # SpinBox for Forward Projection
-        forward_projection_label = QLabel("Forward projection")
-        self.forward_projection_spinbox = QSpinBox()
-        self.forward_projection_spinbox.setRange(0, 100)  # Set the range as required
-        self.forward_projection_spinbox.setValue(self.data_manager.user_preferences.get('forward_projection', 0))
-        self.forward_projection_spinbox.valueChanged.connect(lambda value: self.data_manager.user_preferences.update({'forward_projection': value}))
-
-        # Combo box for envelope method
-        envelope_method_label = QLabel("Bounce envelope")
-        self.envelope_method_combo = QComboBox()
-        self.envelope_method_combo.addItem('None')
-        self.envelope_method_combo.addItem('5-95 percentile')
-        self.envelope_method_combo.addItem('Interquartile range')
-        self.envelope_method_combo.addItem('Standard deviation')
-        self.envelope_method_combo.addItem('90% confidence interval')
-        self.envelope_method_combo.setCurrentText(self.data_manager.user_preferences.get('bounce_envelope', 'None'))
-        self.envelope_method_combo.currentIndexChanged.connect(lambda index: self.data_manager.user_preferences.update({'bounce_envelope': self.envelope_method_combo.currentText()}))
-
-        # Combo box for celeraiton unit
-        celeration_unit_label = QLabel("Celeration unit")
-        self.celeration_unit_combo = QComboBox()
-        self.celeration_unit_combo.addItem('Daily')
-        self.celeration_unit_combo.addItem('Weekly (standard)')
-        self.celeration_unit_combo.addItem('Monthly (Weekly x4)')
-        self.celeration_unit_combo.addItem('Yearly (Weekly x52)')
-        self.celeration_unit_combo.setCurrentText(self.data_manager.user_preferences.get('celeration_unit', 'Weekly (standard)'))
-        self.celeration_unit_combo.currentIndexChanged.connect(lambda index: self.data_manager.user_preferences.update({'celeration_unit': self.celeration_unit_combo.currentText()}))
-
-        # Add components to the main layout
-        self.layout.addWidget(trend_method_label)
-        self.layout.addWidget(self.trend_method_combo)
-        self.layout.addWidget(forward_projection_label)
-        self.layout.addWidget(self.forward_projection_spinbox)
-        self.layout.addWidget(envelope_method_label)
-        self.layout.addWidget(self.envelope_method_combo)
-        self.layout.addWidget(celeration_unit_label)
-        self.layout.addWidget(self.celeration_unit_combo)
-
-        # Eliminate any extra vertical stretches
-        self.layout.addStretch()
-
-        # Clean up when switching between point type
-        self.trend_radio_dot.toggled.connect(self.figure_manager.trend_cleanup)
-        trend_radio_x.toggled.connect(self.figure_manager.trend_cleanup)
-
-        # Connect buttons to figure manager methods
-        self.trend_fit_btn.clicked.connect(self.handle_fit_button)
-        self.trend_add_btn.clicked.connect(self.add_trend)
-        trend_undo_btn.clicked.connect(self.undo_trend)
-        trend_configure_btn.clicked.connect(self.configure_trends)
-
-        # Connect date changes to figure manager updates
-        self.trend_start_date_input.dateChanged.connect(self.figure_manager.trend_date1_changed)
-        self.trend_end_date_input.dateChanged.connect(self.figure_manager.trend_date2_changed)
+        return date_input_layout
 
     def add_trend(self):
-        self.figure_manager.trend_finalize(self.trend_radio_dot.isChecked())
+        self.event_bus.emit('trend_finalize')
         self.set_plus_btn_status()
 
     def undo_trend(self):
-        self.figure_manager.trend_undo(self.trend_radio_dot.isChecked())
-        self.set_plus_btn_status()
+        user_col = self.get_current_trend_column()
+        if user_col:
+            col_instance = self.figure_manager.data_manager.plot_columns[user_col]
+            col_instance.remove_trend()
+            self.event_bus.emit('refresh_chart')
+            self.set_plus_btn_status()
 
-    def handle_fit_button(self):
-        self.figure_manager.trend_fit(self.trend_radio_dot.isChecked())
-        self.setFocus()  # Set focus back to the main window
+    def fit_trend(self):
+        trend_data = None
+        self.event_bus.emit('plot_cel_trend_temp', trend_data)
+        self.setFocus()
         self.set_plus_btn_status()
+        self.event_bus.emit('refresh_chart')
 
     def set_plus_btn_status(self):
-        # If a magenta trend was placed, make the plus button available
         if self.figure_manager.trend_manager.trend_temp_fit_on:
             self.trend_add_btn.setEnabled(True)
             self.trend_add_btn.setIcon(QIcon(':/images/plus-solid.svg'))
@@ -916,8 +1060,12 @@ class TrendModeWidget(ModeWidget):
             self.trend_add_btn.setIcon(QIcon(':/images/plus-solid-disabled.svg'))
 
     def configure_trends(self):
-        dialog = ConfigureTrendLinesDialog(self.trend_radio_dot.isChecked(), self.figure_manager, self)
-        dialog.exec()
+        user_col = self.trend_type_combo.currentText()
+        column_map = self.data_manager.chart_data['column_map']
+        if column_map and user_col in column_map.values():
+            trend_style = self.data_manager.plot_columns[user_col].get_default_trend_style()
+            dialog = ConfigureTrendLinesDialog(user_col, trend_style, self.figure_manager, self)
+            dialog.exec()
 
 
 class NoteModeWidget(ModeWidget):

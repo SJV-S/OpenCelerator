@@ -8,7 +8,7 @@ import pandas as pd
 
 
 class Chart:
-    def __init__(self, date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, style_color='#5a93cc', custom_grid_color='#71B8FF', credit_line_space=True):
+    def __init__(self, date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, style_color='#5a93cc', custom_grid_color='#71B8FF'):
         self.date_format = date_format
         self.start_date = start_date
         self.width = width
@@ -25,25 +25,22 @@ class Chart:
         self.font = self.get_system_font()
         self.general_fontsize = width * 1.2
         self.general_fontsize_minor_scaling = 0.7
-        self.credit_fontsize = width * 0.92
+        self.credit_fontsize = width * 0.7
         self.right_y_axis_fontsize = width * 0.85
         self.top_x_label_pad = width * 1
 
         # Chart margin spacing
         self.space_left = 0.17
         self.space_right = 0.87
-        if credit_line_space:
-            self.space_top = 0.86
-            self.space_bottom = 0.23
-        else:
-            self.space_top = 0.85
-            self.space_bottom = 0.14
+        self.space_top = 0.85
+        self.space_bottom = 0.19
 
         # Fan control variables
         self.div_text_objects = []
         self.mult_text_objects = []
 
-        self.major_grid_line_objects = []
+        self.major_grid_date_objects = []
+        self.major_grid_count_objects = []
         self.floor_grid_line_objects = []
 
         if self.start_date is None:
@@ -72,8 +69,12 @@ class Chart:
         else:
             return "Sans-serif"
 
-    def major_grid_lines(self, grid_on):
-        for line in self.major_grid_line_objects:
+    def major_grid_dates(self, grid_on):
+        for line in self.major_grid_date_objects:
+            line.set_visible(grid_on)
+
+    def major_grid_counts(self, grid_on):
+        for line in self.major_grid_count_objects:
             line.set_visible(grid_on)
 
     def minor_grid_lines(self, grid_on):
@@ -119,13 +120,13 @@ class Chart:
         if self.major_grid_on:
             for month in top_x_ticks:
                 g1 = self.ax.axvline(month, color=self.custom_grid_color, linewidth=self.major_grid_width, visible=True, zorder=1)
-                self.major_grid_line_objects.append(g1)
+                self.major_grid_date_objects.append(g1)
             for power in [0.001, 0.01, 0.1, 1, 10, 100, 1000, 10000, 100000, 1000000]:
                 g2 = self.ax.axhline(power, color=self.custom_grid_color, linewidth=self.major_grid_width, visible=True, zorder=1)
-                self.major_grid_line_objects.append(g2)
+                self.major_grid_count_objects.append(g2)
             for power in [0.005, 0.05, 0.5, 5, 50, 500, 5000, 50000, 500000]:
                 g3 = self.ax.axhline(power, color=self.custom_grid_color, linewidth=self.major_grid_width * 0.5, visible=True, zorder=1)
-                self.major_grid_line_objects.append(g3)
+                self.major_grid_count_objects.append(g3)
 
     def add_cel_fan(self, chart_type, div_decrease, line_length=0.95, text_pos=0.70):
         minute_x_pos = -0.1 * self.xmax
@@ -220,8 +221,8 @@ class Chart:
 
 
 class DailyTemplate(Chart):
-    def __init__(self, date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, a, b, c, ymin, ymax, style_color='#5a93cc', custom_grid_color='#71B8FF', credit_line_space=True):
-        super().__init__(date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, style_color, custom_grid_color, credit_line_space)
+    def __init__(self, date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, a, b, c, ymin, ymax, style_color='#5a93cc', custom_grid_color='#71B8FF'):
+        super().__init__(date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, style_color, custom_grid_color)
         self.a = a
         self.b = b
         self.c = c
@@ -251,7 +252,7 @@ class DailyTemplate(Chart):
                                       15: 1.09
         }
 
-        self.credit_vert_pos = -0.26
+        self.credit_vert_pos = -0.23
         self.vert_pos = self.vert_pos_scaling_dict[width]
         self.underline = self.vert_pos - 0.012
         self.top_x_label_pad = width * 3.7
@@ -307,13 +308,13 @@ class DailyTemplate(Chart):
         if self.major_grid_on:
             for sun in [i for i in range(7, 140, 7)]:
                 g1 = self.ax.axvline(sun, color=self.custom_grid_color, linewidth=self.major_grid_width, visible=True, zorder=1)
-                self.major_grid_line_objects.append(g1)
+                self.major_grid_date_objects.append(g1)
             for power in [0.001, 0.01, 0.1, 1, 10, 100, 1000, 10000, 100000, 1000000]:
                 g2 = self.ax.axhline(power, color=self.custom_grid_color, linewidth=self.major_grid_width, visible=True, zorder=1)
-                self.major_grid_line_objects.append(g2)
+                self.major_grid_count_objects.append(g2)
             for power in [0.005, 0.05, 0.5, 5, 50, 500, 5000, 50000, 500000]:
                 g3 = self.ax.axhline(power, color=self.custom_grid_color, linewidth=self.major_grid_width * 0.5, visible=True, zorder=1)
-                self.major_grid_line_objects.append(g3)
+                self.major_grid_count_objects.append(g3)
 
         if self.minor_grid_on:
             self.ax.grid(which="both", visible=self.minor_grid_on, color=self.custom_grid_color, linewidth=self.minor_grid_width)
@@ -357,7 +358,7 @@ class DailyTemplate(Chart):
 
 
 class Daily(DailyTemplate):
-    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER DAY", style_color='#5a93cc', custom_grid_color='#71B8FF', credit_line_space=True):
+    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER DAY", style_color='#5a93cc', custom_grid_color='#71B8FF'):
         self.left_y_ticks = [10 ** e for e in [np.log10(i) for i in [1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000]]]
         self.left_y_labels = [f"{tick:,}" for tick in [1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000]]
         super().__init__(date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label,
@@ -367,13 +368,13 @@ class Daily(DailyTemplate):
                          ymin=1 * 0.69,
                          ymax=1000000,
                          style_color=style_color,
-                         custom_grid_color=custom_grid_color, credit_line_space=credit_line_space)
+                         custom_grid_color=custom_grid_color)
         self._setup_axes()
         self.ax.yaxis.set_label_coords(-0.13, 0.5)
 
 
 class DailyMinute(DailyTemplate):
-    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER MINUTE", style_color='#5a93cc', custom_grid_color='#71B8FF', credit_line_space=True):
+    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER MINUTE", style_color='#5a93cc', custom_grid_color='#71B8FF'):
         self.left_y_ticks = [10 ** e for e in [np.log10(i) for i in [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000]]]
         self.left_y_labels = ["0.001", "0.005", "0.01", "0.05", "0.1", "0.5", "1", "5", "10", "50", "100", "500", "1000"]
         self.right_y_ticks = [1 / m for m in [10 / 60, 15 / 60, 20 / 60, 30 / 60, 1, 2, 5, 10, 20, 60, 50, 100, 200, 500, 1000, 60 * 2, 60 * 4, 60 * 8, 60 * 16]]
@@ -390,7 +391,7 @@ class DailyMinute(DailyTemplate):
                          ymin=0.001 * 0.69,
                          ymax=1000,
                          style_color=style_color,
-                         custom_grid_color=custom_grid_color, credit_line_space=credit_line_space)
+                         custom_grid_color=custom_grid_color)
 
         self._setup_axes()
         self.draw_floor_grid(self.right_y_ticks)
@@ -431,8 +432,8 @@ class DailyMinute(DailyTemplate):
 
 
 class WeeklyTemplate(Chart):
-    def __init__(self, date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, a, b, c, ymin, ymax, style_color='#5a93cc', custom_grid_color='#71B8FF', credit_line_space=True):
-        super().__init__(date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, style_color, custom_grid_color, credit_line_space)
+    def __init__(self, date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, a, b, c, ymin, ymax, style_color='#5a93cc', custom_grid_color='#71B8FF'):
+        super().__init__(date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, style_color, custom_grid_color)
         self.a = a
         self.b = b
         self.c = c
@@ -450,7 +451,7 @@ class WeeklyTemplate(Chart):
         self.height = self.image_ratio * self.width * np.tan(self.angle / 180 * np.pi) * self.y_axis_expansion
 
         # Positioning
-        self.credit_vert_pos = - 0.26
+        self.credit_vert_pos = - 0.23
         self.top_x_labels_vert_pos = 1.01
 
         # Scaling
@@ -576,7 +577,7 @@ class WeeklyTemplate(Chart):
 
 
 class Weekly(WeeklyTemplate):
-    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER WEEK", style_color='#5a93cc', custom_grid_color='#71B8FF', credit_line_space=True):
+    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER WEEK", style_color='#5a93cc', custom_grid_color='#71B8FF'):
         super().__init__(
             date_format=date_format,
             start_date=start_date,
@@ -592,7 +593,6 @@ class Weekly(WeeklyTemplate):
             ymax=1000000,
             style_color=style_color,
             custom_grid_color=custom_grid_color,
-            credit_line_space=credit_line_space
         )
 
         self.vert_pos = 1.03
@@ -605,7 +605,7 @@ class Weekly(WeeklyTemplate):
 
 
 class WeeklyMinute(WeeklyTemplate):
-    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER MINUTE", style_color='#5a93cc', custom_grid_color='#71B8FF', credit_line_space=True):
+    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER MINUTE", style_color='#5a93cc', custom_grid_color='#71B8FF'):
         self.vert_pos = 1.03
         self.bottom_x_ticks = np.arange(0, 101, 1)
         self.right_y_ticks = [1 / m for m in [10 / 60, 15 / 60, 20 / 60, 30 / 60, 1, 2, 5, 10, 20, 60, 50, 100, 200, 500, 1000, 60 * 2, 60 * 4, 60 * 8, 60 * 16]]
@@ -631,7 +631,6 @@ class WeeklyMinute(WeeklyTemplate):
             ymax=1000,
             style_color=style_color,
             custom_grid_color=custom_grid_color,
-            credit_line_space=credit_line_space
         )
 
         self._setup_axes()
@@ -668,8 +667,8 @@ class WeeklyMinute(WeeklyTemplate):
 
 
 class MonthlyTemplate(Chart):
-    def __init__(self, date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, a, b, c, ymin, ymax, style_color='#5a93cc', custom_grid_color='#71B8FF', credit_line_space=True):
-        super().__init__(date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, style_color, custom_grid_color, credit_line_space=credit_line_space)
+    def __init__(self, date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, a, b, c, ymin, ymax, style_color='#5a93cc', custom_grid_color='#71B8FF'):
+        super().__init__(date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, style_color, custom_grid_color)
         self.a = a
         self.b = b
         self.c = c
@@ -687,7 +686,7 @@ class MonthlyTemplate(Chart):
         self.height = self.image_ratio * self.width * np.tan(self.angle / 180 * np.pi) * self.y_axis_expansion
 
         # Positioning
-        self.credit_vert_pos = - 0.26
+        self.credit_vert_pos = - 0.23
         self.year_vert_pos = 1.025
 
         # Scaling
@@ -751,13 +750,13 @@ class MonthlyTemplate(Chart):
         if self.major_grid_on:
             for month in np.arange(0, 120, 6):
                 g1 = self.ax.axvline(month, color=self.custom_grid_color, linewidth=self.major_grid_width, visible=True, zorder=1)
-                self.major_grid_line_objects.append(g1)
+                self.major_grid_date_objects.append(g1)
             for power in [0.001, 0.01, 0.1, 1, 10, 100, 1000, 10000, 100000, 1000000]:
                 g2 = self.ax.axhline(power, color=self.custom_grid_color, linewidth=self.major_grid_width, visible=True, zorder=1)
-                self.major_grid_line_objects.append(g2)
+                self.major_grid_count_objects.append(g2)
             for power in [0.005, 0.05, 0.5, 5, 50, 500, 5000, 50000, 500000]:
                 g3 = self.ax.axhline(power, color=self.custom_grid_color, linewidth=self.major_grid_width * 0.5, visible=True, zorder=1)
-                self.major_grid_line_objects.append(g3)
+                self.major_grid_count_objects.append(g3)
 
         if self.minor_grid_on:
             self.ax.grid(which="both", visible=self.minor_grid_on, color=self.custom_grid_color, linewidth=self.minor_grid_width)
@@ -792,7 +791,7 @@ class MonthlyTemplate(Chart):
 
 
 class Monthly(MonthlyTemplate):
-    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER MONTH", style_color='#5a93cc', custom_grid_color='#71B8FF', credit_line_space=True):
+    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER MONTH", style_color='#5a93cc', custom_grid_color='#71B8FF'):
         super().__init__(
             date_format=date_format,
             start_date=start_date,
@@ -808,7 +807,6 @@ class Monthly(MonthlyTemplate):
             ymax=1000000,
             style_color=style_color,
             custom_grid_color=custom_grid_color,
-            credit_line_space=credit_line_space
         )
 
         self.vert_pos = 1.03
@@ -820,7 +818,7 @@ class Monthly(MonthlyTemplate):
 
 
 class MonthlyMinute(MonthlyTemplate):
-    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER MINUTE", style_color='#5a93cc', custom_grid_color='#71B8FF', credit_line_space=True):
+    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER MINUTE", style_color='#5a93cc', custom_grid_color='#71B8FF'):
         super().__init__(
             date_format=date_format,
             start_date=start_date,
@@ -836,7 +834,6 @@ class MonthlyMinute(MonthlyTemplate):
             ymax=1000,
             style_color=style_color,
             custom_grid_color=custom_grid_color,
-            credit_line_space=credit_line_space
         )
 
         self.vert_pos = 1.03
@@ -884,8 +881,8 @@ class MonthlyMinute(MonthlyTemplate):
 
 
 class YearlyTemplate(Chart):
-    def __init__(self, date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, a, b, c, ymin, ymax, style_color='#5a93cc', custom_grid_color='#71B8FF', credit_line_space=True):
-        super().__init__(date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, style_color, custom_grid_color, credit_line_space=credit_line_space)
+    def __init__(self, date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, a, b, c, ymin, ymax, style_color='#5a93cc', custom_grid_color='#71B8FF'):
+        super().__init__(date_format, start_date, width, major_grid_on, minor_grid_on, floor_grid_on, y_label, style_color, custom_grid_color)
 
         self.a = a
         self.b = b
@@ -904,7 +901,7 @@ class YearlyTemplate(Chart):
         self.height = self.image_ratio * self.width * np.tan(self.angle / 180 * np.pi) * self.y_axis_expansion
 
         # Positioning
-        self.credit_vert_pos = - 0.26
+        self.credit_vert_pos = - 0.23
         self.year_vert_pos = 1.025
 
         # Scaling
@@ -967,13 +964,13 @@ class YearlyTemplate(Chart):
         if self.major_grid_on:
             for year in self.bottom_x_ticks[::5]:
                 g1 = self.ax.axvline(year, color=self.custom_grid_color, linewidth=self.major_grid_width, visible=True, zorder=1)
-                self.major_grid_line_objects.append(g1)
+                self.major_grid_date_objects.append(g1)
             for power in [0.001, 0.01, 0.1, 1, 10, 100, 1000, 10000, 100000, 1000000]:
                 g2 = self.ax.axhline(power, color=self.custom_grid_color, linewidth=self.major_grid_width, visible=True, zorder=1)
-                self.major_grid_line_objects.append(g2)
+                self.major_grid_count_objects.append(g2)
             for power in [0.005, 0.05, 0.5, 5, 50, 500, 5000, 50000, 500000]:
                 g3 = self.ax.axhline(power, color=self.custom_grid_color, linewidth=self.major_grid_width * 0.5, visible=True, zorder=1)
-                self.major_grid_line_objects.append(g3)
+                self.major_grid_count_objects.append(g3)
 
         if self.minor_grid_on:
             self.ax.grid(which="both", visible=self.minor_grid_on, color=self.custom_grid_color, linewidth=self.minor_grid_width)
@@ -1008,7 +1005,7 @@ class YearlyTemplate(Chart):
 
 
 class Yearly(YearlyTemplate):
-    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER YEAR", style_color='#5a93cc', custom_grid_color='#71B8FF', credit_line_space=True):
+    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER YEAR", style_color='#5a93cc', custom_grid_color='#71B8FF'):
         super().__init__(
             date_format=date_format,
             start_date=start_date,
@@ -1024,7 +1021,6 @@ class Yearly(YearlyTemplate):
             ymax=1000000,
             style_color=style_color,
             custom_grid_color=custom_grid_color,
-            credit_line_space=credit_line_space
         )
 
         self.vert_pos = 1.03
@@ -1037,7 +1033,7 @@ class Yearly(YearlyTemplate):
 
 
 class YearlyMinute(YearlyTemplate):
-    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER MINUTE", style_color='#5a93cc', custom_grid_color='#71B8FF', credit_line_space=True):
+    def __init__(self, date_format=None, start_date=None, width=9, major_grid_on=True, minor_grid_on=True, floor_grid_on=False, y_label="COUNT PER MINUTE", style_color='#5a93cc', custom_grid_color='#71B8FF'):
         super().__init__(
             date_format=date_format,
             start_date=start_date,
@@ -1053,7 +1049,6 @@ class YearlyMinute(YearlyTemplate):
             ymax=1000,
             style_color=style_color,
             custom_grid_color=custom_grid_color,
-            credit_line_space=credit_line_space
         )
 
         self.vert_pos = 1.03
@@ -1101,5 +1096,5 @@ class YearlyMinute(YearlyTemplate):
 
 
 if __name__ == '__main__':
-    chart = WeeklyMinute()
+    chart = DailyMinute()
     plt.show()

@@ -17,20 +17,22 @@ class InputDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle('Credit Lines')
+        self.setFixedSize(900, 150)
 
         # Create data manager instance
         self.data_manager = DataManager()
+        self.event_bus = EventBus()
 
         # Main layout
         layout = QVBoxLayout(self)
 
         # Create labels and input fields
-        row_labels = ['Row I', 'Row II', 'Row III']
+        row_labels = ['Row I', 'Row II']  # Reduced to 2 rows
         self.inputs = [QLineEdit(self) for _ in row_labels]
         for row_label, input_field in zip(row_labels, self.inputs):
             row_layout = QHBoxLayout()
             label = QLabel(row_label)
-            input_field.setFixedWidth(700)  # Set a wider width
+            input_field.setFixedWidth(900)
             row_layout.addWidget(label)
             row_layout.addWidget(input_field)
             layout.addLayout(row_layout)
@@ -41,23 +43,18 @@ class InputDialog(QDialog):
         self.btn_cancel = QPushButton('Cancel', self)
         button_layout.addWidget(self.btn_revise)
         button_layout.addWidget(self.btn_cancel)
-
-        # Add button layout to the main layout
         layout.addLayout(button_layout)
 
-        # Connect the Cancel button to close the dialog
         self.btn_cancel.clicked.connect(self.reject)
-        # Connect the Revise button to accept the dialog
         self.btn_revise.clicked.connect(self.accept)
 
     def update_data(self):
-        # Fetch the latest data
-        row1, row2, row3 = self.data_manager.chart_data['credit']
-        for i, row_data in enumerate([row1, row2, row3]):
+        # Fetch only first two rows
+        row1, row2 = self.data_manager.chart_data['credit']
+        for i, row_data in enumerate([row1, row2]):
             self.inputs[i].setText(row_data)
 
     def showEvent(self, event):
-        # Update data each time the dialog is shown
         self.update_data()
         super().showEvent(event)
 
@@ -191,6 +188,7 @@ class ConfigureTemplateDialog(QDialog):
         self.setGeometry(300, 300, 400, 300)
         self.figure_manager = figure_manager
         self.data_manager = DataManager()
+        self.event_bus = EventBus()
         self.items = self.data_manager.chart_data[data_key]
         self.default_item = default_item
         self.init_ui()
@@ -329,6 +327,7 @@ class ConfigureTemplateDialog(QDialog):
             'linewidth': self.line_width_spinbox.value(),
             'linestyle': self.line_style_map[self.line_style_combobox.currentText()],
         }
+
         self.delete_selected_item(selected_item)
         self.figure_manager.replot(new_item, self.data_key)
         self.figure_manager.refresh()
@@ -442,23 +441,32 @@ class ConfigureAimLinesDialog(ConfigureTemplateDialog):
             self.list_widget.addItem(list_item)
 
 
-class ConfigureTrendLinesDialog(ConfigureTemplateDialog):
-    def __init__(self, corr, figure_manager, parent=None):
-        self.corr = corr
-        title = 'Dot' if self.corr else 'X'
-        super().__init__(figure_manager, 'trend_corr' if self.corr else 'trend_err', f"{title} Trend Configuration",
-                         figure_manager.default_trend_corr_item if self.corr else figure_manager.default_trend_err_item,
-                         parent)
-        self.refresh_list_box()  # Populate the list box immediately after initialization
+class ConfigureTrendLinesDialog(QDialog):
+    def __init__(self, user_col, trend_style, figure_manager, parent=None):
+        super().__init__(parent)
+        self.user_col = user_col
+        self.trend_style = trend_style
+        self.figure_manager = figure_manager
+        self.data_manager = DataManager()
+        self.event_bus = EventBus()
+        self.items = self.data_manager.chart_data[trend_style]
+        self.default_item = self.data_manager.user_preferences[trend_style + "_style"]
+        self.line_style_map = {"Solid": "-", "Dashed": "--", "Dotted": ":"}
+
+        self.setWindowTitle(f"{user_col} Configuration")
+        self.setGeometry(300, 300, 400, 300)
+        self.init_ui()
+        self.refresh_list_box()
+        self.populate_fields_with_defaults()
 
     def init_ui(self):
         layout = QHBoxLayout(self)
 
-        # Group box for configuration options
+        # Left side - Configuration options
         config_group_box = QGroupBox('Styles')
         config_layout = QVBoxLayout(config_group_box)
 
-        # Line text
+        # Line text input
         self.line_text = QLineEdit('')
         config_layout.addWidget(QLabel('Text'))
         config_layout.addWidget(self.line_text)
@@ -471,7 +479,7 @@ class ConfigureTrendLinesDialog(ConfigureTemplateDialog):
 
         # Font size selector
         self.font_size_spinbox = QSpinBox()
-        self.font_size_spinbox.setRange(8, 32)  # Example range
+        self.font_size_spinbox.setRange(8, 32)
         config_layout.addWidget(QLabel("Font Size"))
         config_layout.addWidget(self.font_size_spinbox)
 
@@ -490,35 +498,34 @@ class ConfigureTrendLinesDialog(ConfigureTemplateDialog):
 
         # Line style selector
         self.line_style_combobox = QComboBox()
-        self.line_style_map = {"Solid": "-", "Dashed": "--", "Dotted": ":"}
         self.line_style_combobox.addItems(self.line_style_map.keys())
         config_layout.addWidget(QLabel("Line Style"))
         config_layout.addWidget(self.line_style_combobox)
 
-        # Styles buttons
+        # Update button
         self.update_btn = QPushButton("Update")
         self.update_btn.setToolTip('Item in list must be selected.')
         self.update_btn.clicked.connect(lambda: self.update_item_styles(self.list_widget.currentRow()))
-        self.update_btn.setEnabled(False)  # Initially disable the button
+        self.update_btn.setEnabled(False)
         config_layout.addWidget(self.update_btn)
 
-        # Update button
+        # Set default button
         set_default_btn = QPushButton("Set as default")
         set_default_btn.clicked.connect(self.set_default_style)
         config_layout.addWidget(set_default_btn)
 
         layout.addWidget(config_group_box)
 
-        # List box and buttons
+        # Right side - List and buttons
         right_layout = QVBoxLayout()
+
+        # List widget
         self.list_widget = QListWidget()
         self.list_widget.currentItemChanged.connect(self.populate_fields)
-        self.list_widget.itemSelectionChanged.connect(self.update_button_state)  # Connect to update_button_state method
+        self.list_widget.itemSelectionChanged.connect(self.update_button_state)
         right_layout.addWidget(self.list_widget)
 
-        self.populate_fields_with_defaults()
-
-        # Buttons below list box
+        # Bottom buttons
         btn_layout = QHBoxLayout()
         remove_btn = QPushButton("Delete")
         remove_btn.clicked.connect(lambda: self.delete_selected_item(self.list_widget.currentRow()))
@@ -529,53 +536,9 @@ class ConfigureTrendLinesDialog(ConfigureTemplateDialog):
         right_layout.addLayout(btn_layout)
 
         layout.addLayout(right_layout)
-        self.setLayout(layout)
 
-    def update_item_styles(self, selected_item):
-        if selected_item == -1:
-            return
-        old_trend = self.items[selected_item]
-        new_trend = {
-            **old_trend,
-            'text': self.line_text.text(),
-            'font_size': self.font_size_spinbox.value(),
-            'font_color': self.font_color_button.text(),
-            'line_color': self.line_color_button.text(),
-            'linewidth': self.line_width_spinbox.value(),
-            'linestyle': self.line_style_map[self.line_style_combobox.currentText()],
-        }
-        self.delete_selected_item(selected_item)
-        self.figure_manager.trend_replot(new_trend, self.corr)
-        self.figure_manager.refresh()
-        self.items.append(new_trend)
-        self.refresh_list_box()
-
-    def delete_selected_item(self, selected_item):
-        if selected_item != -1:
-            self.list_widget.takeItem(selected_item)
-            self.figure_manager.selective_item_removal(item_type='trend', selected=selected_item, corr=self.corr)
-
-    def refresh_list_box(self):
-        self.list_widget.clear()
-        for item in self.items:
-            to_display = f"{item['text']}, {item['date1']} -- {item['date2']}"
-            list_item = QListWidgetItem(to_display)
-            list_item.setData(Qt.ItemDataRole.UserRole, item)
-            self.list_widget.addItem(list_item)
-
-    def choose_font_color(self):
-        self.select_color(self.font_color_button)
-
-    def choose_line_color(self):
-        self.select_color(self.line_color_button)
-
-    def set_default_style(self):
-        self.default_item['font_size'] = self.font_size_spinbox.value()
-        self.default_item['font_color'] = self.font_color_button.text()
-        self.default_item['line_color'] = self.line_color_button.text()
-        self.default_item['linewidth'] = self.line_width_spinbox.value()
-        self.default_item['linestyle'] = self.line_style_map[self.line_style_combobox.currentText()]
-        self.accept()
+    def update_button_state(self):
+        self.update_btn.setEnabled(len(self.list_widget.selectedItems()) > 0)
 
     def populate_fields(self, current):
         if current:
@@ -587,8 +550,7 @@ class ConfigureTrendLinesDialog(ConfigureTemplateDialog):
             self.line_width_spinbox.setValue(item_data.get('linewidth', 1))
             style_value = item_data.get('linestyle', '-')
             style_key = next(key for key, value in self.line_style_map.items() if value == style_value)
-            index = self.line_style_combobox.findText(style_key)
-            self.line_style_combobox.setCurrentIndex(index)
+            self.line_style_combobox.setCurrentIndex(self.line_style_combobox.findText(style_key))
 
     def populate_fields_with_defaults(self):
         self.font_size_spinbox.setValue(self.default_item['font_size'])
@@ -598,8 +560,70 @@ class ConfigureTrendLinesDialog(ConfigureTemplateDialog):
         self.line_width_spinbox.setValue(self.default_item['linewidth'])
         style_value = self.default_item['linestyle']
         style_key = next(key for key, value in self.line_style_map.items() if value == style_value)
-        index = self.line_style_combobox.findText(style_key)
-        self.line_style_combobox.setCurrentIndex(index)
+        self.line_style_combobox.setCurrentIndex(self.line_style_combobox.findText(style_key))
+
+    def update_item_styles(self, selected_item):
+        if selected_item == -1:
+            return
+
+        old_trend = self.items[selected_item]
+        new_trend = {
+            **old_trend,
+            'text': self.line_text.text(),
+            'font_size': self.font_size_spinbox.value(),
+            'font_color': self.font_color_button.text(),
+            'line_color': self.line_color_button.text(),
+            'linewidth': self.line_width_spinbox.value(),
+            'linestyle': self.line_style_map[self.line_style_combobox.currentText()],
+        }
+
+        user_col = self.event_bus.emit('get_current_trend_column')
+        col_instance = self.data_manager.plot_columns[user_col]
+        trend_set = col_instance.get_trend_set()
+        if trend_set:
+            trend_elements, trend_data = trend_set[selected_item]
+
+            # Update trend elements styling
+            trend_elements['trend_line'].set_color(new_trend['line_color'])
+            trend_elements['trend_line'].set_linewidth(new_trend['linewidth'])
+            trend_elements['trend_line'].set_linestyle(new_trend['linestyle'])
+            if trend_elements['upper_line']:
+                trend_elements['upper_line'].set_linestyle(new_trend['linestyle'])
+            if trend_elements['lower_line']:
+                trend_elements['lower_line'].set_linestyle(new_trend['linestyle'])
+            trend_elements['cel_label'].set_color(new_trend['font_color'])
+            trend_elements['cel_label'].set_size(new_trend['font_size'])
+            trend_elements['cel_label'].set_text(new_trend['text'])
+
+            # Update trend data dictionary
+            trend_data.update(new_trend)
+
+            self.figure_manager.refresh()
+            self.refresh_list_box()
+
+    def refresh_list_box(self):
+        self.list_widget.clear()
+        for item in self.items:
+            to_display = f"{item['text']}\n{item['date1']} --> {item['date2']}"
+            list_item = QListWidgetItem(to_display)
+            list_item.setData(Qt.ItemDataRole.UserRole, item)
+            self.list_widget.addItem(list_item)
+
+    def set_default_style(self):
+        self.default_item.update({
+            'font_size': self.font_size_spinbox.value(),
+            'font_color': self.font_color_button.text(),
+            'line_color': self.line_color_button.text(),
+            'linewidth': self.line_width_spinbox.value(),
+            'linestyle': self.line_style_map[self.line_style_combobox.currentText()]
+        })
+        self.accept()
+
+    def choose_font_color(self):
+        self.select_color(self.font_color_button)
+
+    def choose_line_color(self):
+        self.select_color(self.line_color_button)
 
     def select_color(self, button):
         color = QColorDialog.getColor()
@@ -609,6 +633,14 @@ class ConfigureTrendLinesDialog(ConfigureTemplateDialog):
     def set_color_button_style(self, button, color):
         button.setStyleSheet(f'border: 3px solid {color};')
         button.setText(color)
+
+    def delete_selected_item(self, selected_item):
+        if selected_item != -1:
+            col_instance = self.data_manager.plot_columns[self.user_col]
+            col_instance.remove_trend(selected_item)
+            self.list_widget.takeItem(selected_item)
+            self.setGeometry(300, 300, 400, 300)
+            self.figure_manager.refresh()
 
 
 class SupportDevDialog(QDialog):
@@ -644,8 +676,7 @@ class SupportDevDialog(QDialog):
             "<li>If you use this in an official capacity, please acknowledge by linking to my GitHub: "
             "<a href='https://github.com/SJV-S/OpenCelerator'>https://github.com/SJV-S/OpenCelerator</a></li>"
             "</ul>"
-            "<p>The email below can also be used to contact me about other job opportunities.</p>"
-            "<p>You can also send me a request to join the OpenCelerator group chat.</p>"
+            "<p>The email below can also be used to contact me about job opportunities.</p>"
             "<p>Contact: <a href='mailto:opencelerator.9qpel@simplelogin.com'>opencelerator.9qpel@simplelogin.com</a></p>"
         )
 
@@ -899,21 +930,25 @@ class DataColumnMappingDialog(QDialog):
         'DD-MM-YY': '%d-%m-%y'
     }
 
-    field_explanations = {
-        'Date': 'Must contain complete dates – day, month, and year. The exact date format should be handled automatically in most cases.',
-        'Dot': 'Expected to be raw counts. Will be divided by the timing floor automatically when using minute charts.',
-        'X': 'Expected to be raw counts. Will be divided by the timing floor automatically when using minute charts.',
-        'Floor': 'Expected to be minutes. Decimal values work fine. The inverse is charted automatically.',
-        'Misc': 'Any other extra data you want. It will not be divided by the timing floor.',
-        'date_format': "The date format could not be inferred. A qualified guess has been made.",
-    }
-
     def __init__(self, parent, file_path):
         super().__init__(parent)
         self.data_manager = DataManager()
         self.event_bus = EventBus()
         self.file_path = file_path
         self.dropdowns_dict = {}
+        self.misc_dropdowns = []
+
+        # Control variables
+        self.is_minute_chart = 'Minute' in self.data_manager.chart_data['type']
+        minute_chart_msg = 'Expected to be raw counts. Will be divided by the timing floor automatically.'
+
+        self.field_explanations = {
+            'Date': 'Must contain complete dates – day, month, and year. The exact date format should be handled automatically in most cases.',
+            'Dot': f'Something to increase. {minute_chart_msg if self.is_minute_chart else ""}',
+            'X': f'Something to decrease. {minute_chart_msg if self.is_minute_chart else ""}',
+            'Floor': 'Expected to be minutes. Decimal values work fine. The inverse is charted automatically.',
+            'date_format': "The date format could not be inferred. A qualified guess has been made.",
+        }
 
         self._setup_ui()
         self._load_data()
@@ -923,25 +958,59 @@ class DataColumnMappingDialog(QDialog):
 
     def _setup_ui(self):
         self.setStyleSheet("""QWidget {font-size: 12pt; font-style: normal;}""")
-
         self.setWindowTitle("Column Mapping")
-        self.setFixedSize(350, 350)
+        self.setMinimumSize(350, 450)
 
-        layout = QVBoxLayout()
-        layout.setSpacing(10)
-        layout.setContentsMargins(20, 20, 20, 20)
+        main_layout = QVBoxLayout()
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(20, 20, 20, 20)
 
         title = QLabel("What data columns will you be using?")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
+        main_layout.addWidget(title)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        container = QWidget()
+        scroll_layout = QVBoxLayout(container)
 
         self.form_layout = QFormLayout()
         self.form_layout.setSpacing(10)
         self.form_layout.setContentsMargins(0, 10, 0, 10)
-        layout.addLayout(self.form_layout)
+        scroll_layout.addLayout(self.form_layout)
 
-        self._add_button_row(layout)
-        self.setLayout(layout)
+        self.misc_layout = QVBoxLayout()
+        scroll_layout.addLayout(self.misc_layout)
+
+        # Plus button inside scroll area
+        self.add_misc_button = QPushButton()
+        self.add_misc_button.setToolTip('Add column')
+        self.add_misc_button.setIcon(QIcon(':/images/plus-solid.svg'))
+        self.add_misc_button.setStyleSheet("""
+           QPushButton {
+               border: 1px solid #ccc !important;
+               border-radius: 16px !important;
+               margin: 0px !important;
+               padding: 0px !important;
+               min-width: 32px !important;
+               min-height: 32px !important;
+               max-width: 32px !important; 
+               max-height: 32px !important;
+           }
+           QPushButton:hover {
+               background-color: #f0f0f0;
+           }
+        """)
+        self.add_misc_button.clicked.connect(self.add_misc_dropdown)
+        scroll_layout.addWidget(self.add_misc_button, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        scroll.setWidget(container)
+        main_layout.addWidget(scroll)
+
+        self._add_button_row(main_layout)
+        self.setLayout(main_layout)
 
     def _load_data(self):
         try:
@@ -954,17 +1023,20 @@ class DataColumnMappingDialog(QDialog):
 
             self.df = self.df.loc[:, ~self.df.columns.str.contains('^Unnamed')]
             self.df = self.df[self.df.columns[:20]]
+            self.df = self.df.fillna(0)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to import data file: {str(e)}")
             self.reject()
 
     def _setup_column_filters(self):
-        self.date_columns = self._lazy_check(self.df, pattern=self.date_pattern)
+        self.date_columns = self._lazy_check(self.df, pattern=self.date_pattern, date_check=True)
         self.numeric_columns = self._lazy_check(self.df, pattern=self.numeric_pattern)
 
     def _create_info_label(self, tooltip_text):
         info_label = QLabel()
-        info_label.setPixmap(QPixmap(":/images/circle-question-regular.svg").scaled(16, 16, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        info_label.setPixmap(
+            QPixmap(":/images/circle-question-regular.svg").scaled(16, 16, Qt.AspectRatioMode.KeepAspectRatio,
+                                                                   Qt.TransformationMode.SmoothTransformation))
         info_label.setToolTip(f"<p style='white-space: normal; width: 300px;'>{tooltip_text}</p>")
         return info_label
 
@@ -976,7 +1048,8 @@ class DataColumnMappingDialog(QDialog):
         if on_change:
             dropdown.currentTextChanged.connect(on_change)
 
-        info_label = self._create_info_label(self.field_explanations[field_name])
+        tooltip_text = self.field_explanations.get(field_name.split()[0], "Additional data column")
+        info_label = self._create_info_label(tooltip_text)
 
         row_layout = QHBoxLayout()
         row_layout.addWidget(dropdown)
@@ -988,7 +1061,6 @@ class DataColumnMappingDialog(QDialog):
     def _create_date_controls(self):
         self.date_dropdown = self._create_dropdown_row('Date', self.date_columns, self.check_date_format_warning)
 
-        # Date format controls
         self.date_format_row = QWidget()
         date_format_layout = QHBoxLayout(self.date_format_row)
         date_format_layout.setContentsMargins(0, 0, 0, 0)
@@ -1009,11 +1081,26 @@ class DataColumnMappingDialog(QDialog):
         self.format_label.hide()
         self.date_format_row.hide()
 
+        # Auto-select first date column if any exist
+        if self.date_columns:
+            self.date_dropdown.setCurrentText(self.date_columns[0])
+
     def _create_field_dropdowns(self):
-        for field in ['Dot', 'X', 'Floor', 'Misc']:
+        if self.is_minute_chart:
+            dropdown = self._create_dropdown_row('Floor', self.numeric_columns, lambda *args: self.on_dropdown_changed('Floor'))
+            self.dropdowns_dict['Floor'] = dropdown
+
+        for field in ['Dot', 'X']:
             dropdown = self._create_dropdown_row(field, self.numeric_columns,
                                                  lambda *args, f=field: self.on_dropdown_changed(f))
             self.dropdowns_dict[field] = dropdown
+
+    def add_misc_dropdown(self):
+        misc_idx = len(self.misc_dropdowns)
+        dropdown = self._create_dropdown_row(f'M{misc_idx + 1}', self.numeric_columns,
+                                             lambda *args: self.on_dropdown_changed(f'M{misc_idx + 1}'))
+        self.misc_dropdowns.append(dropdown)
+        self.dropdowns_dict[f'Misc {misc_idx + 1}'] = dropdown
 
     def _add_button_row(self, layout):
         button_layout = QHBoxLayout()
@@ -1032,12 +1119,12 @@ class DataColumnMappingDialog(QDialog):
 
         layout.addLayout(button_layout)
 
-    @staticmethod
-    def _lazy_check(df, pattern, threshold=0.8, check_limit=10):
+    def _lazy_check(self, df, pattern, threshold=0.8, check_limit=20, date_check=False):
         matching_columns = []
-        for col in df.columns:
+        cols_to_check = df.columns if date_check else [col for col in df.columns if col not in self.date_columns]
+        for col in cols_to_check:
             matches = 0
-            to_check = df[col][:check_limit]
+            to_check = df[col].dropna()[:check_limit]
             total = len(to_check)
 
             for cell in to_check.astype(str):
@@ -1047,21 +1134,56 @@ class DataColumnMappingDialog(QDialog):
             if matches / total > threshold:
                 matching_columns.append(col)
 
+        # If no matches found, try partial date detection
+        if not matching_columns and date_check:
+            min_valid_year = pd.Timestamp.min.year
+            max_valid_year = pd.Timestamp.max.year
+
+            for col in df.columns:
+                matches = 0
+                to_check = df[col].dropna()[:check_limit]
+                total = len(to_check)
+
+                for cell in to_check.astype(str):
+                    value_str = str(cell).strip()
+
+                    # Try year-only format
+                    if value_str.isdigit() and len(value_str) == 4:
+                        year = int(value_str)
+                        if min_valid_year <= year <= max_valid_year:
+                            matches += 1
+                            continue
+
+                    # Try year/month or month/year format
+                    parts = value_str.replace('/', '-').replace('.', '-').split('-')
+                    if len(parts) == 2:
+                        try:
+                            if len(parts[0]) == 4:  # YYYY/MM
+                                year, month = int(parts[0]), int(parts[1])
+                                if 1 <= month <= 12 and min_valid_year <= year <= max_valid_year:
+                                    matches += 1
+                            elif len(parts[1]) == 4:  # MM/YYYY
+                                month, year = int(parts[0]), int(parts[1])
+                                if 1 <= month <= 12 and min_valid_year <= year <= max_valid_year:
+                                    matches += 1
+                        except ValueError:
+                            continue
+
+                if matches / total > threshold:
+                    matching_columns.append(col)
+
         return matching_columns
 
     def on_dropdown_changed(self, field_changed):
-        # Block all dropdowns to prevent recursion
         for dropdown in self.dropdowns_dict.values():
             dropdown.blockSignals(True)
 
-        # Get all selected columns
         all_selected_columns = []
         for field in self.dropdowns_dict.keys():
             selected_column = self.dropdowns_dict[field].currentText()
             if selected_column != self.column_placeholder:
                 all_selected_columns.append(selected_column)
 
-        # Update options in fields
         for field in self.dropdowns_dict.keys():
             if field != field_changed:
                 dropdown = self.dropdowns_dict[field]
@@ -1080,22 +1202,12 @@ class DataColumnMappingDialog(QDialog):
                         dropdown.setEnabled(True)
                         dropdown.setStyleSheet("QComboBox { background-color: white; }")
 
-        # Unblock all dropdowns
         for dropdown in self.dropdowns_dict.values():
             dropdown.blockSignals(False)
 
     def check_date_format_warning(self):
-        """
-        Check if the selected date column needs manual format selection.
-        If pandas can't automatically infer the date format:
-        - Show the format selector and its label
-        - Try to detect the correct format
-        - Set that format in the dropdown
-        Otherwise hide the format selector and its label.
-        """
         date_col = self.date_dropdown.currentText()
 
-        # Hide everything if placeholder is selected
         if date_col == self.column_placeholder:
             self.format_label.hide()
             self.date_format_row.hide()
@@ -1111,11 +1223,9 @@ class DataColumnMappingDialog(QDialog):
                 falls_back_to_dateutil = True
 
         if falls_back_to_dateutil:
-            # Show both label and controls when format needed
             self.format_label.show()
             self.date_format_row.show()
 
-            # Try each format to find a match
             for label, format_string in self.date_format_map.items():
                 sample_date = self.df[date_col].dropna().iloc[0]
                 try:
@@ -1127,7 +1237,6 @@ class DataColumnMappingDialog(QDialog):
                 except Exception:
                     continue
         else:
-            # Hide both label and controls when format not needed
             self.format_label.hide()
             self.date_format_row.hide()
             self.date_format_dropdown.setCurrentText('Automatic')
@@ -1135,24 +1244,27 @@ class DataColumnMappingDialog(QDialog):
         return falls_back_to_dateutil
 
     def confirm_mapping(self):
-        column_keys = ['c', 'i', 'm', 'o']
         column_map = {'d': self.date_dropdown.currentText()}
 
-        for dropdown, key in zip(self.dropdowns_dict.values(), column_keys):
-            if dropdown.currentText() != self.column_placeholder:
-                column_map[key] = dropdown.currentText()
+        field_key_map = {'Dot': 'c', 'X': 'i', 'Floor': 'm'}
+        for field, key in field_key_map.items():
+            if field in self.dropdowns_dict and self.dropdowns_dict[field].currentText() != self.column_placeholder:
+                column_map[key] = self.dropdowns_dict[field].currentText()
+
+        misc_fields = [d for d in self.dropdowns_dict if d.startswith('Misc')]
+        for idx, field in enumerate(misc_fields):
+            if self.dropdowns_dict[field].currentText() != self.column_placeholder:
+                column_map[f'o{idx}'] = self.dropdowns_dict[field].currentText()
 
         if self.date_format_dropdown.currentText() == 'Automatic':
             date_format = None
         else:
             date_format = self.date_format_map[self.date_format_dropdown.currentText()]
-            # Modify seperator if necessary
             date_col = column_map['d']
             sample_date = self.df[date_col].dropna().iloc[0]
             separator = next(char for char in sample_date if char in '/-.')
             date_format = date_format.replace('-', separator)
 
-        # Save in chart data
         self.data_manager.chart_data['column_map'] = column_map
         self.data_manager.chart_data['date_format'] = date_format
 

@@ -4,6 +4,7 @@ class EventBus:
     debug_subscribe = False
     debug_trigger = False
     debug_emit = False
+    debug_refresh = False
     debug_all = False
 
     def __new__(cls):
@@ -42,14 +43,13 @@ class EventBus:
 
     def emit(self, event, data=None):
         result = None
-        if self.debug_all or self.debug_emit:
+        if self.debug_refresh and event == 'refresh_chart':
             print(f"[DEBUG] Emitting event: {event}")
-            print(f"[DEBUG] Event data: {data}")
-            print(f"[DEBUG] Subscribers found: {event in self.subscribers}")
-            print(f"[DEBUG] Trigger found: {event in self.event_triggers}")
 
         if event in self.subscribers:
             if self.debug_all or self.debug_emit:
+                print(f"[DEBUG] Subscribers found: {event in self.subscribers}")
+                print(f"[DEBUG] Trigger found: {event in self.event_triggers}")
                 print(f"[DEBUG] Processing {len(self.subscribers[event])} subscribers")
             for callback, has_data in self.subscribers[event]:
                 if self.debug_all or self.debug_emit:

@@ -22,16 +22,17 @@ import warnings
 import error_logging
 logger = error_logging.logger
 
-# Only uncomment for Windows splash screen
-# import tempfile
-# if "NUITKA_ONEFILE_PARENT" in os.environ:
-#     splash_filename = os.path.join(
-#         tempfile.gettempdir(),
-#         "onefile_%d_splash_feedback.tmp" % int(os.environ["NUITKA_ONEFILE_PARENT"]),
-#     )
-#     if os.path.exists(splash_filename):
-#         os.unlink(splash_filename)
-# print("Splash Screen has been removed")
+# Windows splash screen
+if os.name == 'nt':  # Check if OS is Windows
+    import tempfile
+    if "NUITKA_ONEFILE_PARENT" in os.environ:
+        splash_filename = os.path.join(
+            tempfile.gettempdir(),
+            "onefile_%d_splash_feedback.tmp" % int(os.environ["NUITKA_ONEFILE_PARENT"]),
+        )
+        if os.path.exists(splash_filename):
+            os.unlink(splash_filename)
+    print("Splash Screen has been removed")
 
 # I had to use Y and M instead of YE and ME because the executable won't currently run with YE and ME
 warnings.filterwarnings(action='ignore', category=FutureWarning, message=".*'Y' is deprecated.*")
@@ -60,12 +61,11 @@ class ChartApp(QMainWindow):
         self.event_bus.subscribe("aim_mode_selected", lambda: self.change_mode(3), has_data=False)
         self.event_bus.subscribe("celeration_mode_selected", lambda: self.change_mode(4), has_data=False)
         self.event_bus.subscribe("note_mode_selected", lambda: self.change_mode(5), has_data=False)
-        self.event_bus.subscribe('sync_view_settings', self.sync_view_settings)
 
         # Event subscriptions with data
         self.event_bus.subscribe('save_decision', self.save_decision, has_data=True)
 
-        # Event triggers
+        # Event chains
         self.event_bus.add_event_trigger('new_chart', 'cleanup_after_chart_update')
 
         # Setup interaction handling
@@ -73,7 +73,7 @@ class ChartApp(QMainWindow):
         self.previous_mode = None
         self.manual_mode_widget = None
         # Initialize the main window properties
-        self.window_title_str = 'OpenCelerator v0.9.0'
+        self.window_title_str = 'OpenCelerator v0.10.0'
         self.setWindowTitle(self.window_title_str)
         self.setWindowIcon(QIcon(':/images/opencelerator_logo_no_text.svg'))
 
@@ -293,10 +293,19 @@ class ChartApp(QMainWindow):
         self.button_trend.setStyleSheet(self.get_mode_button_style(selected if index == 4 else non_selected))
         self.button_note.setStyleSheet(self.get_mode_button_style(selected if index == 5 else non_selected))
 
-        # Refresh note listbox when switching to note mode
+        # Run for selected mode
         if index == 5:
+            # Refresh note listbox when switching to note mode
             self.event_bus.emit('refresh_note_listbox')
             self.event_bus.emit('refresh_note_locations')
+        elif index == 4:
+            pass
+            # self.event_bus.emit('highlight_selected_data_series')
+        elif index == 1:
+            self.event_bus.emit('refresh_style_columns')
+            # self.event_bus.emit('highlight_style_user_col')
+        elif index == 0:
+            pass
 
         # Cleanup edit objects from previous mode
         if self.previous_mode == 2:
@@ -304,14 +313,15 @@ class ChartApp(QMainWindow):
         elif self.previous_mode == 3:
             self.figure_manager.aim_cleanup()
         elif self.previous_mode == 4:
-            self.figure_manager.trend_cleanup()
+            self.event_bus.emit('trend_cleanup')
         elif self.previous_mode == 1:
-            self.figure_manager.data_styling_cleanup()
-            self.event_handlers.reset_data_styling_date_range()
+            self.event_bus.emit('style_cleanup')
         elif self.previous_mode == 5:
             self.figure_manager.hover_manager.disable_note_crosshair()
             self.event_bus.emit('remove_note_locations')
             self.event_bus.emit('clear_previous_individual_note_object', data={'refresh': True})
+        elif self.previous_mode == 0:
+            self.event_bus.emit('view_column_dropdown_update_label')
 
     def setup_home_tab(self):
         self.tab_home.setContentsMargins(0, 0, 0, 0)  # Add this line to remove margins from the tab
@@ -414,6 +424,12 @@ class ChartApp(QMainWindow):
         self.trend_mode_widget = chart_mode.TrendModeWidget(self.figure_manager)
         self.note_mode_widget = chart_mode.NoteModeWidget(self.figure_manager)
 
+        # Sync on boot
+        self.event_bus.emit('sync_grid_checkboxes')
+        self.event_bus.emit('sync_misc_checkboxes')
+        self.event_bus.emit('apply_all_grid_settings')
+        self.event_bus.emit('apply_all_misc_settings')
+
         self.stacked_widget.addWidget(self.view_mode_widget)
         self.stacked_widget.addWidget(self.manual_mode_widget)
         self.stacked_widget.addWidget(self.phase_mode_widget)
@@ -497,15 +513,19 @@ class ChartApp(QMainWindow):
 
         chart_type_label = QLabel("Type")
         chart_type_settings_layout.addWidget(chart_type_label)
+        chart_type_options = [
+            ('Daily', 'Daily'),
+            ('Weekly', 'Weekly'),
+            ('Monthly', 'Monthly'),
+            ('Yearly', 'Yearly'),
+            ('DailyMinute', 'DailyMinute'),
+            ('WeeklyMinute', 'WeeklyMinute'),
+            ('MonthlyMinute', 'MonthlyMinute'),
+            ('YearlyMinute', 'YearlyMinute')
+        ]
         self.chart_type_settings_dropdown = QComboBox()
-        self.chart_type_settings_dropdown.addItem('Daily', 'Daily')
-        self.chart_type_settings_dropdown.addItem('Weekly', 'Weekly')
-        self.chart_type_settings_dropdown.addItem('Monthly', 'Monthly')
-        self.chart_type_settings_dropdown.addItem('Yearly', 'Yearly')
-        self.chart_type_settings_dropdown.addItem('DailyMinute', 'DailyMinute')
-        self.chart_type_settings_dropdown.addItem('WeeklyMinute', 'WeeklyMinute')
-        self.chart_type_settings_dropdown.addItem('MonthlyMinute', 'MonthlyMinute')
-        self.chart_type_settings_dropdown.addItem('YearlyMinute', 'YearlyMinute')
+        for display, value in chart_type_options:
+            self.chart_type_settings_dropdown.addItem(display, value)
         chart_type_settings_layout.addWidget(self.chart_type_settings_dropdown)
 
         # Load chart preference
@@ -515,26 +535,6 @@ class ChartApp(QMainWindow):
             self.chart_type_settings_dropdown.setCurrentIndex(index)
         self.chart_type_settings_dropdown.currentIndexChanged.connect(self.event_handlers.change_chart_type)
         settings_layout.addWidget(chart_type_settings_group)
-
-        # Set chart aggregation
-        settings_data_agg_label = QLabel('Data aggregation')
-        self.settings_data_agg = QComboBox()
-        self.settings_data_agg.addItem('Sum', 'sum')
-        self.settings_data_agg.addItem('Mean', 'mean')
-        self.settings_data_agg.addItem('Median', 'median')
-        self.settings_data_agg.addItem('Max', 'max')
-        self.settings_data_agg.addItem('Min', 'min')
-        self.settings_data_agg.addItem('Stack', 'stack')
-        # Load chart setting
-        current_value = self.data_manager.chart_data['chart_data_agg']
-        index = self.settings_data_agg.findData(current_value)
-        if index != -1:
-            self.settings_data_agg.setCurrentIndex(index)
-        # Add to layout
-        chart_type_settings_layout.addWidget(settings_data_agg_label)
-        chart_type_settings_layout.addWidget(self.settings_data_agg)
-        # Connect function
-        self.settings_data_agg.currentIndexChanged.connect(self.event_handlers.on_agg_current_index_changed)
 
         # Zero counts below timing floor or don't display
         settings_zero_count_handling_label = QLabel('Zero counts')
@@ -655,64 +655,6 @@ class ChartApp(QMainWindow):
                 self.trend_mode_widget.trend_start_date_input.setDate(QDate(date.year, date.month, date.day))
             elif order == 'second':
                 self.trend_mode_widget.trend_end_date_input.setDate(QDate(date.year, date.month, date.day))
-
-    def sync_view_settings(self):
-        # Set checkboxes (will only run here if there's a change, so unreliable)
-        settings = self.data_manager.chart_data['view_check']
-        self.view_mode_widget.minor_grid_check.setChecked(settings['minor_grid'])
-        self.view_mode_widget.major_grid_check.setChecked(settings['major_grid'])
-        self.view_mode_widget.dots_check.setChecked(settings['dots'])
-        self.view_mode_widget.xs_check.setChecked(settings['xs'])
-        self.view_mode_widget.dot_trends_check.setChecked(settings['dot_trends'])
-        self.view_mode_widget.x_trends_check.setChecked(settings['x_trends'])
-        self.view_mode_widget.timing_floor_check.setChecked(settings['timing_floor'])
-        self.view_mode_widget.timing_grid_check.setChecked(settings['timing_grid'])
-        self.view_mode_widget.phase_lines_check.setChecked(settings['phase_lines'])
-        self.view_mode_widget.aims_check.setChecked(settings['aims'])
-        self.view_mode_widget.dot_bounce_check.setChecked(settings['dot_bounce'])
-        self.view_mode_widget.x_bounce_check.setChecked(settings['x_bounce'])
-        self.view_mode_widget.dot_est_check.setChecked(settings['dot_est'])
-        self.view_mode_widget.x_est_check.setChecked(settings['x_est'])
-        self.view_mode_widget.fan_check.setChecked(settings['fan'])
-        self.view_mode_widget.misc_point_check.setChecked(settings['misc'])
-
-        # Preventing a double redrawing
-        self.view_mode_widget.credit_check.blockSignals(True)
-        self.view_mode_widget.credit_check.setChecked(settings['credit_spacing'])
-        self.view_mode_widget.credit_check.blockSignals(False)
-
-        # Prevent double run
-        self.settings_data_agg.blockSignals(True)
-        index = self.settings_data_agg.findData(self.data_manager.chart_data['chart_data_agg'])
-        self.settings_data_agg.setCurrentIndex(index)
-        self.settings_data_agg.blockSignals(False)
-
-        # Prevent double run
-        self.settings_zero_count_handling.blockSignals(True)
-        index = 0 if self.data_manager.chart_data['place_below_floor'] else 1
-        self.settings_zero_count_handling.setCurrentIndex(index)
-        self.settings_zero_count_handling.blockSignals(False)
-
-        # Update view checks
-        refresh = False
-        self.figure_manager.view_minor_gridlines(settings['minor_grid'], refresh=refresh)
-        self.figure_manager.view_major_gridlines(settings['major_grid'], refresh=refresh)
-        self.figure_manager.view_dots(settings['dots'], refresh=refresh)
-        self.figure_manager.view_xs(settings['xs'], refresh=refresh)
-        self.figure_manager.view_dot_trend(settings['dot_trends'], refresh=refresh)
-        self.figure_manager.view_x_trend(settings['x_trends'], refresh=refresh)
-        self.figure_manager.view_floor(settings['timing_floor'], refresh=refresh)
-        self.figure_manager.view_floor_grid(settings['timing_grid'], refresh=refresh)
-        self.figure_manager.view_phase_lines(settings['phase_lines'], refresh=refresh)
-        self.figure_manager.view_aims(settings['aims'], refresh=refresh)
-        self.figure_manager.view_dot_bounce(settings['dot_bounce'], refresh=refresh)
-        self.figure_manager.view_x_bounce(settings['x_bounce'], refresh=refresh)
-        self.figure_manager.view_dot_est(settings['dot_est'], refresh=refresh)
-        self.figure_manager.view_x_est(settings['x_est'], refresh=refresh)
-        self.figure_manager.view_update_celeration_fan(settings['fan'], refresh=refresh)
-        self.figure_manager.view_misc_points(settings['misc'], refresh=refresh)
-
-        self.figure_manager.refresh()  # Only refresh canvas once!
 
     def save_decision(self, event=None):
         autosave = self.data_manager.user_preferences['autosave']
@@ -933,12 +875,6 @@ class EventHandlers:
         self.event_bus.subscribe('save_chart_as_recent', self.save_recent, has_data=True)
         self.event_bus.subscribe('trigger_user_prompt', self.trigger_user_prompt, has_data=True)
 
-    def reset_data_styling_date_range(self):
-        d1 = self.figure_manager.x_to_date[0].strftime(self.data_manager.standard_date_string)
-        d2 = self.figure_manager.x_to_date[max(self.figure_manager.Chart.date_to_pos.values())].strftime(self.data_manager.standard_date_string)
-        self.chart_app.manual_mode_widget.populate_fields_with_defaults()
-        self.chart_app.manual_mode_widget.date_range_label.setText(f'{d1} ~ {d2}')
-
     def show_date_dialog(self):
         dialog = StartDateDialog(self.chart_app)
         if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -1047,7 +983,7 @@ class EventHandlers:
     def update_cel_fan(self, status):
         self.data_manager.user_preferences['div_deceleration'] = bool(status)
         self.figure_manager.Chart.change_deceleration_symbol(bool(status))
-        self.figure_manager.refresh()
+        self.event_bus.emit('refresh_chart')
 
     def set_data_folder(self):
         folder_path = QFileDialog.getExistingDirectory(self.chart_app, "Select Folder", QDir.homePath())
@@ -1055,10 +991,6 @@ class EventHandlers:
             self.chart_app.settings_folder_btn.setText(folder_path)
             self.chart_app.settings_folder_btn.setToolTip(folder_path)
             self.data_manager.user_preferences['home_folder'] = folder_path
-
-    def on_agg_current_index_changed(self, index):
-        self.data_manager.chart_data.update({'chart_data_agg': self.chart_app.settings_data_agg.itemData(index)})
-        self.event_bus.emit('new_chart', self.data_manager.chart_data['start_date'])
 
     def change_chart_type(self, index):
         new_type = self.chart_app.chart_type_settings_dropdown.itemData(index)
@@ -1068,8 +1000,6 @@ class EventHandlers:
     def cleanup_after_chart_update(self):
         # Make sure current mode is enabled for key handling
         self.chart_app.set_interaction_mode()
-        # Reset data styling range based new chart
-        self.reset_data_styling_date_range()
         # Enable or disable timing checkboxes for view mode
         self.chart_app.view_mode_widget.update_timing_checkboxes()
 
@@ -1098,6 +1028,26 @@ class EventHandlers:
             new_window_title = f"{self.chart_app.window_title_str} | {file_name} | {truncated_import_path}"
             if self.chart_app.windowTitle() != new_window_title:
                 self.chart_app.setWindowTitle(new_window_title)
+
+        self.event_bus.emit('refresh_trend_column_list')
+        self.event_bus.emit('refresh_style_columns')
+
+        # Set trend fit after chart type
+        chart_mapping = {
+            'Daily': 'Weekly (standard)',
+            'Weekly': 'Monthly (Weekly x4)',
+            'Monthly': 'Yearly (Weekly x52)',
+            'Yearly': 'Yearly (Weekly x52)',
+            'DailyMinute': 'Weekly (standard)',
+            'WeeklyMinute': 'Monthly (Weekly x4)',
+            'MonthlyMinute': 'Yearly (Weekly x52)',
+            'YearlyMinute': 'Yearly (Weekly x52)'
+        }
+        chart_type = self.data_manager.chart_data['type']
+        cel_unit = chart_mapping[chart_type]
+        self.event_bus.emit('set_celeration_unit', data={'cel_unit': cel_unit})
+
+        self.event_bus.emit('refresh_view_dropdown')
 
     def change_width(self, new_width):
         self.data_manager.user_preferences['width'] = new_width
@@ -1141,7 +1091,7 @@ class EventHandlers:
                 self.chart_app.aim_mode_widget.aim_end_date_input.setDate(QDate(d2.year, d2.month, d2.day))
 
     def trend_click(self, event):
-        self.figure_manager.trend_on_click(event)
+        self.event_bus.emit('trend_on_click', event)
         self.chart_app.trend_adjust_dates()
 
     def note_click(self, event):
@@ -1156,18 +1106,6 @@ class EventHandlers:
 
     def point_click(self, event):
         self.figure_manager.point_on_click(event)  # Paint temporary magenta lines
-        self.data_adjust_dates()
-
-    def data_adjust_dates(self):
-        result = self.figure_manager.point_adjust_dates()
-        if result:
-            date, order = result
-            new_date = date.strftime(self.data_manager.standard_date_string)
-            d1, sep, d2 = self.chart_app.manual_mode_widget.date_range_label.text().split()
-            if order == 'first':
-                self.chart_app.manual_mode_widget.date_range_label.setText(f'{new_date} {sep} {d2}')
-            elif order == 'second':
-                self.chart_app.manual_mode_widget.date_range_label.setText(f'{d1} {sep} {new_date}')
 
     def test_angle(self, show):
         self.figure_manager.settings_test_angle(show)
