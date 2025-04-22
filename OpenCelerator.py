@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QTabWidget, Q
                                QVBoxLayout, QLabel, QFileDialog, QCheckBox, QComboBox, QMessageBox,
                                QStackedWidget, QDialog, QSpacerItem, QSizePolicy, QSpinBox, QColorDialog, QListWidget,
                                QListWidgetItem)
-from PySide6.QtCore import Qt, QDate, QDir, QKeyCombination, QEvent
+from PySide6.QtCore import Qt, QDate, QDir, QKeyCombination, QEvent, QObject
 from PySide6.QtGui import QPainter, QColor, QIcon, QPixmap, QShortcut, QDragEnterEvent, QDropEvent
 
 import sys
@@ -43,6 +43,7 @@ class ChartApp(QMainWindow):
     def __init__(self):
         super().__init__()
 
+
         # Set widget to accept drops
         self.setAcceptDrops(True)
 
@@ -51,6 +52,8 @@ class ChartApp(QMainWindow):
 
         # Initialize and add the Matplotlib widget to the right panel
         self.data_manager = DataManager()
+        # Set revise chart defaults according to user preferences
+        self.data_manager.default_chart_assessment()
         self.figure_manager = FigureManager(self)
         self.event_bus = EventBus()
 
@@ -61,6 +64,7 @@ class ChartApp(QMainWindow):
         self.event_bus.subscribe("aim_mode_selected", lambda: self.change_mode(3), has_data=False)
         self.event_bus.subscribe("celeration_mode_selected", lambda: self.change_mode(4), has_data=False)
         self.event_bus.subscribe("note_mode_selected", lambda: self.change_mode(5), has_data=False)
+        self.event_bus.subscribe("plot_mode_selected", lambda: self.change_mode(6), has_data=False)
 
         # Event subscriptions with data
         self.event_bus.subscribe('save_decision', self.save_decision, has_data=True)
@@ -73,7 +77,7 @@ class ChartApp(QMainWindow):
         self.previous_mode = None
         self.manual_mode_widget = None
         # Initialize the main window properties
-        self.window_title_str = 'OpenCelerator v0.10.0'
+        self.window_title_str = 'OpenCelerator v0.11.0'
         self.setWindowTitle(self.window_title_str)
         self.setWindowIcon(QIcon(':/images/opencelerator_logo_no_text.svg'))
 
@@ -137,12 +141,14 @@ class ChartApp(QMainWindow):
         self.shortcut_aim = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_A), self)
         self.shortcut_trend = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_C), self)
         self.shortcut_note = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_M), self)
+        self.shortcut_plot = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_G), self)
         self.shortcut_view.activated.connect(lambda: [self.event_bus.emit('view_mode_selected'), self.tabs.setCurrentIndex(0)])
         self.shortcut_manual.activated.connect(lambda: [self.event_bus.emit('style_mode_selected'), self.tabs.setCurrentIndex(0)])
         self.shortcut_phase.activated.connect(lambda: [self.event_bus.emit('phase_mode_selected'), self.tabs.setCurrentIndex(0)])
         self.shortcut_aim.activated.connect(lambda: [self.event_bus.emit('aim_mode_selected'), self.tabs.setCurrentIndex(0)])
         self.shortcut_trend.activated.connect(lambda: [self.event_bus.emit('celeration_mode_selected'), self.tabs.setCurrentIndex(0)])
         self.shortcut_note.activated.connect(lambda: [self.event_bus.emit('note_mode_selected'), self.tabs.setCurrentIndex(0)])
+        self.shortcut_plot.activated.connect(lambda: [self.event_bus.emit('plot_mode_selected'), self.tabs.setCurrentIndex(0)])
 
         # Tab key bindings
         self.shortcut_home = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_H), self)
@@ -166,16 +172,26 @@ class ChartApp(QMainWindow):
 
         # Control variables
         self.current_connection = None
+        self.legend_pick_cid = None
+        self.credit_pick_cid = None
+        self.fan_pick_cid = None
+        self.fan_release_cid = None
+        self.fan_motion_cid = None
         self.xy_coord = None
         self.save_preferences_upon_close = True
 
     def eventFilter(self, obj, event):
+        # Check if obj is a valid QObject and event is a valid QEvent
+        if not isinstance(obj, QObject) or not isinstance(event, QEvent):
+            # If not proper types, just return false (don't handle)
+            return False
+
         # Check if the event is a key press event
         if event.type() == QEvent.Type.KeyPress:
             if (event.key() == Qt.Key.Key_Shift and not self.shift_key_down) or \
                     (event.key() == Qt.Key.Key_Alt and not self.alt_key_down):
 
-                # Set appropriate key state
+                # Set key state
                 if event.key() == Qt.Key.Key_Shift:
                     self.shift_key_down = True
                     self.figure_manager.hover_manager.show_lines = True
@@ -292,6 +308,7 @@ class ChartApp(QMainWindow):
         self.button_aim.setStyleSheet(self.get_mode_button_style(selected if index == 3 else non_selected))
         self.button_trend.setStyleSheet(self.get_mode_button_style(selected if index == 4 else non_selected))
         self.button_note.setStyleSheet(self.get_mode_button_style(selected if index == 5 else non_selected))
+        self.button_plot.setStyleSheet(self.get_mode_button_style(selected if index == 6 else non_selected))
 
         # Run for selected mode
         if index == 5:
@@ -299,13 +316,15 @@ class ChartApp(QMainWindow):
             self.event_bus.emit('refresh_note_listbox')
             self.event_bus.emit('refresh_note_locations')
         elif index == 4:
-            pass
-            # self.event_bus.emit('highlight_selected_data_series')
+            self.event_bus.emit('refresh_trend_column_list')
         elif index == 1:
             self.event_bus.emit('refresh_style_columns')
-            # self.event_bus.emit('highlight_style_user_col')
         elif index == 0:
-            pass
+            self.event_bus.emit('refresh_view_dropdown')
+            self.event_bus.emit('view_update_aggregate_dropdown')
+        elif index == 6:
+            self.event_bus.emit('refresh_plot_mode_widget')
+            self.event_bus.emit('update_plot_mode')
 
         # Cleanup edit objects from previous mode
         if self.previous_mode == 2:
@@ -322,6 +341,8 @@ class ChartApp(QMainWindow):
             self.event_bus.emit('clear_previous_individual_note_object', data={'refresh': True})
         elif self.previous_mode == 0:
             self.event_bus.emit('view_column_dropdown_update_label')
+        elif self.previous_mode == 6 and index != 6:
+            self.event_bus.emit('plot_cleanup')
 
     def setup_home_tab(self):
         self.tab_home.setContentsMargins(0, 0, 0, 0)  # Add this line to remove margins from the tab
@@ -383,6 +404,7 @@ class ChartApp(QMainWindow):
         self.button_trend = create_icon_text_button(':/images/celeration.svg', 'Celeration ')
         self.button_note = create_icon_text_button(':/images/note-sticky-regular.svg', 'Notes ')
         self.button_manual = create_icon_text_button(':/images/style-svgrepo-com.svg', 'Style ')
+        self.button_plot = create_icon_text_button(':/images/pen-to-square-regular.svg', 'Plot ')
 
         self.button_view.setStyleSheet(self.get_mode_button_style())
         self.button_manual.setStyleSheet(self.get_mode_button_style())
@@ -390,9 +412,11 @@ class ChartApp(QMainWindow):
         self.button_aim.setStyleSheet(self.get_mode_button_style())
         self.button_trend.setStyleSheet(self.get_mode_button_style())
         self.button_note.setStyleSheet(self.get_mode_button_style())
+        self.button_plot.setStyleSheet(self.get_mode_button_style())
 
         # Add push buttons to the mode selection layout with vertical alignment
         mode_selection_layout.addWidget(self.button_view)
+        mode_selection_layout.addWidget(self.button_plot)
         mode_selection_layout.addWidget(self.button_phase)
         mode_selection_layout.addWidget(self.button_aim)
         mode_selection_layout.addWidget(self.button_trend)
@@ -405,7 +429,8 @@ class ChartApp(QMainWindow):
             2: 'phase',
             3: 'aim',
             4: 'trend',
-            5: 'note'
+            5: 'note',
+            6: 'plot'
         }
 
         # Add mode selection layout directly to the home layout
@@ -423,6 +448,7 @@ class ChartApp(QMainWindow):
         self.aim_mode_widget = chart_mode.AimModeWidget(self.figure_manager)
         self.trend_mode_widget = chart_mode.TrendModeWidget(self.figure_manager)
         self.note_mode_widget = chart_mode.NoteModeWidget(self.figure_manager)
+        self.plot_mode_widget = chart_mode.PlotModeWidget(self.figure_manager)
 
         # Sync on boot
         self.event_bus.emit('sync_grid_checkboxes')
@@ -436,6 +462,7 @@ class ChartApp(QMainWindow):
         self.stacked_widget.addWidget(self.aim_mode_widget)
         self.stacked_widget.addWidget(self.trend_mode_widget)
         self.stacked_widget.addWidget(self.note_mode_widget)
+        self.stacked_widget.addWidget(self.plot_mode_widget)
 
         # Connect push buttons to set interaction mode
         self.button_view.clicked.connect(lambda: self.event_bus.emit("view_mode_selected"))
@@ -444,6 +471,7 @@ class ChartApp(QMainWindow):
         self.button_aim.clicked.connect(lambda: self.event_bus.emit('aim_mode_selected'))
         self.button_trend.clicked.connect(lambda: self.event_bus.emit('celeration_mode_selected'))
         self.button_note.clicked.connect(lambda: self.event_bus.emit('note_mode_selected'))
+        self.button_plot.clicked.connect(lambda: self.event_bus.emit("plot_mode_selected"))
 
         # Stretch at the bottom to push everything up
         self.home_layout.addStretch(1)
@@ -461,25 +489,8 @@ class ChartApp(QMainWindow):
         preferences_group_layout = QVBoxLayout()
         preferences_group.setLayout(preferences_group_layout)
 
-        # Handling for decreasing frequencies
-        settings_decreasing_frequency_label = QLabel('Show deceleration as')
-        settings_decreasing_frequency_handling = QComboBox()
-        settings_decreasing_frequency_handling.addItem('Divisor', True)
-        settings_decreasing_frequency_handling.addItem('Multiple', False)
-
-        # Automatically set the combo box based on the value in user_preferences
-        current_value = self.data_manager.user_preferences['div_deceleration']
-        settings_decreasing_frequency_handling.setCurrentIndex(0 if current_value else 1)
-
-        settings_decreasing_frequency_handling.currentIndexChanged.connect(
-            lambda index: self.event_handlers.update_cel_fan(settings_decreasing_frequency_handling.itemData(index))
-        )
-
-        preferences_group_layout.addWidget(settings_decreasing_frequency_label)
-        preferences_group_layout.addWidget(settings_decreasing_frequency_handling)
-
         # Autosave
-        settings_autosave_label = QLabel('Autosave charts')
+        settings_autosave_label = QLabel('Autosave')
         self.settings_autosave_options = QComboBox()
         self.settings_autosave_options.addItem("On")
         self.settings_autosave_options.addItem("Off")
@@ -493,10 +504,11 @@ class ChartApp(QMainWindow):
         preferences_group_layout.addWidget(self.settings_autosave_options)
 
         # Add button below the start date dropdown
+        full_path = Path(self.data_manager.user_preferences['home_folder'])
+        short_path = Path(*full_path.parts[-1:])
         path_label = QLabel('Default folder')
         preferences_group_layout.addWidget(path_label)
-        self.settings_folder_btn = QPushButton(self.data_manager.user_preferences['home_folder'])
-        self.settings_folder_btn.setStyleSheet("text-align: right;")
+        self.settings_folder_btn = QPushButton(str(short_path))
         self.settings_folder_btn.setToolTip(self.data_manager.user_preferences['home_folder'])
         self.settings_folder_btn.clicked.connect(self.event_handlers.set_data_folder)
         preferences_group_layout.addWidget(self.settings_folder_btn)
@@ -634,8 +646,16 @@ class ChartApp(QMainWindow):
     def set_interaction_mode(self):
         if self.current_connection:
             self.figure_manager.canvas.mpl_disconnect(self.current_connection)
+
+        # Universal connections
+        self.legend_pick_cid = self.figure_manager.canvas.mpl_connect('pick_event', self.figure_manager.view_manager.legend_pick)
+        self.credit_pick_cid = self.figure_manager.canvas.mpl_connect('pick_event', self.figure_manager.view_manager.view_on_credit_line_pick)
+        self.fan_pick_cid = self.figure_manager.canvas.mpl_connect('pick_event', self.figure_manager.drag_fan_manager.on_pick)
+        self.fan_release_cid = self.figure_manager.canvas.mpl_connect('button_release_event', self.figure_manager.drag_fan_manager.on_release)
+        self.fan_motion_cid = self.figure_manager.canvas.mpl_connect('motion_notify_event', self.figure_manager.drag_fan_manager.on_motion)
+
         if self.mode == 0:  # View mode
-            pass  # No interaction
+            pass
         elif self.mode == 1:  # Data mode
             self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.point_click)
         elif self.mode == 2:  # Phase mode
@@ -644,8 +664,10 @@ class ChartApp(QMainWindow):
             self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.aim_click)
         elif self.mode == 4:  # Trend mode
             self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.trend_click)
-        elif self.mode == 5:
+        elif self.mode == 5:  # Note mode
             self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.note_click)
+        elif self.mode == 6:  # Plot mode
+            self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.plot_click)
 
     def trend_adjust_dates(self):
         result = self.figure_manager.trend_adjust_dates()
@@ -687,10 +709,12 @@ class ChartApp(QMainWindow):
                 if event:
                     event.accept()
 
-        elif autosave and not chart_file_path and data_exists:
+        elif not chart_file_path and data_exists:
             data = {'title': "No chart file",
                     'message': 'Save this chart?',
-                    'choice': True}
+                    'choice': True,
+                    'ok_text': 'Yes',
+                    'cancel_text': 'No'}
             accepted = self.event_bus.emit('trigger_user_prompt', data)
             if accepted:
                 self.event_handlers.save_chart(chart_file_path)
@@ -728,14 +752,14 @@ class FilesTab(QWidget):
         layout_chart = QVBoxLayout()
         btn_new = QPushButton('New')
         btn_new.setToolTip('Get default chart')
-        btn_import_delete = QPushButton('Data')
-        btn_import_delete.setToolTip('Import raw data onto existing chart')
-        btn_load = QPushButton('Load')
-        btn_load.setToolTip('Load chart file')
+        btn_import_delete = QPushButton('Import Data')
+        btn_import_delete.setToolTip('Import spreadsheet data onto existing chart')
+        btn_load = QPushButton('Open')
+        btn_load.setToolTip('Open chart file')
         btn_save = QPushButton('Save')
         btn_save.setToolTip('Save chart file (data plus chart settings)')
-        btn_image = QPushButton('Export')
-        btn_image.setToolTip('Export chart as png, jpeg, pdf, or svg')
+        btn_image = QPushButton('Export Chart')
+        btn_image.setToolTip('Get chart as png, jpeg, pdf, or svg')
         layout_chart.addWidget(btn_new)
         layout_chart.addWidget(btn_load)
         layout_chart.addWidget(btn_save)
@@ -795,11 +819,16 @@ class FilesTab(QWidget):
         files_layout.addStretch()  # Prevents the buttons from vertically filling the whole panel
 
     def eventFilter(self, obj, event):
+        # Check if obj is a valid QObject and event is a valid QEvent
+        if not isinstance(obj, QObject) or not isinstance(event, QEvent):
+            # If not proper types, just return false (don't handle)
+            return False
+
         if event.type() == QEvent.Type.KeyPress:
             if event.key() == Qt.Key.Key_Delete or event.key() == Qt.Key.Key_D:
                 if obj == self.lst_recent_charts:
                     self.remove_selected_item(self.lst_recent_charts, 'recent_charts')
-                return True
+                    return True
         return super().eventFilter(obj, event)
 
     def remove_selected_item(self, list_widget, preference_key):
@@ -857,6 +886,9 @@ class FilesTab(QWidget):
 
             # Remove display name of imported/loaded chart
             self.chart_app.setWindowTitle(self.chart_app.window_title_str)
+
+            # Select view mode by default
+            self.event_bus.emit('view_mode_selected')
 
 
 class EventHandlers:
@@ -916,7 +948,7 @@ class EventHandlers:
             return
 
         # Create raw df for chart_data
-        self.data_manager.chart_data['column_map'] = None  # If re-importing
+        self.data_manager.chart_data['column_map'] = {}  # If re-importing
         self.event_bus.emit('column_mapped_raw_data_import', file_path)
 
         # Will be None if user canceled import
@@ -982,13 +1014,14 @@ class EventHandlers:
 
     def update_cel_fan(self, status):
         self.data_manager.user_preferences['div_deceleration'] = bool(status)
-        self.figure_manager.Chart.change_deceleration_symbol(bool(status))
+        self.figure_manager.drag_fan_manager.update_visibility()
         self.event_bus.emit('refresh_chart')
 
     def set_data_folder(self):
         folder_path = QFileDialog.getExistingDirectory(self.chart_app, "Select Folder", QDir.homePath())
         if folder_path:
-            self.chart_app.settings_folder_btn.setText(folder_path)
+            short_path = Path(*Path(folder_path).parts[-1:])
+            self.chart_app.settings_folder_btn.setText(str(short_path))
             self.chart_app.settings_folder_btn.setToolTip(folder_path)
             self.data_manager.user_preferences['home_folder'] = folder_path
 
@@ -996,6 +1029,7 @@ class EventHandlers:
         new_type = self.chart_app.chart_type_settings_dropdown.itemData(index)
         self.data_manager.chart_data['type'] = new_type
         self.event_bus.emit('new_chart', self.data_manager.chart_data['start_date'])
+        self.event_bus.emit('view_mode_selected')
 
     def cleanup_after_chart_update(self):
         # Make sure current mode is enabled for key handling
@@ -1034,20 +1068,21 @@ class EventHandlers:
 
         # Set trend fit after chart type
         chart_mapping = {
-            'Daily': 'Weekly (standard)',
+            'Daily': 'Weekly',
             'Weekly': 'Monthly (Weekly x4)',
-            'Monthly': 'Yearly (Weekly x52)',
-            'Yearly': 'Yearly (Weekly x52)',
+            'Monthly': 'Six-monthly (Weekly x26)',
+            'Yearly': 'Five-yearly (Yearly x5)',
             'DailyMinute': 'Weekly (standard)',
             'WeeklyMinute': 'Monthly (Weekly x4)',
-            'MonthlyMinute': 'Yearly (Weekly x52)',
-            'YearlyMinute': 'Yearly (Weekly x52)'
+            'MonthlyMinute': 'Six-monthly (Weekly x26)',
+            'YearlyMinute': 'Five-yearly (Yearly x5)'
         }
         chart_type = self.data_manager.chart_data['type']
         cel_unit = chart_mapping[chart_type]
         self.event_bus.emit('set_celeration_unit', data={'cel_unit': cel_unit})
 
         self.event_bus.emit('refresh_view_dropdown')
+        self.event_bus.emit('view_update_aggregate_dropdown')
 
     def change_width(self, new_width):
         self.data_manager.user_preferences['width'] = new_width
@@ -1105,7 +1140,14 @@ class EventHandlers:
                 dialog.exec()
 
     def point_click(self, event):
-        self.figure_manager.point_on_click(event)  # Paint temporary magenta lines
+        self.figure_manager.point_on_click(event)
+
+    def plot_click(self, event):
+        if event.inaxes and event.xdata is not None:
+            x = self.figure_manager.data_manager.find_closest_x(int(event.xdata), self.figure_manager.Chart.date_to_pos)
+            if x in self.figure_manager.x_to_date:
+                date = self.figure_manager.x_to_date[x]
+                self.event_bus.emit('plot_date_clicked', date)
 
     def test_angle(self, show):
         self.figure_manager.settings_test_angle(show)
@@ -1130,7 +1172,9 @@ class EventHandlers:
         prompt = UserPrompt(
             title=data['title'],
             message=data['message'],
-            choice=data['choice']
+            choice=data['choice'],
+            ok_text=data.get('ok_text', 'OK'),
+            cancel_text=data.get('cancel_text', 'Cancel')
         )
         return prompt.display()
 

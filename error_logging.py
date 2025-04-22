@@ -1,25 +1,27 @@
 import sys
-import os
 import platform
 import logging
-from PySide6.QtWidgets import QMessageBox
+import traceback
+from pathlib import Path
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QLabel, QHBoxLayout, QApplication
+from PySide6.QtCore import Qt
 
 
 def get_error_report_path():
     system = platform.system()
-    home_dir = os.path.expanduser("~")
+    home_dir = Path.home()
 
     if system == "Linux" or system == "Darwin":  # Darwin is macOS
-        config_dir = os.path.join(home_dir, '.config', 'OpenCelerator')
+        config_dir = home_dir / '.config' / 'OpenCelerator'
     elif system == "Windows":
-        config_dir = os.path.join(home_dir, 'AppData', 'Local', 'OpenCelerator')
+        config_dir = home_dir / 'AppData' / 'Local' / 'OpenCelerator'
     else:
         raise OSError("Unsupported operating system")
 
     # Ensure the config directory exists
-    os.makedirs(config_dir, exist_ok=True)
+    config_dir.mkdir(parents=True, exist_ok=True)
 
-    return os.path.join(config_dir, 'error_report.log')
+    return config_dir / 'error_report.log'
 
 
 def setup_logging():
@@ -36,6 +38,62 @@ def setup_logging():
     return logger
 
 
+class ErrorDialog(QDialog):
+    def __init__(self, error_message, error_report_path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("An error occurred")
+        self.setFixedWidth(550)
+        self.setFixedHeight(400)
+
+        self.error_message = error_message
+        layout = QVBoxLayout()
+        layout.setSpacing(5)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Combine all text into a single top label for easier editing
+        combined_text = (
+            "An error has occurred.\n"
+            "Please copy and send to: opencelerator.9qpel@simplelogin.com\n"
+            f"All error reports are saved here: {str(error_report_path)}\n"
+            "\nTechnical details:"
+        )
+        top_label = QLabel(combined_text)
+        top_label.setWordWrap(True)
+        top_label.setStyleSheet("font-style: normal;")
+        top_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(top_label, 0)  # 0 stretch factor
+
+        # Error text area (scrollable and selectable)
+        self.error_text = QTextEdit()
+        self.error_text.setReadOnly(True)
+        self.error_text.setText(error_message)
+        self.error_text.setMinimumHeight(100)
+        layout.addWidget(self.error_text, 1)  # 1 stretch factor - this will expand
+
+        # Buttons layout
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(5)
+
+        # Copy button
+        copy_button = QPushButton("Copy Error to Clipboard")
+        copy_button.clicked.connect(self.copy_to_clipboard)
+        copy_button.setStyleSheet("font-style: normal;")
+        button_layout.addWidget(copy_button)
+
+        # Close button
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(self.accept)
+        close_button.setStyleSheet("font-style: normal;")
+        button_layout.addWidget(close_button)
+
+        layout.addLayout(button_layout, 0)  # 0 stretch factor
+        self.setLayout(layout)
+
+    def copy_to_clipboard(self):
+        clipboard = QApplication.clipboard()
+        clipboard.setText(self.error_message)
+
+
 def log_uncaught_exceptions(exctype, value, tb):
     logger = logging.getLogger('app_logger')
     # Add a file handler dynamically when an error occurs
@@ -46,8 +104,15 @@ def log_uncaught_exceptions(exctype, value, tb):
     file_handler.setFormatter(file_formatter)
     logger.addHandler(file_handler)
 
+    # Format the error traceback as a string
+    error_message = ''.join(traceback.format_exception(exctype, value, tb))
+
+    # Log to file
     logger.error("Uncaught exception", exc_info=(exctype, value, tb))
-    QMessageBox.critical(None, "An error occurred", f"An unexpected error occurred. A report has been generated here: {error_report_path}. Please share it with the developer.")
+
+    # Show the custom dialog directly
+    dialog = ErrorDialog(error_message, error_report_path)
+    dialog.exec()
 
     # Remove file handler to avoid duplicate logs in the future
     logger.removeHandler(file_handler)

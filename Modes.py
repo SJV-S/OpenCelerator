@@ -1,13 +1,16 @@
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                                QGroupBox, QRadioButton, QLineEdit, QLabel, QDateEdit, QListWidget, QFileDialog, QCheckBox,
                                QButtonGroup, QDialog, QComboBox, QMessageBox, QGridLayout, QStackedWidget, QSpinBox,
-                               QSpacerItem, QSizePolicy, QDoubleSpinBox, QColorDialog, QListWidgetItem, QFrame)
-from PySide6.QtGui import QDoubleValidator, QFont, QIcon
-from PySide6.QtCore import Qt, QDate
+                               QSpacerItem, QSizePolicy, QDoubleSpinBox, QColorDialog, QListWidgetItem, QFrame,
+                               QCalendarWidget, QDialogButtonBox, QScrollArea)
+from PySide6.QtGui import QDoubleValidator, QFont, QIcon, QIntValidator, QDesktopServices
+from PySide6.QtCore import Qt, QDate, QUrl, QEvent, QObject
 
-from Popups import InputDialog, ConfigurePhaseLinesDialog, ConfigureAimLinesDialog, ConfigureTrendLinesDialog, NoteDialog
+from Popups import InputDialog, ConfigurePhaseLinesDialog, ConfigureAimLinesDialog, ConfigureTrendLinesDialog, NoteDialog, ModifyColumns
 from DataManager import DataManager
 from EventBus import EventBus
+from pathlib import Path
+import pandas as pd
 
 
 class ModeWidget(QWidget):
@@ -17,13 +20,49 @@ class ModeWidget(QWidget):
         self.data_manager = DataManager()
         self.layout = QVBoxLayout(self)
         self.layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.init_ui()
+
+        # List to keep track of buttons that need double-click protection
+        self.double_click_buttons = []
 
         # Initialize event bus instance for all mode widgets
         self.event_bus = EventBus()
 
+        self.init_ui()
+
     def init_ui(self):
         pass
+
+    def register_double_click_button(self, button, callback):
+        """Register a button that should only respond to double-clicks.
+
+        Args:
+            button (QPushButton): The button to register
+            callback (function): The function to call when button is double-clicked
+        """
+        button.setToolTip("Double-click")
+        button.installEventFilter(self)
+        self.double_click_buttons.append((button, callback))
+
+        # Avoids type errors with receivers() method
+        button.blockSignals(True)
+
+    def eventFilter(self, obj, event):
+        # Filter events for double-click buttons
+
+        # Check if obj is a valid QObject and event is a valid QEvent
+        if not isinstance(obj, QObject) or not isinstance(event, QEvent):
+            return False
+
+        # Check if double-click button
+        for button, callback in self.double_click_buttons:
+            # Make sure obj is the button object, not a QWidgetItem
+            if obj == button and event.type() == QEvent.Type.MouseButtonDblClick:
+                # Call the associated callback when double-clicked
+                callback()
+                return True  # Event was handled
+
+        # Pass event to parent class if not handled
+        return super().eventFilter(obj, event)
 
 
 class DataModeWidget(ModeWidget):
@@ -54,14 +93,18 @@ class DataModeWidget(ModeWidget):
     def init_ui(self):
         main_layout = QVBoxLayout()
 
-        spacer_item = QSpacerItem(10, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        main_layout.addItem(spacer_item)
+        # Add Column label directly to the layout (like in TrendModeWidget)
+        column_label = QLabel(self.data_manager.ui_column_label)
+        main_layout.addWidget(column_label)
 
         self.column_selector = QComboBox()
         self.column_selector.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.column_selector.currentTextChanged.connect(self.update_style_widgets)
         self.column_selector.activated.connect(self.highlight_style_user_col)
         main_layout.addWidget(self.column_selector)
+
+        spacer_item = QSpacerItem(10, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        main_layout.addItem(spacer_item)
 
         # Create all widgets
         content_layout = QVBoxLayout()
@@ -146,10 +189,25 @@ class DataModeWidget(ModeWidget):
         self.column_selector.clear()
 
         column_map = self.data_manager.chart_data['column_map']
+        is_minute_chart = 'Minute' in self.data_manager.chart_data['type']
+
         if column_map:
-            data_columns = [v for k, v in column_map.items() if k != 'd']
+            # Filter columns based on chart type
+            data_columns = []
+            for k, v in column_map.items():
+                # Always exclude 'd' keys
+                if k == 'd':
+                    continue
+                # Exclude 'm' keys only for non-minute charts
+                if k == 'm' and not is_minute_chart:
+                    continue
+                data_columns.append(v)
+
             if data_columns:
+                # Populate dropdown and try to restore previous selection
                 self.column_selector.addItems(data_columns)
+
+                # Try to restore previous selection
                 index = self.column_selector.findText(current_text)
                 if index >= 0:
                     self.column_selector.setCurrentIndex(index)
@@ -232,6 +290,8 @@ class DataModeWidget(ModeWidget):
 
 
 class ViewModeWidget(ModeWidget):
+    default_agg = 'raw'
+
     def init_ui(self):
         self.dialog = InputDialog()
         self.event_bus = EventBus()
@@ -249,7 +309,7 @@ class ViewModeWidget(ModeWidget):
         dropdown_layout = QGridLayout()
         dropdown_layout.setSpacing(10)
 
-        self.column_label = QLabel('Column')
+        self.column_label = QLabel(self.data_manager.ui_column_label)
         self.column_dropdown = QComboBox()
         group_label = QLabel("Group")
         self.group_dropdown = QComboBox()
@@ -257,8 +317,8 @@ class ViewModeWidget(ModeWidget):
         self.aggregate_dropdown = QComboBox()
 
         self.group_dropdown.addItems(['Day', 'Week', 'Month', 'Year'])
-        self.aggregate_dropdown.addItems(['raw', 'sum', 'mean', 'median', 'min', 'max'])
-        self.aggregate_dropdown.setCurrentText('median')
+        self.update_aggregate_dropdown()  # Update aggregation options
+        self.aggregate_dropdown.setCurrentText(self.default_agg)
         self.toggle_group_column()
 
         column_wrapper = QVBoxLayout()
@@ -285,7 +345,7 @@ class ViewModeWidget(ModeWidget):
         # Section headings
         font = QFont()
         grid_heading = QLabel("Grid")
-        self.column_heading = QLabel("Column")
+        self.column_heading = QLabel(self.data_manager.ui_column_label)
         other_heading = QLabel("Other")
         for heading in [grid_heading, self.column_heading, other_heading]:
             heading.setFont(font)
@@ -335,11 +395,6 @@ class ViewModeWidget(ModeWidget):
         # Add spacing between checkbox section and credit button
         main_layout.addItem(spacer2)
 
-        # Credit button
-        self.credit_lines_btn = QPushButton("Credit lines")
-        self.credit_lines_btn.clicked.connect(self.credit_lines_popup)
-        main_layout.addWidget(self.credit_lines_btn)
-
         self.layout.addLayout(main_layout)
 
         for checkbox in [self.major_vertical_check, self.major_horizontal_check,
@@ -376,12 +431,33 @@ class ViewModeWidget(ModeWidget):
         self.event_bus.subscribe('sync_grid_checkboxes', self.sync_grid_checkboxes)
         self.event_bus.subscribe('sync_data_checkboxes', self.sync_data_checkboxes)
         self.event_bus.subscribe('sync_misc_checkboxes', self.sync_misc_checkboxes)
+        self.event_bus.subscribe('view_update_aggregate_dropdown', self.update_aggregate_dropdown)
+        self.event_bus.subscribe('view_credit_lines_popup', self.credit_lines_popup)
 
         self.update_timing_checkboxes()
 
+    def update_aggregate_dropdown(self):
+        self.aggregate_dropdown.clear()
+
+        # Check if minute chart
+        if 'Minute' in self.data_manager.chart_data['type']:
+            options = ['raw', 'mean', 'median', 'min', 'max']
+        else:
+            options = ['raw', 'sum', 'mean', 'median', 'min', 'max']
+
+        self.aggregate_dropdown.addItems(options)
+
+        # Get aggregation from current column's view settings
+        user_col = self.column_dropdown.currentText()
+        if user_col and user_col in self.data_manager.plot_columns.keys():
+            column_instance = self.data_manager.plot_columns[user_col]
+            agg_type = column_instance.view_settings['agg_type']
+            self.aggregate_dropdown.setCurrentText(agg_type)
+        else:
+            self.aggregate_dropdown.setCurrentText(self.default_agg)  # Default fallback
+
     def handle_credit_toggle(self, state):
         self.event_bus.emit('view_credit_lines_toggle', state)
-        self.credit_lines_btn.setVisible(bool(state))
 
     def handle_column_dropdown_changed(self, index):
         self.view_column_dropdown_update_label(index)
@@ -398,6 +474,7 @@ class ViewModeWidget(ModeWidget):
         if not user_col:
             return
 
+        self.sync_current_column_view_settings()
         column_instance = self.data_manager.plot_columns[user_col]
         column_instance.set_visibility(element_type, show)
         self.event_bus.emit('refresh_chart')
@@ -417,8 +494,6 @@ class ViewModeWidget(ModeWidget):
             checkbox.setChecked(view_settings[key])
             checkbox.blockSignals(False)
 
-        self.credit_lines_btn.setVisible(view_settings['credit'])
-
     def sync_grid_checkboxes(self):
         view_settings = self.data_manager.chart_data['view']['chart']
         checkboxes = [self.major_vertical_check, self.major_horizontal_check,
@@ -435,6 +510,27 @@ class ViewModeWidget(ModeWidget):
         for checkbox in checkboxes:
             checkbox.blockSignals(False)
 
+    def map_calendar_code_to_text(self, code):
+        # Maps internal calendar code to dropdown text
+        mapping = {
+            'D': 'Day',
+            'W': 'Week',
+            'M': 'Month',
+            'Y': 'Year'
+        }
+        return mapping.get(code, code)
+
+    def map_calendar_text_to_code(self, text):
+        # Maps dropdown text to internal calendar code
+        mapping = {
+            'Day': 'D',
+            'Week': 'W',
+            'Month': 'M',
+            'Year': 'Y'
+        }
+        return mapping.get(text, text)
+
+    # Update the sync_data_checkboxes method
     def sync_data_checkboxes(self):
         user_col = self.column_dropdown.currentText()
         if not user_col:
@@ -466,7 +562,11 @@ class ViewModeWidget(ModeWidget):
         # Sync dropdowns
         self.group_dropdown.blockSignals(True)
         self.aggregate_dropdown.blockSignals(True)
-        self.group_dropdown.setCurrentText(view_settings['calendar_group'])
+
+        # Map the internal calendar code to dropdown text
+        calendar_text = self.map_calendar_code_to_text(view_settings['calendar_group'])
+        self.group_dropdown.setCurrentText(calendar_text)
+
         self.aggregate_dropdown.setCurrentText(view_settings['agg_type'])
         self.group_dropdown.blockSignals(False)
         self.aggregate_dropdown.blockSignals(False)
@@ -490,24 +590,28 @@ class ViewModeWidget(ModeWidget):
 
         column_instance = self.data_manager.plot_columns[user_col]
         column_instance.view_settings[setting_key] = setting_value
-        sys_col = column_instance.sys_col
-
-        # Save view settings in chart data
-        key = f'{sys_col}|{user_col}'
-        view_dict = self.data_manager.chart_data['view']
-        view_dict[key] = column_instance.view_settings
 
         column_instance.refresh_view()
         self.event_bus.emit('refresh_chart')
 
+    def sync_current_column_view_settings(self):
+        user_col = self.column_dropdown.currentText()
+        if user_col:
+            self.event_bus.emit('sync_column_view_settings', user_col)
+        else:
+            self.event_bus.emit('sync_column_view_settings')
+
     def group_column_update(self):
-        calendar_group = self.group_dropdown.currentText()
-        self._update_column_settings('calendar_group', calendar_group)
+        calendar_group_text = self.group_dropdown.currentText()
+        calendar_group_code = self.map_calendar_text_to_code(calendar_group_text)
+        self._update_column_settings('calendar_group', calendar_group_code)
+        self.sync_current_column_view_settings()
 
     def agg_column_update(self):
         agg_type = self.aggregate_dropdown.currentText()
         self._update_column_settings('agg_type', agg_type)
         self.toggle_group_column()
+        self.sync_current_column_view_settings()
 
     def view_column_dropdown_update_label(self, index=0):
         new_column_heading = self.column_dropdown.itemText(index)
@@ -520,8 +624,20 @@ class ViewModeWidget(ModeWidget):
     def refresh_view_dropdown(self):
         self.column_dropdown.clear()
         column_map = self.data_manager.chart_data['column_map']
+        is_minute_chart = 'Minute' in self.data_manager.chart_data['type']
+
         if column_map:
-            self.column_dropdown.addItems([v for k, v in column_map.items() if k != 'd'])
+            filtered_columns = []
+            for k, v in column_map.items():
+                # Always exclude 'd' keys
+                if k == 'd':
+                    continue
+                # Exclude 'm' keys only for non-minute charts
+                if k == 'm' and not is_minute_chart:
+                    continue
+                filtered_columns.append(v)
+
+            self.column_dropdown.addItems(filtered_columns)
 
     def credit_lines_popup(self):
         if self.dialog.exec() == QDialog.DialogCode.Accepted:
@@ -578,7 +694,7 @@ class PhaseModeWidget(ModeWidget):
             self.phase_change_input.text(),
             self.phase_date_input.text()
         ))
-        undo_phase_line_btn.clicked.connect(self.figure_manager.phase_undo_line)
+        self.register_double_click_button(undo_phase_line_btn, self.figure_manager.phase_undo_line)
         config_btn.clicked.connect(self.configure_phase_lines)
 
         # Add vertical spacing before the radio buttons
@@ -769,7 +885,7 @@ class AimModeWidget(ModeWidget):
             self.aim_start_date_input.text(),
             self.aim_end_date_input.text()
         ))
-        undo_aim_line_btn.clicked.connect(self.figure_manager.aim_undo)
+        self.register_double_click_button(undo_aim_line_btn, self.figure_manager.aim_undo)
         configure_aim_btn.clicked.connect(self.configure_aim_lines)
 
         # Create a horizontal layout for the radio buttons
@@ -866,10 +982,10 @@ class TrendModeWidget(ModeWidget):
         # Define combo box items
         self.trend_methods = ['Least-squares', 'Quarter-intersect', 'Split-middle-line', 'Mean', 'Median']
         self.envelope_methods = ['None', '5-95 percentile', 'Interquartile range', 'Standard deviation', '90% confidence interval']
-        self.celeration_units = ['Daily', 'Weekly (standard)', 'Monthly (Weekly x4)', 'Yearly (Weekly x52)']
+        self.celeration_units = ['Daily', 'Weekly', 'Monthly (Weekly x4)', 'Six-monthly (Weekly x26)', 'Yearly (Weekly x52)', 'Five-yearly (Yearly x5)']
 
         # Trend type selector
-        trend_col_label = QLabel('Column')
+        trend_col_label = QLabel(self.data_manager.ui_column_label)
         trend_type_layout = QHBoxLayout()
         self.trend_type_combo = QComboBox()
         trend_type_layout.addWidget(self.trend_type_combo)
@@ -948,8 +1064,8 @@ class TrendModeWidget(ModeWidget):
 
         self.celeration_unit_combo = QComboBox()
         self.celeration_unit_combo.addItems(self.celeration_units)
-        self.celeration_unit_combo.setCurrentText(
-            self.data_manager.user_preferences.get('celeration_unit', 'Weekly (standard)'))
+        self.data_manager.user_preferences['celeration_unit'] = 'Weekly'
+        self.celeration_unit_combo.setCurrentText(self.data_manager.user_preferences.get('celeration_unit', 'Weekly'))
         self.celeration_unit_combo.currentIndexChanged.connect(
             lambda index: self.data_manager.user_preferences.update(
                 {'celeration_unit': self.celeration_unit_combo.currentText()})
@@ -998,7 +1114,7 @@ class TrendModeWidget(ModeWidget):
         # Connect buttons
         self.trend_fit_btn.clicked.connect(self.fit_trend)
         self.trend_add_btn.clicked.connect(self.add_trend)
-        trend_undo_btn.clicked.connect(self.undo_trend)
+        self.register_double_click_button(trend_undo_btn, self.undo_trend)
         trend_configure_btn.clicked.connect(self.configure_trends)
 
         return trend_button_layout
@@ -1147,7 +1263,7 @@ class NoteModeWidget(ModeWidget):
         self.layout.addLayout(main_layout)
 
         # Connect button actions
-        remove_note_btn.clicked.connect(self.remove_note)
+        self.register_double_click_button(remove_note_btn, self.remove_note)
 
     def refresh_note_listbox(self):
         self.note_list.clear()
@@ -1211,3 +1327,713 @@ class NoteModeWidget(ModeWidget):
                     self.refresh_note_listbox()
 
 
+class PlotModeWidget(ModeWidget):
+    def __init__(self, figure_manager):
+        self.data_manager = figure_manager.data_manager
+        self.date_handler = ChartDateHandler(figure_manager.data_manager, figure_manager)
+        super().__init__(figure_manager)
+
+        # Vertical line for selected date
+        self.selected_date_line = None
+
+        # Event bus subscriptions
+        self._setup_event_subscriptions()
+
+        # Track column inputs
+        self.column_input_list = {}
+
+    def _setup_event_subscriptions(self):
+        # Set up event bus subscriptions
+        self.event_bus.subscribe('refresh_plot_mode_widget', self.refresh_plot_mode_widget, has_data=False)
+        self.event_bus.subscribe('update_plot_mode', self.update_plot_mode, has_data=False)
+        self.event_bus.subscribe('plot_date_clicked', self.plot_date_clicked, has_data=True)
+        self.event_bus.subscribe('modify_columns', ModifyColumns(self).exec)
+
+    def init_ui(self):
+        # Conditionals for direct data entry
+        self.is_minute_chart = 'Minute' in self.data_manager.chart_data['type']
+
+        # Create UI components
+        self._create_main_layout()
+
+        # Initial state update
+        self.update_plot_timing_inputs()
+        self.update_spreadsheet_button_visibility()
+
+        # Initial validation for minute chart mode
+        self.validate_time_inputs()
+
+    def _create_main_layout(self):
+        # Create container for time inputs
+        self.time_container = QWidget()
+
+        # Main layout setup
+        plot_layout = QVBoxLayout()
+
+        # Add header components
+        self._setup_header_components(plot_layout)
+
+        # Add column input area
+        self._setup_column_input_area(plot_layout)
+
+        # Add time inputs
+        self._setup_time_inputs()
+        plot_layout.addWidget(self.time_container)
+
+        # Add date selector
+        self._setup_date_selector(plot_layout)
+
+        # Add action buttons
+        self._setup_action_buttons(plot_layout)
+
+        # Add data info section
+        self._setup_data_info_section(plot_layout)
+
+        self.layout.addLayout(plot_layout)
+
+    def _setup_header_components(self, parent_layout):
+        # Add Column label at the top
+        column_label = QLabel(self.data_manager.ui_column_label)
+        parent_layout.addWidget(column_label)
+
+        # Column name input box (visible only when adding new column via dialog)
+        self.column_name_input = QLineEdit()
+        self.column_name_input.setPlaceholderText("Enter column name")
+        self.column_name_input.setVisible(False)
+        parent_layout.addWidget(self.column_name_input)
+
+        # Add marker style dropdown (visible only when adding new column via dialog)
+        self.marker_combo = QComboBox()
+        self.marker_combo.setVisible(False)
+        self.marker_combo.addItem("⬤ Increase", "c")
+        self.marker_combo.addItem("✕ Decrease", "i")
+        self.marker_combo.addItem("▼ Other", "o1")
+        parent_layout.addWidget(self.marker_combo)
+
+    def _setup_column_input_area(self, parent_layout):
+        # Create scrollable area for column inputs
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_content = QWidget()
+        self.column_input_list_layout = QVBoxLayout(self.scroll_content)
+        self.column_input_list_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.scroll_area.setWidget(self.scroll_content)
+        parent_layout.addWidget(self.scroll_area)
+
+    def _setup_time_inputs(self):
+        # Time inputs layout
+        time_layout = QVBoxLayout(self.time_container)
+
+        # Time inputs - using regular input fields with labels above
+        time_inputs_layout = QHBoxLayout()
+
+        # Hour input
+        hour_layout = QVBoxLayout()
+        hour_label = QLabel("Hour")
+        self.hour_input = QLineEdit()
+        self.hour_input.setPlaceholderText("0")
+        self.hour_input.setValidator(QIntValidator(0, 23))
+        hour_layout.addWidget(hour_label)
+        hour_layout.addWidget(self.hour_input)
+
+        # Minute input
+        min_layout = QVBoxLayout()
+        min_label = QLabel("Min")
+        self.min_input = QLineEdit()
+        self.min_input.setPlaceholderText("0")
+        self.min_input.setValidator(QIntValidator(0, 59))
+        min_layout.addWidget(min_label)
+        min_layout.addWidget(self.min_input)
+
+        # Second input
+        sec_layout = QVBoxLayout()
+        sec_label = QLabel("Sec")
+        self.sec_input = QLineEdit()
+        self.sec_input.setPlaceholderText("0")
+        self.sec_input.setValidator(QIntValidator(0, 59))
+        sec_layout.addWidget(sec_label)
+        sec_layout.addWidget(self.sec_input)
+
+        # Add the individual time layouts to a horizontal layout
+        time_inputs_layout.addLayout(hour_layout)
+        time_inputs_layout.addLayout(min_layout)
+        time_inputs_layout.addLayout(sec_layout)
+
+        time_layout.addLayout(time_inputs_layout)
+
+        # Connect time inputs to validation
+        self.hour_input.textChanged.connect(self.validate_time_inputs)
+        self.min_input.textChanged.connect(self.validate_time_inputs)
+        self.sec_input.textChanged.connect(self.validate_time_inputs)
+
+    def _setup_date_selector(self, parent_layout):
+        # Date selector row
+        date_layout = QVBoxLayout()
+        date_buttons_layout = QHBoxLayout()
+
+        self.prev_date_btn = QPushButton()
+        self.prev_date_btn.setIcon(QIcon(':/images/arrow-left-solid.svg'))
+        self.prev_date_btn.clicked.connect(lambda: self.adjust_date(increment=False))
+
+        self.date_btn = QPushButton()
+        self.date_btn.clicked.connect(self.show_calendar)
+
+        # Update date button initially
+        self.update_date_button()
+
+        self.next_date_btn = QPushButton()
+        self.next_date_btn.setIcon(QIcon(':/images/arrow-right-solid.svg'))
+        self.next_date_btn.clicked.connect(lambda: self.adjust_date(increment=True))
+
+        date_buttons_layout.addWidget(self.prev_date_btn)
+        date_buttons_layout.addWidget(self.date_btn)
+        date_buttons_layout.addWidget(self.next_date_btn)
+
+        date_layout.addLayout(date_buttons_layout)
+        parent_layout.addLayout(date_layout)
+
+    def _setup_action_buttons(self, parent_layout):
+        # Action buttons
+        button_layout = QHBoxLayout()
+
+        # Add data button (plus icon)
+        self.add_data_btn = QPushButton()
+        self.add_data_btn.clicked.connect(self.add_data)
+        self.add_data_btn.setIcon(QIcon(':/images/plus-solid.svg'))
+
+        # Create remove data button (minus icon) with double-click requirement
+        self.remove_data_btn = QPushButton()
+        self.remove_data_btn.setIcon(QIcon(':/images/minus-solid.svg'))
+        self.register_double_click_button(self.remove_data_btn, self.remove_data)
+
+        # Create configure columns button (cog icon)
+        configure_columns_btn = QPushButton()
+        configure_columns_btn.setToolTip('Modify columns')
+        configure_columns_btn.setIcon(QIcon(':/images/gear-solid.svg'))
+        configure_columns_btn.clicked.connect(self.show_modify_columns_dialog)
+
+        button_layout.addWidget(self.add_data_btn)
+        button_layout.addWidget(self.remove_data_btn)
+        button_layout.addWidget(configure_columns_btn)
+        parent_layout.addLayout(button_layout)
+
+    def _setup_data_info_section(self, parent_layout):
+        # Data points label
+        data_label_layout = QVBoxLayout()
+        self.data_label = QLabel('')
+        data_label_layout.addWidget(self.data_label)
+
+        # Add file path label
+        self.file_path_label = QLabel('')
+        self.file_path_label.setAlignment(Qt.AlignmentFlag.AlignCenter)  # Center the label
+        data_label_layout.addWidget(self.file_path_label)
+
+        # Add spreadsheet button
+        self.open_spreadsheet_btn = QPushButton("Open Spreadsheet")
+        self.open_spreadsheet_btn.clicked.connect(self.open_spreadsheet)
+        data_label_layout.addWidget(self.open_spreadsheet_btn)
+
+        parent_layout.addStretch()
+        parent_layout.addLayout(data_label_layout)
+
+    def show_modify_columns_dialog(self):
+        self.event_bus.emit('modify_columns')
+
+    def create_column_input_row(self, column_name):
+        # Create a row for a column with input field
+        row_widget = QWidget()
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Create count input field with column name as placeholder
+        count_input = QLineEdit()
+        count_input.setPlaceholderText(column_name)
+        count_input.setValidator(QIntValidator())
+
+        # Add widget to row
+        row_layout.addWidget(count_input)
+
+        # Store reference to input field
+        self.column_input_list[column_name] = count_input
+
+        return row_widget
+
+    def remove_data(self):
+        self.event_bus.emit('remove_latest_entry')
+
+    def update_plot_mode(self):
+        # Update date handler calendar type
+        self.date_handler.update_calendar_type()
+
+        # Set current_date to normalized today's date (period-end)
+        today = QDate.currentDate()
+        normalized_date = self.date_handler.normalize_date_for_calendar_type(today)
+
+        # Ensure date is valid or get middle date
+        valid_date, _ = self.date_handler.ensure_valid_date(normalized_date)
+        self.date_handler.current_date = valid_date
+
+        # Update UI
+        self.update_date_button()
+        self.update_selected_date_line()
+
+    def plot_date_clicked(self, date):
+        qdate = QDate(date.year, date.month, date.day)
+
+        # Normalize the date according to calendar type
+        qdate = self.date_handler.normalize_date_for_calendar_type(qdate)
+
+        # Update date in plot mode widget
+        self.date_handler.current_date = qdate
+        self.update_date_button()
+        self.update_selected_date_line()  # Will refresh the chart
+
+    def validate_time_inputs(self):
+        # Validates time inputs and enables/disables add button accordingly
+        if self.is_minute_chart:
+            # Enable add button only if at least one time field has data
+            has_time_data = bool(self.hour_input.text() or
+                                 self.min_input.text() or
+                                 self.sec_input.text())
+            self.add_data_btn.setEnabled(has_time_data)
+
+            # Update icon based on enabled state
+            if has_time_data:
+                self.add_data_btn.setIcon(QIcon(':/images/plus-solid.svg'))
+            else:
+                self.add_data_btn.setIcon(QIcon(':/images/plus-solid-disabled.svg'))
+        else:
+            # Always enable for non-minute charts
+            self.add_data_btn.setEnabled(True)
+            self.add_data_btn.setIcon(QIcon(':/images/plus-solid.svg'))
+
+    def update_plot_timing_inputs(self):
+        self.is_minute_chart = 'Minute' in self.data_manager.chart_data['type']
+        self.time_container.setVisible(self.is_minute_chart)
+
+        # Update button state after changing chart type
+        self.validate_time_inputs()
+
+    def refresh_column_list(self):
+        # Clear existing widgets
+        self._clear_column_inputs()
+
+        # Reset tracking dictionary
+        self.column_input_list.clear()
+
+        # Get column data
+        data_columns = self._get_data_columns()
+        num_columns = len(data_columns)
+
+        # Determine column display strategy and apply it
+        if self._should_use_direct_layout(num_columns):
+            self._apply_direct_layout_strategy(data_columns)
+        else:
+            self._apply_scroll_area_strategy(data_columns)
+
+        # Update marker combo options
+        self._update_marker_combo_options()
+
+    def _clear_column_inputs(self):
+        # Clear from scroll area
+        for i in reversed(range(self.column_input_list_layout.count())):
+            widget = self.column_input_list_layout.itemAt(i).widget()
+            if widget:
+                widget.deleteLater()
+
+        # Find plot_layout
+        plot_layout = self._find_plot_layout()
+
+        if plot_layout:
+            # Find indices
+            marker_index = self._find_widget_index(plot_layout, self.marker_combo)
+            scroll_index = self._find_widget_index(plot_layout, self.scroll_area)
+
+            if marker_index != -1 and scroll_index != -1:
+                # Remove widgets between marker_combo and scroll_area
+                for i in reversed(range(marker_index + 1, scroll_index)):
+                    widget = plot_layout.itemAt(i).widget()
+                    if widget:
+                        widget.deleteLater()
+
+    def _find_plot_layout(self):
+        # Find the plot_layout containing marker_combo
+        for i in range(self.layout.count()):
+            item = self.layout.itemAt(i)
+            if item and item.layout():
+                for j in range(item.layout().count()):
+                    widget_item = item.layout().itemAt(j)
+                    if widget_item and widget_item.widget() == self.marker_combo:
+                        return item.layout()
+        return None
+
+    def _find_widget_index(self, layout, widget):
+        # Find the index of a widget in a layout
+        for i in range(layout.count()):
+            if layout.itemAt(i).widget() == widget:
+                return i
+        return -1
+
+    def _get_data_columns(self):
+        # Get column names from data manager
+        column_map = self.data_manager.chart_data['column_map']
+        data_columns = []
+        if column_map:
+            data_columns = [v for k, v in column_map.items() if k not in ['d', 'm']]
+        return data_columns
+
+    def _should_use_direct_layout(self, num_columns):
+        # Determine if we should use direct layout or scroll area
+        return num_columns <= 4
+
+    def _apply_direct_layout_strategy(self, data_columns):
+        # Apply direct layout strategy for small column counts
+        plot_layout = self._find_plot_layout()
+        marker_index = self._find_widget_index(plot_layout, self.marker_combo)
+
+        if plot_layout and marker_index != -1:
+            self.scroll_area.setVisible(False)
+            insert_point = marker_index + 1
+
+            for column in data_columns:
+                row = self.create_column_input_row(column)
+                plot_layout.insertWidget(insert_point, row)
+                insert_point += 1
+
+    def _apply_scroll_area_strategy(self, data_columns):
+        # Apply scroll area strategy for larger column counts
+        self.scroll_area.setVisible(True)
+
+        # Add widgets to scroll content
+        for column in data_columns:
+            row = self.create_column_input_row(column)
+            self.column_input_list_layout.addWidget(row)
+
+        # Configure scroll area
+        ROW_HEIGHT = 40  # Height in pixels per row
+        self.scroll_area.setFixedHeight(4 * ROW_HEIGHT)  # Show exactly 4 rows
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.scroll_content.setMinimumHeight(len(data_columns) * ROW_HEIGHT)
+
+    def _update_marker_combo_options(self):
+        # Update marker combo options
+        column_map = self.data_manager.chart_data['column_map']
+        self.marker_combo.clear()
+
+        if column_map:
+            if 'c' not in column_map.keys():
+                self.marker_combo.addItem("⬤ Increase", "c")
+            if 'i' not in column_map.keys():
+                self.marker_combo.addItem("✕ Decrease", "i")
+            self.marker_combo.addItem("▼ Other", "o1")
+
+    def refresh_plot_mode_widget(self):
+        self.update_plot_timing_inputs()
+        self.refresh_column_list()
+
+        # Update calendar type in the date handler
+        self.date_handler.update_calendar_type()
+
+        # Update date display
+        self.update_date_button()
+
+        # Update vertical line
+        self.update_selected_date_line()
+
+        # Update spreadsheet button visibility
+        self.update_spreadsheet_button_visibility()
+
+    def update_selected_date_line(self):
+        # Get valid date and corresponding timestamp
+        valid_date, timestamp = self.date_handler.ensure_valid_date(self.date_handler.current_date)
+
+        # Update current_date if it changed
+        if valid_date != self.date_handler.current_date:
+            self.date_handler.current_date = valid_date
+            self.update_date_button()
+
+        # Draw line if we have a valid timestamp
+        if timestamp is not None:
+            x_pos = self.figure_manager.Chart.date_to_pos.get(timestamp)
+            if x_pos is not None:
+                self.figure_manager.plot_draw_manager.draw_date_line(x_pos)
+
+    def show_calendar(self):
+        # Show calendar widget for date selection
+        calendar = QCalendarWidget()
+        calendar.setSelectedDate(self.date_handler.current_date)
+
+        # Create a dialog to hold the calendar
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Select Date")
+        dialog_layout = QVBoxLayout(dialog)
+        dialog_layout.addWidget(calendar)
+
+        # Add OK button
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        button_box.accepted.connect(dialog.accept)
+        dialog_layout.addWidget(button_box)
+
+        if dialog.exec_() == QDialog.DialogCode.Accepted:
+            # Update current_date in date handler
+            self.date_handler.current_date = calendar.selectedDate()
+            self.update_date_button()
+
+            # Update vertical line
+            self.update_selected_date_line()
+
+    def update_date_button(self):
+        # Get formatted date text and today status from date handler
+        date_str, is_today = self.date_handler.get_formatted_date_text()
+        self.date_btn.setText(date_str)
+
+        # Highlight if date is today
+        if is_today:
+            self.date_btn.setStyleSheet("QPushButton { color: white; background-color: #5e81ac; }")
+        else:
+            self.date_btn.setStyleSheet("")
+
+    def adjust_date(self, increment=True):
+        # Use date handler to adjust date
+        self.date_handler.adjust_date(increment)
+
+        # Update UI elements
+        self.update_date_button()
+        self.update_selected_date_line()
+
+    def add_data(self):
+        # Collect data from input fields
+        user_cols, count_strs, sys_cols = self._collect_column_data()
+
+        # If no values were entered, return
+        if not user_cols:
+            return
+
+        # Prepare data for event emission
+        data = {
+            'user_col': user_cols,
+            'sys_col': sys_cols,
+            'count_str': count_strs,
+            'date_str': self.date_handler.current_date.toString('yyyy-MM-dd'),
+            'hour_str': self.hour_input.text(),
+            'minute_str': self.min_input.text(),
+            'second_str': self.sec_input.text()
+        }
+
+        # Clear all count input fields
+        for input_field in self.column_input_list.values():
+            input_field.clear()
+
+        self.event_bus.emit('direct_data_entry', data)
+        self.refresh_column_list()
+        self.update_spreadsheet_button_visibility()
+
+    def _collect_column_data(self):
+        # Extract data from all input fields with values
+        user_cols = []
+        count_strs = []
+        sys_cols = []
+
+        # Get all column inputs that have entries
+        for col_name, input_field in self.column_input_list.items():
+            count_value = input_field.text()
+            if count_value:  # Only collect non-empty inputs
+                user_cols.append(col_name)
+                count_strs.append(count_value)
+
+                # Look up the appropriate sys_col for this column
+                column_map = self.data_manager.chart_data['column_map']
+                sys_col = None
+                for sc, uc in column_map.items():
+                    if uc == col_name and sc not in ['d', 'm']:
+                        sys_col = sc
+                        break
+
+                # Append the sys_col (or default to "o1" if not found)
+                sys_cols.append(sys_col or "o1")
+
+        return user_cols, count_strs, sys_cols
+
+    def open_spreadsheet(self):
+        unix_id = self.data_manager.user_preferences.get('unix_id')
+        data_import_path = self.data_manager.chart_data['import_path'].get(unix_id)
+
+        path = Path(data_import_path) if data_import_path else None
+
+        if path and path.exists():
+            # Use QDesktopServices to open the file with the default application
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        else:
+            QMessageBox.warning(self, "File Not Found",
+                                "The spreadsheet file could not be found.")
+
+    def update_spreadsheet_button_visibility(self):
+        # Get the import path
+        unix_id = self.data_manager.user_preferences.get('unix_id')
+        data_import_path = self.data_manager.chart_data['import_path'].get(unix_id)
+
+        path = Path(data_import_path) if data_import_path else None
+        has_valid_path = bool(path and path.exists())
+
+        # Update button visibility
+        self.open_spreadsheet_btn.setVisible(has_valid_path)
+
+        # Set tooltip for valid paths
+        if has_valid_path:
+            self.open_spreadsheet_btn.setToolTip(f"Document: {path.name}\nLocation: {path.parent}")
+        else:
+            self.open_spreadsheet_btn.setToolTip("")
+
+        # Hide the file path label completely
+        self.file_path_label.setVisible(False)
+
+
+class ChartDateHandler:
+    def __init__(self, data_manager, figure_manager):
+        self.data_manager = data_manager
+        self.figure_manager = figure_manager
+
+        # Store the calendar type
+        self.calendar_type = self.data_manager.chart_data['type'][0]
+
+        # Initialize with current date but normalize it to period-end
+        today = QDate.currentDate()
+        self.current_date = self.normalize_date_for_calendar_type(today)
+
+    def normalize_date_for_calendar_type(self, date):
+        """
+        Normalizes a date according to the current calendar type (D, W, M, Y),
+        aligning with the period-end date format in the date_to_pos mapping.
+        Returns the normalized QDate.
+        """
+        if self.calendar_type == 'W':
+            # Keep the Sunday normalization for weekly data
+            days_to_sunday = date.dayOfWeek() % 7
+            return date.addDays(-days_to_sunday)
+        elif self.calendar_type == 'M':
+            # Normalize to the last day of the month
+            year = date.year()
+            month = date.month()
+            # Calculate last day of current month
+            last_day = QDate(year, month, 1).addMonths(1).addDays(-1).day()
+            return QDate(year, month, last_day)
+        elif self.calendar_type == 'Y':
+            # Normalize to December 31st of the current year
+            return QDate(date.year(), 12, 31)
+        else:  # 'D' or default
+            return date
+
+    def ensure_valid_date(self, date):
+        """
+        Ensures the provided date exists in date_to_pos.
+        If not, returns the middle date from date_to_pos.
+        Returns: (QDate, pandas.Timestamp or None) - tuple of valid QDate and its corresponding timestamp
+        """
+        # Convert QDate to pandas timestamp for lookup
+        pd_stamp = pd.Timestamp(date.toString('yyyy-MM-dd'))
+        closest_date = self.figure_manager.data_manager.find_closest_date(pd_stamp,
+                                                                          self.figure_manager.Chart.date_to_pos)
+
+        # If date is valid, return it
+        if closest_date is not None:
+            return date, closest_date
+
+        # Otherwise, try to find middle date
+        if not self.figure_manager.Chart.date_to_pos:
+            return date, None  # No data available, return original date
+
+        # Find middle date
+        sorted_dates = sorted(self.figure_manager.Chart.date_to_pos.keys())
+        middle_timestamp = sorted_dates[len(sorted_dates) // 2]
+        middle_qdate = QDate(middle_timestamp.year, middle_timestamp.month, middle_timestamp.day)
+
+        return middle_qdate, middle_timestamp
+
+    def adjust_date(self, increment=True):
+        """
+        Adjusts the current date forward or backward according to calendar type
+        increment: True to move forward, False to move backward
+        Returns: The adjusted QDate
+        """
+        # Determine the direction (increment or decrement)
+        direction = 1 if increment else -1
+
+        if self.calendar_type == 'D':
+            # Daily adjustment remains unchanged
+            self.current_date = self.current_date.addDays(direction)
+        elif self.calendar_type == 'W':
+            # Weekly adjustment - move to next/previous Sunday
+            days_to_sunday = self.current_date.dayOfWeek() % 7
+            sunday = self.current_date.addDays(-days_to_sunday)
+            self.current_date = sunday.addDays(7 * direction)
+        elif self.calendar_type == 'M':
+            # Monthly adjustment - move to the last day of next/previous month
+            year = self.current_date.year()
+            month = self.current_date.month()
+
+            # First ensure we're at the end of the current month
+            current_month_end = QDate(year, month, 1).addMonths(1).addDays(-1)
+
+            # Then move to next/previous month end
+            next_month_end = current_month_end.addMonths(direction)
+            self.current_date = next_month_end
+        elif self.calendar_type == 'Y':
+            # Yearly adjustment - move to December 31st of next/previous year
+            year = self.current_date.year()
+            # Ensure we're at year end first
+            current_year_end = QDate(year, 12, 31)
+            # Move to next/previous year end
+            next_year_end = current_year_end.addYears(direction)
+            self.current_date = next_year_end
+        else:
+            # Default case
+            self.current_date = self.current_date.addDays(direction)
+
+        return self.current_date
+
+    def get_formatted_date_text(self):
+        """
+        Returns the formatted date text according to the calendar type
+        Also indicates if the current date is today
+        Returns: (str, bool) - formatted date string and boolean indicating if date is today
+        """
+        today = QDate.currentDate()
+        normalized_today = self.normalize_date_for_calendar_type(today)
+
+        # Check if date is today based on calendar type
+        if self.calendar_type == 'D':
+            is_today = self.current_date == today
+        elif self.calendar_type == 'W':
+            days_to_sunday = self.current_date.dayOfWeek() % 7
+            week_start = self.current_date.addDays(-days_to_sunday)
+            week_end = week_start.addDays(6)
+            is_today = today >= week_start and today <= week_end
+        elif self.calendar_type == 'M':
+            is_today = (self.current_date.year() == today.year() and
+                        self.current_date.month() == today.month())
+        elif self.calendar_type == 'Y':
+            is_today = self.current_date.year() == today.year()
+        else:
+            is_today = self.current_date == today
+
+        # Format date string based on calendar type
+        if self.calendar_type == 'D':
+            date_str = self.current_date.toString("dd-MM-yyyy")
+        elif self.calendar_type == 'W':
+            # Find the Sunday of this week
+            days_to_sunday = self.current_date.dayOfWeek() % 7
+            sunday = self.current_date.addDays(-days_to_sunday)
+            week_num = self.current_date.weekNumber()[0]
+            date_str = f"W{week_num} {sunday.toString('dd-MM-yyyy')}"
+        elif self.calendar_type == 'M':
+            date_str = self.current_date.toString("MMM yyyy")
+        elif self.calendar_type == 'Y':
+            date_str = self.current_date.toString("yyyy")
+        else:
+            date_str = self.current_date.toString("dd-MM-yyyy")  # Default
+
+        return date_str, is_today
+
+    def update_calendar_type(self):
+        """Updates the calendar type from data_manager"""
+        self.calendar_type = self.data_manager.chart_data['type'][0]

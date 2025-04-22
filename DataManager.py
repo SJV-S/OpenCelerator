@@ -3,6 +3,7 @@ from matplotlib.markers import MarkerStyle
 import pandas as pd
 import colorsys
 import numpy as np
+from pathlib import Path
 import os
 import copy
 import json
@@ -66,12 +67,12 @@ class DataManager:
                 'y_line': None,
                 'y_text': None,
                 'text': None,
-                'font_size': 12,
+                'font_size': 10,
                 'font_color': '#000000',
                 'bg_color': '#FFFFFF',
                 'edge_color': '#000000',
                 'line_color': '#000000',
-                'linewidth': 1,
+                'linewidth': 0.5,
                 'linestyle': '-',
                 'text_mode': None,
                 'text_position': None,
@@ -163,7 +164,6 @@ class DataManager:
 
             self.user_preferences = {
                 'unix_id': str(int(time.time())),
-                'div_deceleration': True,
                 'chart_font_color': '#05c3de',
                 'chart_grid_color': '#6ad1e3',
                 'width': 11,
@@ -175,11 +175,11 @@ class DataManager:
                 'bounce_envelope': 'None',
                 'celeration_unit': 'Weekly (standard)',
                 'forward_projection': 0,
-                'home_folder': os.path.expanduser("~"),
-                'corr_style': self.default_corr_point_style,
-                'err_style': self.default_err_point_style,
-                'floor_style': self.default_floor_point_style,
-                'misc_style': self.default_misc_point_style,
+                'home_folder': str(Path.home()),
+                # 'corr_style': self.default_corr_point_style,
+                # 'err_style': self.default_err_point_style,
+                # 'floor_style': self.default_floor_point_style,
+                # 'misc_style': self.default_misc_point_style,
                 'phase_style': self.default_phase_style,
                 'aim_style': self.default_aim_style,
                 'trend_corr_style': self.default_corr_trend_style,
@@ -194,7 +194,11 @@ class DataManager:
                 'type': 'Daily',
                 'import_path': {},
                 'chart_file_path': None,
-                'column_map': {},
+                'column_map': {'d': 'dates',
+                               'm': 'minutes',
+                               'c': 'corrects',
+                               'i': 'incorrects',
+                               'o1': 'other'},
                 'date_format': None,
                 'phase': [],
                 'aim': [],
@@ -227,11 +231,12 @@ class DataManager:
 
             # Celeration unit dictionary
             self.cel_unit_dict = {'Daily': 1,
-                                  'Weekly (standard)': 7,
+                                  'Weekly': 7,
                                   'Monthly (Weekly x4)': 28,
+                                  'Six-monthly (Weekly x26)': 182,
                                   'Yearly (Weekly x52)': 365,
+                                  'Five-yearly (Yearly x5)': 1825,
                                   }
-
             # Support classes
             self.file_monitor = FileMonitor(self)
             self.event_bus = EventBus()
@@ -247,21 +252,105 @@ class DataManager:
             self.standard_date_string = '%Y-%m-%d'
             self.df_raw = pd.DataFrame()
             self.plot_columns = {}
+            self.ui_column_label = 'Series'
 
             # Apply settings
             self.get_user_preferences()
 
             # Event bus subscriptions
             self.event_bus.subscribe('column_mapped_raw_data_import', self.column_mapped_raw_data_import, has_data=True)
+            self.event_bus.subscribe('direct_data_entry', self.direct_data_entry, has_data=True)
+            self.event_bus.subscribe('sync_column_view_settings', self.sync_column_view_settings, has_data=True)
+            self.event_bus.subscribe('remove_latest_entry', self.remove_latest_entry, has_data=False)
+
+    def direct_data_entry(self, data):
+        # Process time data once
+        hours = float(data['hour_str']) if data['hour_str'] else 0
+        minutes = float(data['minute_str']) if data['minute_str'] else 0
+        seconds = float(data['second_str']) if data['second_str'] else 0
+        total_minutes = hours * 60 + minutes + seconds / 60
+        total_minutes = 1 if total_minutes == 0 else total_minutes
+
+        # Define states once
+        raw_data_exists = not self.df_raw.empty
+        is_minute_chart = 'Minute' in self.chart_data['type']
+        column_map = self.chart_data['column_map']
+
+        # Create a single row dictionary to gather all data
+        new_row = {'d': data['date_str'], 'm': total_minutes}
+
+        # Create new row
+        for sys_col, count_str in zip(data['sys_col'], data['count_str']):
+            count = int(count_str) if count_str else 0
+            new_row[sys_col] = count
+
+        # Add new row
+        if not raw_data_exists:
+            self.df_raw = pd.DataFrame([new_row])
+        else:
+            # Add the new consolidated row to df
+            new_df_row = pd.DataFrame([new_row])
+            self.df_raw = pd.concat([self.df_raw, new_df_row], ignore_index=True)
+
+        # Ensure columns without entries are not registered as NaN
+        self.df_raw = self.df_raw.fillna(0)
+
+        # Update plot_column dict
+        for user_col, sys_col in zip(data['user_col'], data['sys_col']):
+            column_name_in_plot_columns = user_col in self.plot_columns.keys()
+            if not column_name_in_plot_columns:
+                # If new column
+                self.plot_columns[user_col] = self.event_bus.emit('get_data_point_column', {'sys_col': sys_col, 'user_col': user_col})
+
+        # Update agg dfs for all involved columns
+        plot_column_keys_except_floor = [v for k, v in column_map.items() if k not in ['d', 'm']]
+        for user_col in plot_column_keys_except_floor:
+            self.plot_columns[user_col].refresh_view()
+
+        # # Refresh minute column if needed
+        if is_minute_chart:
+            minute_col_name = column_map['m']
+            if minute_col_name not in self.plot_columns.keys():
+                self.plot_columns[minute_col_name] = self.event_bus.emit('get_data_point_column', {'sys_col': 'm', 'user_col': minute_col_name})
+            self.plot_columns[minute_col_name].refresh_view()
+
+        # Refresh chart and save (only once)
+        self.event_bus.emit('update_legend')
+        self.event_bus.emit('refresh_chart')
+        self.handle_data_saving()
+
+        # Prevent file monitor from triggering a redundant update
+        self.file_monitor.acknowledge_update()
+
+    def remove_latest_entry(self):
+        # Check if dataframe is not empty
+        if not self.df_raw.empty:
+            # Remove the last row using iloc
+            self.df_raw = self.df_raw.iloc[:-1]
+
+            # Refresh data visualization
+            for col_name in self.plot_columns.keys():
+                self.plot_columns[col_name].refresh_view()
+
+            self.event_bus.emit('refresh_chart')
+
+            # Save data after removal
+            self.handle_data_saving()
 
     def ensure_backwards_compatibility(self, sample_dict, default_dict):
+        # Skip special fields that should not be modified
+        skip_fields = ['column_map']
+
         for key, value in default_dict.items():
+            if key in skip_fields:
+                continue
+
             if key not in sample_dict:
-                sample_dict[key] = value
+                sample_dict[key] = copy.deepcopy(value)
             elif isinstance(value, dict) and isinstance(sample_dict[key], dict):
                 # Apply recursively if value in default_dict and sample_dict are dictionaries
                 self.ensure_backwards_compatibility(sample_dict[key], value)
-            
+
         return sample_dict
 
     def format_y_value(self, y_value):
@@ -280,11 +369,21 @@ class DataManager:
         # Convert dimensionless x-values to days and get celeration label
         daily_slope = (np.log10(ymin) - np.log10(ymax)) / (x_to_day_count[xmin] - x_to_day_count[xmax])
         unit = self.user_preferences['celeration_unit']
-        unit_case = unit[0].lower() if unit[0].lower() != 'm' else '4w'
-        day_unit_multiple = self.cel_unit_dict[unit]
+
+        # Unit_case mapping
+        if unit.startswith('Monthly'):
+            unit_case = '4w'
+        elif unit.startswith('Six-monthly'):
+            unit_case = '26w'
+        elif unit.startswith('Five-yearly'):
+            unit_case = '5y'
+        else:
+            unit_case = unit[0].lower()
+
+        day_unit_multiple = self.cel_unit_dict.get(unit, 7)
         cel = np.power(10, daily_slope * day_unit_multiple)
         symbol = 'x'
-        if self.user_preferences['div_deceleration'] and cel < 1:
+        if cel < 1:
             symbol = '÷'
             cel = 1 / cel
         cel_label = f'c = {symbol}{cel:.2f} / {unit_case}'
@@ -315,11 +414,14 @@ class DataManager:
 
         return pos_x, pos_y, ha, angle, cel_label, text_offset_x, text_offset_y
 
-    def find_closest_date(self, date_str, date_to_pos, date_format=None):
+    def find_closest_date(self, date, date_to_pos, date_format=None):
         if date_format is None:
             date_format = self.standard_date_string
 
-        date = pd.to_datetime(date_str, format=date_format)
+        # Check if already a pandas datetime
+        if not isinstance(date, pd.Timestamp):
+            date = pd.to_datetime(date, format=date_format)
+
         min_date = min(date_to_pos.keys())
         max_date = max(date_to_pos.keys())
 
@@ -345,11 +447,6 @@ class DataManager:
             return None
 
     def _complete_partial_date(self, value_str):
-        """
-        Completes partial dates by adding default month/day values.
-        Handles year-only (YYYY) and year-month (YYYY/MM or MM/YYYY) formats.
-        Preserves the original value if no partial date pattern is detected.
-        """
         value_str = str(value_str).strip()
         min_valid_year = pd.Timestamp.min.year
         max_valid_year = pd.Timestamp.max.year
@@ -358,7 +455,7 @@ class DataManager:
         if value_str.isdigit() and len(value_str) == 4:
             year = int(value_str)
             if min_valid_year <= year <= max_valid_year:
-                return f"{year}-01-01"
+                return f"{year}-12-31"  # Changed from 01-01 to 12-31
 
         # Year/month or month/year format
         parts = value_str.replace('/', '-').replace('.', '-').split('-')
@@ -367,43 +464,80 @@ class DataManager:
                 if len(parts[0]) == 4:  # YYYY/MM
                     year, month = int(parts[0]), int(parts[1])
                     if 1 <= month <= 12 and min_valid_year <= year <= max_valid_year:
-                        return f"{year}-{month:02d}-01"
+                        # Get last day of the specified month
+                        last_day = pd.Timestamp(year, month, 1) + pd.offsets.MonthEnd(1)
+                        return last_day.strftime("%Y-%m-%d")
                 elif len(parts[1]) == 4:  # MM/YYYY
                     month, year = int(parts[0]), int(parts[1])
                     if 1 <= month <= 12 and min_valid_year <= year <= max_valid_year:
-                        return f"{year}-{month:02d}-01"
+                        # Get last day of the specified month
+                        last_day = pd.Timestamp(year, month, 1) + pd.offsets.MonthEnd(1)
+                        return last_day.strftime("%Y-%m-%d")
             except ValueError:
                 pass
 
         return value_str
 
-    def column_mapped_raw_data_import(self, file_path):
-        # Determine file type
-        if file_path.endswith('.csv'):
-            df = pd.read_csv(file_path)
-        elif file_path.endswith(('.xls', '.xlsx', '.ods')):
-            df = pd.read_excel(file_path)
-        else:
-            # Will trigger if user cancels import
-            return
+    def _validate_column_map(self, df):
+        column_map = {} if not isinstance(self.chart_data['column_map'], dict) else self.chart_data['column_map']
+        is_minute_chart = 'Minute' in self.chart_data['type']
+        valid_keys = column_map.keys() if is_minute_chart else [k for k in column_map.keys() if k != 'm']
+        valid_column_map = {k: column_map[k] for k in valid_keys}
 
-        # Recreate column map if missing or expired
-        column_map = self.chart_data['column_map']
-        if not column_map or any(col not in df.columns for col in column_map.values()):
+        return valid_column_map and all(col in df.columns for col in valid_column_map.values())
+
+    def read_file_safely(self, file_path, read_function, row_limit=None):
+        try:
+            return read_function(file_path, row_limit)
+        except Exception:
+            return None
+
+    def read_excel(self, file_path, row_limit=None):
+        return pd.read_excel(file_path, nrows=row_limit)
+
+    def read_csv(self, file_path, row_limit=None):
+        return pd.read_csv(file_path, nrows=row_limit)
+
+    def get_df_from_data_file(self, file_path, row_limit=None):
+        ext = Path(file_path).suffix
+        if ext in ['.xlsx', '.xls', '.ods']:
+            df = self.read_file_safely(file_path, self.read_excel, row_limit)
+            if df is None:
+                df = self.read_file_safely(file_path, self.read_csv, row_limit)
+        else:
+            df = self.read_file_safely(file_path, self.read_csv, row_limit)
+
+        if df is None:
+            raise Warning('Failed to read data file.')
+
+        return df
+
+    def column_mapped_raw_data_import(self, file_path):
+        # Read data sample
+        df = self.get_df_from_data_file(file_path, row_limit=20)
+
+        # In column_mapped_raw_data_import:
+        if not self._validate_column_map(df):
             # Prompt user to create new column map
             self.event_bus.emit('column_map_dialog', file_path)
-            column_map = self.chart_data['column_map']
 
-            # Final check
-            if not column_map or any(col not in df.columns for col in column_map.values()):
+            # Check again after user updated the column map
+            if not self._validate_column_map(df):
                 return False
 
+        # df approved, read all data
+        df = self.get_df_from_data_file(file_path, row_limit=None)
+
         # Rename user column names to system column names
+        column_map = self.chart_data['column_map']
         df = df.rename(columns=dict(zip(column_map.values(), column_map.keys())))
 
         # Add missing columns if any
         if 'm' not in df.columns:
             df['m'] = 1
+            # Add to column map as well
+            if 'm' not in column_map.keys():
+                self.chart_data['column_map']['m'] = 'minutes'
 
         # Drop all non-system columns
         o_cols = [col for col in df.columns if re.match(r'^o\d+$', col)]
@@ -420,19 +554,19 @@ class DataManager:
         defaults = {'c': 0, 'i': 0, 'm': 1}
         for col, default in defaults.items():
             if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(default)
-                df[col] = df[col].apply(lambda x: x if x >= 0 else default)
+                df.loc[:, col] = pd.to_numeric(df[col], errors='coerce').fillna(default)
+                df.loc[:, col] = df[col].apply(lambda x: x if x >= 0 else default)
 
         # Convert 'd' column to datetime if not already in datetime format
         date_format = self.chart_data['date_format']  # Will infer if this value is None
         if not pd.api.types.is_datetime64_any_dtype(df['d']):
 
             # If dates are incomplete
-            df['d'] = df['d'].apply(self._complete_partial_date)
+            df['d'] = df['d'].astype(str).apply(self._complete_partial_date)
 
             # Replace any invalid dates with NaN, then drop them
             try:
-                df['d'] = pd.to_datetime(df['d'], format=date_format, errors='coerce')
+                df.loc[:, 'd'] = pd.to_datetime(df['d'], format=date_format, errors='coerce')
             except ValueError:
                 df['d'] = pd.to_datetime(df['d'], errors='coerce').dt.date
             df = df.dropna(subset=['d'])
@@ -441,44 +575,60 @@ class DataManager:
         df['d'] = df['d'].dt.tz_localize(None)  # Remove timezone info
 
         # Will clean up any empty rows
-        df = df.dropna().reset_index()
+        df = df.dropna().reset_index(drop=True)
 
         # Store imported raw data (also clears any previous data points)
         self.df_raw = df
 
         return True
 
-    def validate_raw_data_format(self, file_path):
-        # Check before auto importing
-        try:
-            # Check file type and read
-            if file_path.endswith('.csv'):
-                df = pd.read_csv(file_path)
-            elif file_path.endswith(('.xls', '.xlsx', '.ods')):
-                df = pd.read_excel(file_path)
-            else:
-                return False, "Unsupported file type"
+    def default_chart_assessment(self):
+        recent_charts = self.user_preferences.get('recent_charts', [])
+        chart_settings = {
+            'type': [],
+            'major_grid_dates': [],
+            'major_grid_counts': [],
+            'minor_grid': [],
+            'floor_grid': [],
+            'cel_fan': [],
+            'credit': [],
+            'legend': []
+        }
+        if len(recent_charts) > 4:
+            for chart_file_path in recent_charts:
+                try:
+                    with open(chart_file_path, 'r') as file:
+                        loaded_chart = json.load(file)
+                except (FileNotFoundError, json.JSONDecodeError):
+                    continue
 
-            # Verify mapped columns exist
-            column_map = self.chart_data['column_map']
-            if not column_map or any(col not in df.columns for col in column_map.values()):
-                return False, "Column mapping is invalid"
+                # Check key agreement
+                if not set(self.chart_data.keys()).issubset(set(loaded_chart.keys())):
+                    continue
 
-            # Verify date column
-            date_col = column_map['d']
-            date_format = self.chart_data['date_format']
-            try:
-                if date_format:
-                    pd.to_datetime(df[date_col], format=date_format)
+                chart_settings['type'].append(loaded_chart.get('type'))
+
+                chart_view = loaded_chart['view']['chart']
+                for key in chart_settings.keys():
+                    if key != 'type':  # Skip type as it's not in chart_view
+                        chart_settings[key].append(chart_view.get(key))
+
+            # Get most frequent values for each setting
+            most_common_settings = {}
+            for key in chart_settings:
+                values = [v for v in chart_settings[key] if v is not None]
+                if values:
+                    most_common_settings[key] = max(set(values), key=values.count)
                 else:
-                    pd.to_datetime(df[date_col])
-            except:
-                return False, "Invalid date format"
+                    most_common_settings[key] = None
 
-            return True, ""
+            # Apply most common settings to chart_data
+            if 'type' in most_common_settings and most_common_settings['type']:
+                self.chart_data['type'] = most_common_settings['type']
 
-        except Exception as e:
-            return False, str(e)
+            for key in chart_settings.keys():
+                if key != 'type' and key in most_common_settings and most_common_settings[key] is not None:
+                    self.chart_data['view']['chart'][key] = most_common_settings[key]
 
     def load_chart_file(self, file_path):
         with open(file_path, 'r') as file:
@@ -491,6 +641,20 @@ class DataManager:
             if len(self.chart_data['credit']) == 3:
                 self.chart_data['credit'] = default_chart['credit']
 
+            # Clean out view keys that don't have corresponding values in column_map
+            for key in list(self.chart_data['view'].keys()):
+                # Check if key has the expected format and value is not in column_map values
+                parts = key.split('|')
+                if self.chart_data['column_map']:
+                    if len(parts) == 2 and parts[1] not in list(self.chart_data['column_map'].values()):
+                        del self.chart_data['view'][key]
+
+            # Keep only trend fits that have 'user_col' key and the value exists in column_map values
+            for trend_key in ['trend_corr', 'trend_err', 'trend_misc']:
+                self.chart_data[trend_key] = [pairs for pairs in self.chart_data[trend_key]
+                                              if 'user_col' in pairs and
+                                              pairs['user_col'] in self.chart_data['column_map'].values()]
+
         # If loaded chart file have an old file path
         if file_path != self.chart_data['chart_file_path']:
             self.chart_data['chart_file_path'] = file_path
@@ -502,23 +666,53 @@ class DataManager:
         # Find import path specific to unix id
         unix_id = self.user_preferences['unix_id']
         all_import_paths = self.chart_data['import_path']
+
         if unix_id in all_import_paths.keys() and os.path.exists(all_import_paths[unix_id]):
             import_path = all_import_paths[unix_id]
             approved = self.event_bus.emit('column_mapped_raw_data_import', import_path)
             if not approved:
                 return
         else:
-            # Manually select import path
-            data = {'title': "Data not found",
+            # Check if there's backup data in the chart file
+            if 'Backup' in self.chart_data:
+                data = {
+                    'title': "Data Restored from Backup",
+                    'message': 'Data file not found. Restored from backup.',
+                    'choice': False
+                }
+                self.event_bus.emit('trigger_user_prompt', data)
+
+                try:
+                    backup_data = pd.DataFrame.from_records(self.chart_data['Backup'])
+                    backup_data['d'] = pd.to_datetime(backup_data['d'])  # Convert to datetime
+                    self.df_raw = backup_data
+                except Exception as e:
+                    data = {
+                        'title': "Backup Restoration Failed",
+                        'message': f'Failed to restore from backup: {str(e)}. Click OK to select a data set manually.',
+                        'choice': True
+                    }
+                    accepted = self.event_bus.emit('trigger_user_prompt', data)
+                    if accepted:
+                        import_path = self.event_bus.emit('select_import_path')
+                        self.event_bus.emit('column_mapped_raw_data_import', import_path)
+            else:
+                data = {
+                    'title': "Data not found",
                     'message': 'This chart is not connected to a data set. Click OK to select one.',
-                    'choice': True}
-            accepted = self.event_bus.emit('trigger_user_prompt', data)
-            if accepted:
-                import_path = self.event_bus.emit('select_import_path')
-                self.event_bus.emit('column_mapped_raw_data_import', import_path)
+                    'choice': True
+                }
+                accepted = self.event_bus.emit('trigger_user_prompt', data)
+                if accepted:
+                    import_path = self.event_bus.emit('select_import_path')
+                    self.event_bus.emit('column_mapped_raw_data_import', import_path)
 
         # Final check
-        if unix_id in all_import_paths.keys() and os.path.exists(all_import_paths[unix_id]) and self.chart_data['column_map']:
+        has_data = hasattr(self, 'df_raw') and not self.df_raw.empty
+        valid_column_map = self.chart_data['column_map'] is not None and bool(self.chart_data['column_map'])
+
+        if (unix_id in all_import_paths.keys() and os.path.exists(
+                all_import_paths[unix_id]) and valid_column_map) or has_data:
             # Generate chart
             self.event_bus.emit('new_chart', self.chart_data['start_date'])
 
@@ -529,8 +723,9 @@ class DataManager:
             # Switch back to view mode by default
             self.event_bus.emit('view_mode_selected')
 
-            # Monitor data set for updates
-            self.file_monitor.start_monitoring(import_path)
+            # Monitor data set for updates if it exists
+            if unix_id in all_import_paths.keys() and os.path.exists(all_import_paths[unix_id]):
+                self.file_monitor.start_monitoring(all_import_paths[unix_id])
 
     def get_preferences_path(self):
         system = platform.system()
@@ -549,6 +744,57 @@ class DataManager:
         os.makedirs(config_dir, exist_ok=True)
 
         return os.path.join(config_dir, filename)
+
+    def sync_column_view_settings(self, user_col):
+        column_instance = self.plot_columns.get(user_col)
+        if column_instance:
+            key = f'{column_instance.sys_col}|{user_col}'
+            self.chart_data['view'][key] = copy.deepcopy(column_instance.view_settings)
+
+    def handle_data_saving(self):
+        has_chart_path = self.chart_data.get('chart_file_path') is not None
+        has_valid_column_map = isinstance(self.chart_data.get('column_map'), dict) and bool(self.chart_data.get('column_map'))
+        has_data = not self.df_raw.empty
+        if has_chart_path and has_data and has_valid_column_map:
+            unix_id = self.user_preferences.get('unix_id')
+            data_import_path = self.chart_data['import_path'].get(unix_id, None)
+            is_minute_chart = 'Minute' in self.chart_data['type']
+
+            if data_import_path is None or not Path(data_import_path).exists():
+                # Create and save data path using chart path
+                chart_path = Path(self.chart_data['chart_file_path'])  # Get chart file path as Path object
+                data_filename = chart_path.stem + "_data"  # Add "_data" suffix to filename
+                data_path_with_json_ext = chart_path.with_stem(data_filename)  # Apply new filename, keep path/extension
+                data_path_without_ext = data_path_with_json_ext.with_suffix('')  # Remove current extension
+                data_import_path = str(data_path_without_ext.with_suffix('.csv'))  # Add .csv extension
+                self.chart_data['import_path'][unix_id] = data_import_path
+
+            # Append '_data' to chart file name to prevent re-writing of original data file
+            chart_path = Path(self.chart_data['chart_file_path'])
+            data_filename = chart_path.stem + "_data"
+            data_path = Path(data_import_path)
+            if data_path.stem != data_filename:
+                new_data_path = data_path.with_stem(data_filename)
+                data_import_path = str(new_data_path)
+                self.chart_data['import_path'][unix_id] = data_import_path
+
+            # Save data formatting
+            df_save = self.df_raw.copy()
+            df_save = df_save.assign(d=pd.to_datetime(df_save['d'])).sort_values(by='d')
+            df_save = df_save.reindex(columns=list(self.chart_data['column_map'].keys()))  # Ensure all columns from column_map
+            has_m_column = 'm' in df_save.columns
+            only_1s_in_m = has_m_column and (df_save['m'] == 1).all()
+            if not is_minute_chart and only_1s_in_m:  # Discard floor column if safe to do so
+                df_save = df_save.drop(columns=['m'])
+            df_save = df_save.rename(columns=self.chart_data['column_map'])
+
+            # Save data
+            file_ext = Path(data_import_path).suffix.lower()
+            if file_ext in ['.xlsx', '.xls', '.ods']:
+                df_save.to_excel(data_import_path, index=False)
+            else:
+                # Default to CSV for any other extension or if extension is missing
+                df_save.to_csv(data_import_path, index=False)
 
     def save_user_preferences(self):
         filepath = self.get_preferences_path()
@@ -598,6 +844,9 @@ class DataManager:
             self.chart_data[item_type].append(item)
 
     def save_chart(self, full_path, start_date):
+        # Save raw data
+        self.handle_data_saving()
+
         # Ensure the file has a .pkl extension
         if not full_path.endswith('.json'):
             full_path += '.json'
@@ -615,6 +864,10 @@ class DataManager:
         # Save current start date in ISO format
         json_to_save['start_date'] = start_date.strftime(self.standard_date_string) if isinstance(start_date, datetime) else start_date
 
+        # Backup data to chart file
+        json_to_save['Backup'] = json.loads(self.df_raw.to_json(date_format='iso'))
+
+        # Save chart
         with open(full_path, 'w') as file:
             json.dump(json_to_save, file, indent=4)
 
@@ -669,11 +922,44 @@ class FileMonitor:
             self.last_modified_time = current_modified_time
             self.handle_file_changed(self.current_path)
 
+    def validate_raw_data_format(self, path):
+        # Check before auto importing
+        try:
+            df = self.data_manager.get_df_from_data_file(path)
+            if df is None:
+                return False, 'Failed to read data'
+
+            # Use the existing _validate_column_map method for consistent validation
+            if not self.data_manager._validate_column_map(df):
+                return False, "Column mapping is invalid"
+
+            # Verify date column
+            column_map = self.data_manager.chart_data['column_map']
+            date_col = column_map['d']
+            date_format = self.data_manager.chart_data['date_format']
+            try:
+                if date_format:
+                    pd.to_datetime(df[date_col], format=date_format)
+                else:
+                    pd.to_datetime(df[date_col])
+            except:
+                return False, "Invalid date format"
+
+            return True, ""
+
+        except Exception as e:
+            return False, str(e)
+
     def handle_file_changed(self, path):
-        approved, message = self.data_manager.validate_raw_data_format(path)
+        approved, message = self.validate_raw_data_format(path)
         if approved:
             self.data_manager.event_bus.emit('column_mapped_raw_data_import', path)
             self.data_manager.event_bus.emit('new_chart', self.data_manager.chart_data['start_date'])
+
+    def acknowledge_update(self):
+        # Reset the last modified time to current to avoid duplicate handling for direct data entry
+        if self.current_path and os.path.exists(self.current_path):
+            self.last_modified_time = os.path.getmtime(self.current_path)
 
 
 class DataPointColumn:
@@ -698,18 +984,20 @@ class DataPointColumn:
         self.trend_type_map = {
             'c': 'trend_corr',
             'i': 'trend_err',
-            'o': 'trend_misc'
+            'o': 'trend_misc',
+            'm': 'trend_misc'
         }
         self.style_type_map = {
-            'c': 'corr_style',
-            'i': 'err_style',
-            'm': 'floor_style',
-            'o': 'misc_style'
+            'c': self.data_manager.default_corr_point_style,
+            'i': self.data_manager.default_err_point_style,
+            'm': self.data_manager.default_floor_point_style,
+            'o': self.data_manager.default_misc_point_style
         }
 
+        chart_type = self.data_manager.chart_data['type']
         default_view_settings = {
-            'calendar_group': self.data_manager.chart_data['type'][0],
-            'agg_type': 'median',
+            'calendar_group': chart_type[0],
+            'agg_type': 'raw',
             'data': True,
             'trend_line': True,
             'bounce': True,
@@ -718,9 +1006,9 @@ class DataPointColumn:
         self.view_settings = view_settings if view_settings else default_view_settings
 
         # Style and data processing
-        self.column_default_style = self.data_manager.user_preferences[self.style_type_map[self.sys_col[0]]]
-        cols = ["m", "d", self.sys_col] if self.sys_col != 'm' else ['d', 'm']
-        self.df_raw = self.data_manager.df_raw.copy()[cols]
+        self.column_default_style = self.style_type_map[self.sys_col[0]]
+
+        self.raw_df = None
         self.df_agg = self.agg_data_column()
 
         # Visualization objects
@@ -731,14 +1019,41 @@ class DataPointColumn:
         self.trend_sets = []
 
     def agg_data_column(self):
+        # Copy latest raw df from data manager
+        self.df_raw = self.data_manager.df_raw.copy()
+
+        # # If rows x columns is zero (no data whatsoever)
+        if self.df_raw.size == 0:
+            columns = ['d', 'm', self.sys_col] if self.sys_col != 'm' else ['d', 'm']
+            self.df_raw = pd.DataFrame(columns=columns)
+        else:
+            # Necessary when adding new column and previous data already exist
+            if self.sys_col not in self.df_raw.columns:
+                self.df_raw[self.sys_col] = 0
+
+        # Ensure consistent datetime conversion
+        self.df_raw['d'] = pd.to_datetime(self.df_raw['d'])
+
+        # Ensure 'm' column exists
+        if 'm' not in self.df_raw.columns:
+            self.df_raw['m'] = 1
+
+        # Filter columns based on sys_col
+        col_filter = ["m", "d", self.sys_col] if self.sys_col != 'm' else ['d', 'm']
+        self.df_raw = self.df_raw[col_filter]
+
         # Initialize aggregated dataframe
         df_agg = self.df_raw.copy()
+
+        # Convert sys_col to float to allow division for frequency calculation
+        df_agg[self.sys_col] = df_agg[self.sys_col].astype('float64')
+
         agg_type = self.view_settings['agg_type']
         calendar_unit = self.view_settings['calendar_group']
 
         # Calculate frequency values
         df_agg[self.sys_col + '_total'] = df_agg[self.sys_col]  # Add separate total count column
-        if agg_type != 'sum':
+        if 'Minute' in self.data_manager.chart_data['type']:
             self._calculate_frequency(df_agg)
 
         # Perform calendar aggregation
@@ -752,33 +1067,36 @@ class DataPointColumn:
         df_agg = self._apply_styling(df_agg)
 
         # Add x values
-        df_agg['x'] = pd.to_datetime(df_agg['d']).map(self.date_to_x)
+        df_agg.loc[:, 'x'] = pd.to_datetime(df_agg['d']).map(self.date_to_x)
 
         return df_agg
 
     def _calculate_frequency(self, df):
         if self.sys_col != 'm':
-            df[self.sys_col] = round(df[self.sys_col] / df['m'], 5)
+            df.loc[:, self.sys_col] = (df[self.sys_col] / df['m'])
         else:
-            df[self.sys_col] = round(1 / df[self.sys_col] / df['m'], 5)
+            df.loc[:, self.sys_col] = (1 / df['m'])
 
     def _handle_zero_counts(self, df):
         m = df['m'] if 'Minute' in self.data_manager.chart_data['type'] else 1
         if self.data_manager.chart_data['place_below_floor']:
-            df[self.sys_col] = np.where(df[self.sys_col] == 0, (1 / m) * 0.8, df[self.sys_col])
+            df.loc[:, self.sys_col] = np.where(df[self.sys_col] == 0, (1 / m) * 0.8, df[self.sys_col])
         else:
-            df[self.sys_col] = df[self.sys_col].apply(lambda x: np.nan if x == 0 else x)
+            df.loc[:, self.sys_col] = df[self.sys_col].apply(lambda x: np.nan if x == 0 else x)
 
     def _aggregate_by_calendar(self, df, calendar_unit, agg_type):
+        df = df.copy()  # Eliminates SettingWithCopyWarning
+
         if agg_type != 'raw':
             df['d'] = pd.to_datetime(df['d'])
+            df['point_count'] = 1
             df = df.set_index('d')
-            agg_dict = {col: 'sum' if 'total' in col else agg_type for col in df.columns}
+            agg_dict = {col: 'sum' if '_total' in col or col == 'point_count' else agg_type for col in df.columns}
             df = df.resample(calendar_unit[0]).agg(agg_dict).reset_index()
 
         # Snap dates and clean up
         date_keys = sorted(list(self.date_to_x.keys()))
-        bins = pd.cut(df['d'], bins=date_keys, right=True, labels=date_keys[1:])
+        bins = pd.cut(df['d'], bins=date_keys, right=False, labels=date_keys[:-1])
         df['d'] = bins
         df.dropna(subset=['d'], inplace=True)
         df = df.dropna()
@@ -793,7 +1111,7 @@ class DataPointColumn:
         return df
 
     def _apply_styling(self, df):
-        y_style = self.data_manager.user_preferences[self.style_type_map[self.sys_col[0]]]
+        y_style = self.style_type_map[self.sys_col[0]]
 
         style_cols = {
             'face_colors': y_style['marker_face_color'],
@@ -811,6 +1129,7 @@ class DataPointColumn:
             hue = (num * 0.618034) % 1
             rgb = colorsys.hsv_to_rgb(hue, 0.8, 0.9)
             hex_color = '#{:02x}{:02x}{:02x}'.format(int(rgb[0] * 255), int(rgb[1] * 255), int(rgb[2] * 255))
+
             for col in ['face_colors', 'line_colors', 'edge_colors']:
                 style_cols[col] = [hex_color] * df.shape[0]
 
@@ -818,7 +1137,10 @@ class DataPointColumn:
             self.column_default_style['marker_edge_color'] = hex_color
             self.column_default_style['line_color'] = hex_color
 
-        return df.assign(**style_cols)
+        # Check what's going into the dataframe
+        result_df = df.assign(**style_cols)
+
+        return result_df
 
     def get_df(self):
         return self.df_agg
@@ -848,6 +1170,58 @@ class DataPointColumn:
                 'marker_size': self.df_agg['marker_sizes'].mode()[0],
                 'line_width': self.df_agg['line_width'].mode()[0]
             }
+
+    def get_data_point_metrics(self, x_i):
+        # Defaults
+        rows = None
+        points = None
+
+        df_slice = self.df_agg[self.df_agg['x'] == x_i]
+        if not df_slice.empty:
+            if self.view_settings['agg_type'] == 'raw':
+                rows = df_slice.shape[0]
+                points = None
+            elif 'point_count' in df_slice.columns:
+                rows = df_slice.shape[0]
+                points = df_slice['point_count'].sum()
+
+        # Condition flags
+        rows_none = rows is None
+        points_none = points is None
+        is_raw = points is None and rows is not None
+        multi_points = False if points is None else bool(points > 1)
+        multi_rows = False if rows is None else bool(rows > 1)
+        is_max_min = self.view_settings['agg_type'] in ["max", "min"]
+
+        # View settings
+        calendar_unit = self.view_settings['calendar_group']
+        calendar_map = {'D': 'Daily', 'W': 'Weekly', 'M': 'Monthly', 'Y': 'Yearly'}
+        calendar_group = calendar_map[calendar_unit[0]]
+        agg_type = self.view_settings['agg_type']
+
+        key = (rows_none, points_none, is_raw, multi_points, multi_rows, is_max_min)
+        if key == (True, True, False, False, False, False):
+            metrics = ''
+        elif key == (False, True, True, False, False, False):
+            metrics = f'\n{rows} individual {"entries" if rows > 1 else "entry"}'
+        elif key == (False, False, False, True, True, True):
+            metrics = f'{rows} {calendar_group} {agg_type} values of\n{points} total entries'
+        elif key == (False, False, False, True, True, False):
+            metrics = f'{rows} {calendar_group} {agg_type}s of\n{points} total entries'
+        elif key == (False, False, False, True, False, True):
+            metrics = f'{calendar_group} {agg_type} of\n{points} entries'
+        elif key == (False, False, False, True, False, False):
+            metrics = f'{calendar_group} {agg_type} of\n{points} entries'
+        elif key == (False, False, False, False, True, False):
+            metrics = f'{rows} {calendar_group} of\n1 total entry'
+        elif key == (False, False, False, False, False, False):
+            metrics = f'{calendar_group}\n1 entry'
+        elif key == (False, False, False, False, False, True):
+            metrics = f'{calendar_group} {agg_type} of\n1 entry'
+        else:
+            metrics = '\n'
+
+        return metrics
 
     def plot(self):
         x = self.df_agg['x']
@@ -922,12 +1296,13 @@ class DataPointColumn:
 
         # Remove from chart
         trend_elements = self.trend_sets[idx][0]
-        for element in trend_elements.values():
-            if element is not None:
-                try:
-                    element.remove()
-                except ValueError as e:
-                    print(e)
+        if isinstance(trend_elements, dict):
+            for element in trend_elements.values():
+                if element is not None:
+                    try:
+                        element.remove()
+                    except ValueError as e:
+                        print(e)
 
         self.trend_sets.pop(idx)
 
@@ -1072,27 +1447,59 @@ class DataPointColumn:
 
         return df[~df[self.sys_col].isna()]
 
-    def highlight(self, duration_ms=500):
+    def highlight(self, duration_ms=600, size_factor=10):
+        # Highlight data points by superimposing yellow squares
         if not self.column_marker_objects or self.is_highlighting:
             return
+
         self.is_highlighting = True
+        self.highlight_objects = []
 
-        # Store original marker sizes
-        self.original_sizes = [marker.get_sizes() for marker in self.column_marker_objects]
-
-        # Temporarily increase marker sizes
+        # For each original marker, create a superimposed yellow square
         for marker in self.column_marker_objects:
-            marker.set_sizes(marker.get_sizes() * 3)
+            # Get offset coordinates
+            offsets = marker.get_offsets()
 
-        self.ax.figure.canvas.draw()
-        QTimer.singleShot(duration_ms, self.remove_highlight)
+            # Instead of using mean size, get the individual sizes from the data frame
+            # This ensures we respect the configured sizes for each point
+            marker_sizes = self.df_agg['marker_sizes'].values
+
+            # Create superimposed yellow squares with individual sizes
+            highlight_marker = self.ax.scatter(
+                offsets[:, 0], offsets[:, 1],  # x and y coordinates from offsets
+                s=marker_sizes * size_factor,  # Apply size factor to individual marker sizes
+                marker='s',  # Square marker
+                color='yellow',
+                alpha=0.3,
+                zorder=marker.get_zorder() + 1  # Ensure it's on top
+            )
+
+            self.highlight_objects.append(highlight_marker)
+
+        # Draw the updated plot
+        self.ax.figure.canvas.draw_idle()
+
+        # Store timer as instance variable to prevent garbage collection
+        self._restore_timer = QTimer()
+        self._restore_timer.setSingleShot(True)
+        self._restore_timer.timeout.connect(self.remove_highlight)
+        self._restore_timer.start(duration_ms)
 
     def remove_highlight(self):
-        # Restore original marker sizes
-        for marker, orig_size in zip(self.column_marker_objects, self.original_sizes):
-            marker.set_sizes(orig_size)
-        self.ax.figure.canvas.draw()
+        # Remove the superimposed highlight markers
+        if hasattr(self, 'highlight_objects'):
+            for highlight_marker in self.highlight_objects:
+                highlight_marker.remove()
+
+            self.highlight_objects = []
+            self.ax.figure.canvas.draw()
+
         self.is_highlighting = False
+
+        # Clean up timer reference
+        if hasattr(self, '_restore_timer'):
+            self._restore_timer.stop()
+            del self._restore_timer
 
     def sync_visibility(self):
         for element_type, show in self.view_settings.items():
@@ -1134,6 +1541,34 @@ class DataPointColumn:
         self.df_agg = self.agg_data_column()
         self.plot()
         self.replot_cel_trends()
+        self.sync_visibility()
+
+    def delete(self):
+        # Remove all line objects
+        for line in self.column_line_objects:
+            line.remove()
+        self.column_line_objects = []
+
+        # Remove all marker objects
+        for marker in self.column_marker_objects:
+            marker.remove()
+        self.column_marker_objects = []
+
+        # Remove all trend sets
+        while self.trend_sets:
+            self.remove_trend(0, delete_from_json=True)
+
+        # Remove any highlight objects
+        if hasattr(self, 'highlight_objects'):
+            for highlight_marker in self.highlight_objects:
+                highlight_marker.remove()
+            self.highlight_objects = []
+            self.is_highlighting = False
+
+        # Clean up timer if it exists
+        if hasattr(self, '_restore_timer'):
+            self._restore_timer.stop()
+            del self._restore_timer
 
 
 class TrendFitter:
@@ -1186,40 +1621,43 @@ class TrendFitter:
         intercept = y1 - slope * x1
         return slope, intercept
 
-    def _split_middle_line_fit(self, x, y, iter_num=1000):
+    def _split_middle_line_fit(self, x, y):
+        # Optimizes the Mean Absolute Deviation (MAD) under the constraint
+        # that equal numbers of points are above and below the line
+
+        # Get the initial slope and intercept using the quarter-intersect method
         slope, intercept = self._quarter_intersect_fit(x, y)
         quarter_intersect_trend = slope * x + intercept
 
+        # Calculate the residuals
         differences = y - quarter_intersect_trend
-        max_diff, min_diff = np.max(differences), np.min(differences)
 
-        results = np.zeros((iter_num, 3))
-        for i, itr in enumerate(np.linspace(min_diff, max_diff, iter_num)):
-            adjusted_trend = slope * x + (intercept + itr)
-            errors = y - adjusted_trend
-            sse = np.mean(errors ** 2)
+        # Ensure half the points are above and half below the line
+        median_diff = np.median(differences)
 
-            above = np.sum(y > adjusted_trend)
-            below = np.sum(y < adjusted_trend)
-            results[i] = [itr, abs(above - below), sse]
-
-        min_abs_diff = np.min(results[:, 1])
-        filtered_results = results[results[:, 1] == min_abs_diff]
-        best_itr = filtered_results[np.argmin(filtered_results[:, 2])][0]
-
-        return slope, intercept + best_itr
+        return slope, intercept + median_diff
 
     def _get_trend_label(self, slope, fit_method, trend_value):
         if fit_method in ['Mean', 'Median']:
             return f'{fit_method.lower()} = {self.data_manager.format_y_value(trend_value)}'
 
         unit = self.data_manager.user_preferences['celeration_unit']
-        unit_case = unit[0].lower() if unit[0].lower() != 'm' else '4w'
-        day_unit_multiple = self.data_manager.cel_unit_dict[unit]
+
+        # Updated unit_case mapping
+        if unit.startswith('Monthly'):
+            unit_case = '4w'
+        elif unit.startswith('Six-monthly'):
+            unit_case = '26w'
+        elif unit.startswith('Five-yearly'):
+            unit_case = '5y'
+        else:
+            unit_case = unit[0].lower()
+
+        day_unit_multiple = self.data_manager.cel_unit_dict.get(unit, 7)
         cel = np.power(10, slope * day_unit_multiple)
 
         symbol = 'x'
-        if self.data_manager.user_preferences['div_deceleration'] and cel < 1:
+        if cel < 1:
             symbol = '÷'
             cel = 1 / cel
 

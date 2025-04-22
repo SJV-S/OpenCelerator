@@ -2,7 +2,7 @@ from resources.resources_rc import *
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QRadioButton, QDialogButtonBox, QGroupBox, QHBoxLayout, QLineEdit, QLabel, QPushButton, QGridLayout, QSpinBox, QScrollArea, QComboBox, QListWidget,
                                QColorDialog, QListWidgetItem, QDoubleSpinBox, QApplication, QFrame, QStackedLayout, QTextEdit, QMessageBox, QFormLayout, QWidget, QSizePolicy)
-from PySide6.QtCore import Qt, QUrl, QTimer
+from PySide6.QtCore import Qt, QUrl, QTimer, QEvent, QObject
 from PySide6.QtGui import QIcon, QDesktopServices, QPixmap
 from EventBus import EventBus
 import pandas as pd
@@ -126,8 +126,17 @@ class StartDateDialog(QDialog):
         # Create a grid layout for selection controls
         grid_layout = QGridLayout()
 
-        # Assume start_date is a pandas Timestamp object
-        start_date = self.data_manager.chart_data['start_date'].to_pydatetime()
+        start_date = self.data_manager.chart_data['start_date']
+        if hasattr(start_date, 'to_pydatetime'):
+            start_date = start_date.to_pydatetime()
+        else:
+            # Convert string to datetime using pandas
+            try:
+                start_date = pd.to_datetime(start_date).to_pydatetime()
+            except:
+                # Default to current date if parsing fails
+                start_date = pd.Timestamp.now().to_pydatetime()
+
         start_date_day = start_date.day
         current_month = start_date.month
         current_year = start_date.year
@@ -918,7 +927,7 @@ class NoteDialog(QDialog):
 
 class DataColumnMappingDialog(QDialog):
     column_placeholder = "-- Select Column --"
-    date_pattern = r'^(?=.*\d{2})(?:[^-/.\n]*[-/.]){2}[^-/.\n]*$'
+    date_pattern = r'^(?=.*\d{2})(?:[^-/.\n]*[-/.]){2,}[^-/.\n]*$'
     numeric_pattern = r'^\s*-?\d+(\.\d+)?\s*$'
 
     date_format_map = {
@@ -940,13 +949,13 @@ class DataColumnMappingDialog(QDialog):
 
         # Control variables
         self.is_minute_chart = 'Minute' in self.data_manager.chart_data['type']
-        minute_chart_msg = 'Expected to be raw counts. Will be divided by the timing floor automatically.'
+        minute_chart_msg = 'Expected to be raw counts, that will be divided by the timing floor automatically.'
 
         self.field_explanations = {
-            'Date': 'Must contain complete dates – day, month, and year. The exact date format should be handled automatically in most cases.',
-            'Dot': f'Something to increase. {minute_chart_msg if self.is_minute_chart else ""}',
-            'X': f'Something to decrease. {minute_chart_msg if self.is_minute_chart else ""}',
-            'Floor': 'Expected to be minutes. Decimal values work fine. The inverse is charted automatically.',
+            '📅': f'Date {self.data_manager.ui_column_label.lower()} goes here. The format should be detected automatically (in most cases).',
+            '⬤': f'Something to increase. {minute_chart_msg if self.is_minute_chart else ""}',
+            '✕': f'Something to decrease. {minute_chart_msg if self.is_minute_chart else ""}',
+            '⧖': 'Expected to be minutes. The inverse is charted automatically.',
             'date_format': "The date format could not be inferred. A qualified guess has been made.",
         }
 
@@ -958,14 +967,14 @@ class DataColumnMappingDialog(QDialog):
 
     def _setup_ui(self):
         self.setStyleSheet("""QWidget {font-size: 12pt; font-style: normal;}""")
-        self.setWindowTitle("Column Mapping")
-        self.setMinimumSize(350, 450)
+        self.setWindowTitle(f"{self.data_manager.ui_column_label} Mapping")
+        self.setMinimumSize(400, 500)
 
         main_layout = QVBoxLayout()
         main_layout.setSpacing(10)
         main_layout.setContentsMargins(20, 20, 20, 20)
 
-        title = QLabel("What data columns will you be using?")
+        title = QLabel(f"What data {self.data_manager.ui_column_label.lower()} will you be using?")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         main_layout.addWidget(title)
 
@@ -986,7 +995,7 @@ class DataColumnMappingDialog(QDialog):
 
         # Plus button inside scroll area
         self.add_misc_button = QPushButton()
-        self.add_misc_button.setToolTip('Add column')
+        self.add_misc_button.setToolTip(f'Add {self.data_manager.ui_column_label}')
         self.add_misc_button.setIcon(QIcon(':/images/plus-solid.svg'))
         self.add_misc_button.setStyleSheet("""
            QPushButton {
@@ -1013,20 +1022,15 @@ class DataColumnMappingDialog(QDialog):
         self.setLayout(main_layout)
 
     def _load_data(self):
-        try:
-            if self.file_path.endswith('.csv'):
-                self.df = pd.read_csv(self.file_path)
-            elif self.file_path.endswith(('.xls', '.xlsx', '.ods')):
-                self.df = pd.read_excel(self.file_path)
-            else:
-                raise ValueError("Unsupported file format")
-
-            self.df = self.df.loc[:, ~self.df.columns.str.contains('^Unnamed')]
-            self.df = self.df[self.df.columns[:20]]
-            self.df = self.df.fillna(0)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to import data file: {str(e)}")
+        # Only a smaller sample is needed, hence row_limit
+        self.df = self.data_manager.get_df_from_data_file(self.file_path, row_limit=None)
+        if self.df is None:
+            print('Column mapping popup failed to read data')
             self.reject()
+        else:
+            self.df = self.df.dropna(axis=1, how='all')  # Filter out empty columns
+            # self.df = self.df[self.df.columns[:100]]
+            self.df = self.df.fillna(0)
 
     def _setup_column_filters(self):
         self.date_columns = self._lazy_check(self.df, pattern=self.date_pattern, date_check=True)
@@ -1043,23 +1047,24 @@ class DataColumnMappingDialog(QDialog):
     def _create_dropdown_row(self, field_name, items, on_change=None):
         dropdown = QComboBox()
         dropdown.setStyleSheet("QComboBox { background-color: white;}")
+        dropdown.setFixedWidth(250)
         dropdown.addItem(self.column_placeholder)
         dropdown.addItems(items)
         if on_change:
             dropdown.currentTextChanged.connect(on_change)
 
-        tooltip_text = self.field_explanations.get(field_name.split()[0], "Additional data column")
+        tooltip_text = self.field_explanations.get(field_name.split()[0], f"Other data {self.data_manager.ui_column_label.lower()}.")
         info_label = self._create_info_label(tooltip_text)
 
         row_layout = QHBoxLayout()
         row_layout.addWidget(dropdown)
         row_layout.addWidget(info_label)
 
-        self.form_layout.addRow(QLabel(f"{field_name}: "), row_layout)
+        self.form_layout.addRow(QLabel(field_name), row_layout)
         return dropdown
 
     def _create_date_controls(self):
-        self.date_dropdown = self._create_dropdown_row('Date', self.date_columns, self.check_date_format_warning)
+        self.date_dropdown = self._create_dropdown_row('📅', self.date_columns, self.check_date_format_warning)
 
         self.date_format_row = QWidget()
         date_format_layout = QHBoxLayout(self.date_format_row)
@@ -1087,17 +1092,19 @@ class DataColumnMappingDialog(QDialog):
 
     def _create_field_dropdowns(self):
         if self.is_minute_chart:
-            dropdown = self._create_dropdown_row('Floor', self.numeric_columns, lambda *args: self.on_dropdown_changed('Floor'))
+            dropdown = self._create_dropdown_row('⧖', self.numeric_columns,
+                                                 lambda *args: self.on_dropdown_changed('Floor'))
             self.dropdowns_dict['Floor'] = dropdown
 
-        for field in ['Dot', 'X']:
-            dropdown = self._create_dropdown_row(field, self.numeric_columns,
+        icon_map = {'Dot': '⬤', 'X': '✕'}
+        for field, icon in icon_map.items():
+            dropdown = self._create_dropdown_row(icon, self.numeric_columns,
                                                  lambda *args, f=field: self.on_dropdown_changed(f))
             self.dropdowns_dict[field] = dropdown
 
     def add_misc_dropdown(self):
         misc_idx = len(self.misc_dropdowns)
-        dropdown = self._create_dropdown_row(f'M{misc_idx + 1}', self.numeric_columns,
+        dropdown = self._create_dropdown_row('▼', self.numeric_columns,
                                              lambda *args: self.on_dropdown_changed(f'M{misc_idx + 1}'))
         self.misc_dropdowns.append(dropdown)
         self.dropdowns_dict[f'Misc {misc_idx + 1}'] = dropdown
@@ -1119,7 +1126,7 @@ class DataColumnMappingDialog(QDialog):
 
         layout.addLayout(button_layout)
 
-    def _lazy_check(self, df, pattern, threshold=0.8, check_limit=20, date_check=False):
+    def _lazy_check(self, df, pattern, threshold=0.8, check_limit=10, date_check=False):
         matching_columns = []
         cols_to_check = df.columns if date_check else [col for col in df.columns if col not in self.date_columns]
         for col in cols_to_check:
@@ -1268,16 +1275,20 @@ class DataColumnMappingDialog(QDialog):
         self.data_manager.chart_data['column_map'] = column_map
         self.data_manager.chart_data['date_format'] = date_format
 
+        # Necessary when selecting mapping for non-minute charts
+        if 'm' not in column_map.keys():
+            self.data_manager.chart_data['column_map']['m'] = 'minutes'
+
         self.accept()
 
 
 class UserPrompt(QDialog):
-    def __init__(self, title="Message", message="", choice=False, parent=None):
+    def __init__(self, title="Message", message="", choice=False, ok_text="OK", cancel_text="Cancel", parent=None):
         super().__init__(parent)
         self._setup_window(title)
         self._create_layout()
         self._add_message_label(message)
-        self._add_button_box(choice)
+        self._add_button_box(choice, ok_text, cancel_text)
         self._apply_styles()
 
     def _setup_window(self, title):
@@ -1295,9 +1306,16 @@ class UserPrompt(QDialog):
         self.message_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.layout.addWidget(self.message_label)
 
-    def _add_button_box(self, choice):
-        buttons = (QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel if choice else QDialogButtonBox.StandardButton.Ok)
+    def _add_button_box(self, choice, ok_text="OK", cancel_text="Cancel"):
+        buttons = (
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel if choice else QDialogButtonBox.StandardButton.Ok)
         self.button_box = QDialogButtonBox(buttons, self)
+
+        # Set custom button text
+        self.button_box.button(QDialogButtonBox.StandardButton.Ok).setText(ok_text)
+        if choice:
+            self.button_box.button(QDialogButtonBox.StandardButton.Cancel).setText(cancel_text)
+
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
         self.layout.addWidget(self.button_box)
@@ -1324,3 +1342,364 @@ class UserPrompt(QDialog):
         return self.exec() == QDialog.DialogCode.Accepted
 
 
+class ModifyColumns(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.data_manager = DataManager()
+        self.event_bus = EventBus()
+        self.column_inputs = []
+
+        # List to keep track of buttons that need double-click protection
+        self.double_click_buttons = []
+
+        # Common button styles
+        self.button_styles = {
+            'small': """
+               QPushButton {
+                   border: 1px solid #ccc !important;
+                   border-radius: 12px !important;
+                   margin: 0px !important;
+                   padding: 0px !important;
+                   min-width: 24px !important;
+                   min-height: 24px !important;
+                   max-width: 24px !important; 
+                   max-height: 24px !important;
+               }
+               QPushButton:hover {
+                   background-color: #f0f0f0;
+               }
+            """,
+            'large': """
+               QPushButton {
+                   border: 1px solid #ccc !important;
+                   border-radius: 16px !important;
+                   margin: 10px 0 !important;
+                   padding: 0px !important;
+                   min-width: 32px !important;
+                   min-height: 32px !important;
+                   max-width: 32px !important; 
+                   max-height: 32px !important;
+               }
+               QPushButton:hover {
+                   background-color: #f0f0f0;
+               }
+            """
+        }
+
+        self._setup_ui()
+
+    def showEvent(self, event):
+        # Clear existing column inputs before repopulating
+        self._clear_column_inputs()
+        self._populate_columns()
+        super().showEvent(event)
+
+    def _clear_column_inputs(self):
+        for column in self.column_inputs:
+            widget = column['row_widget']
+            self.columns_layout.removeWidget(widget)
+            widget.hide()  # Hide widget immediately
+            widget.setParent(None)  # Remove from widget hierarchy
+            widget.deleteLater()
+
+        # Clear the tracking list
+        self.column_inputs = []
+        self.double_click_buttons = []
+
+        # Force processing events to handle pending deletions
+        QApplication.processEvents()
+
+    def _setup_ui(self):
+        self.setWindowTitle(f"Modify {self.data_manager.ui_column_label}")
+        self.setMinimumSize(350, 400)
+
+        main_layout = QVBoxLayout()
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+
+        title = QLabel(f"Manage Data {self.data_manager.ui_column_label}")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(title)
+
+        # Scrollable area for column inputs
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        container = QWidget()
+        self.columns_layout = QVBoxLayout(container)
+        self.columns_layout.setSpacing(10)
+        self.columns_layout.setContentsMargins(0, 10, 0, 10)
+        self.columns_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # Added this line
+
+        # Add plus button inside scroll area
+        self.add_column_button = QPushButton()
+        self.add_column_button.setToolTip('Add column')
+        self.add_column_button.setIcon(QIcon(':/images/plus-solid.svg'))
+        self.add_column_button.setStyleSheet(self.button_styles['large'])
+        self.add_column_button.clicked.connect(lambda: self.add_column_input())
+        self.columns_layout.addWidget(self.add_column_button, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        scroll.setWidget(container)
+        main_layout.addWidget(scroll)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
+
+        confirm_button = QPushButton("Confirm")
+        confirm_button.clicked.connect(self.confirm_changes)
+
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+
+        button_layout.addStretch()
+        button_layout.addWidget(confirm_button)
+        button_layout.addWidget(cancel_button)
+        button_layout.addStretch()
+
+        main_layout.addLayout(button_layout)
+        self.setLayout(main_layout)
+
+    def register_double_click_button(self, button, callback):
+        button.setToolTip("Double-click")
+        button.installEventFilter(self)
+        self.double_click_buttons.append((button, callback))
+
+        # Avoids type errors with receivers() method
+        button.blockSignals(True)
+
+    def eventFilter(self, obj, event):
+        # Filter events for registered double-click buttons
+        # Check if obj is a valid QObject and event is a valid QEvent
+        if not isinstance(obj, QObject) or not isinstance(event, QEvent):
+            return False
+
+        # Check double-click button
+        for button, callback in self.double_click_buttons:
+            # Make sure obj is the button object, not a QWidgetItem
+            if obj == button and event.type() == QEvent.Type.MouseButtonDblClick:
+                # Call the associated callback when double-clicked
+                callback()
+                return True  # Event was handled
+
+        # Pass event to parent class if not handled
+        return super().eventFilter(obj, event)
+
+    def _populate_columns(self):
+        column_map = self.data_manager.chart_data.get('column_map', {})
+        is_minute_chart = 'Minute' in self.data_manager.chart_data.get('type', '')
+
+        self.add_column_input(column_map['d'], 'd')
+
+        if is_minute_chart:
+            self.add_column_input(column_map['m'], 'm')
+
+        for sys_col_type in ['c', 'i']:
+            self.add_column_input(column_map.get(sys_col_type, ''), sys_col_type)
+
+        # Add any remaining sys cols
+        fixed_types = ['d', 'm', 'c', 'i']
+        other_sys_col = [k for k in column_map.keys() if k not in fixed_types]
+        for sys_col in other_sys_col:
+            user_col = column_map[sys_col]
+            self.add_column_input(user_col, sys_col)
+
+    def increment_misc_sys_col(self):
+        prefix = 'o'
+        num = 1
+        existing_o_cols = [col['sys_col'] for col in self.column_inputs if col['sys_col'].startswith('o')]
+        while f"{prefix}{num}" in existing_o_cols:
+            num += 1
+
+        return f"{prefix}{num}"
+
+    def add_column_input(self, column_name="", sys_col='o'):
+        if sys_col == 'o':
+            sys_col = self.increment_misc_sys_col()
+
+        row_widget = QWidget()
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+
+        input_field = QLineEdit(column_name)
+        input_field.setPlaceholderText("Enter column name")
+
+        # Create badge indicating column type (d, c, i, m, o)
+        column_type_label = QLabel()
+        if sys_col == 'c':
+            badge_text = "⬤"  # Dot for Increase
+        elif sys_col == 'i':
+            badge_text = "✕"  # X for Decrease
+        elif sys_col == 'm':
+            badge_text = "⧖"  # Underscore for timing
+        elif sys_col == 'd':
+            badge_text = "📅"  # Calendar for date
+        else:
+            badge_text = "▼"  # Triangle for Other
+
+        column_type_label.setText(badge_text)
+        column_type_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        column_type_label.setStyleSheet("font-size: 16px; min-width: 20px; font-style: normal; font-weight: normal;")
+
+        # Add widgets to row
+        row_layout.addWidget(column_type_label)
+        row_layout.addWidget(input_field, 1)  # Stretch factor 1
+
+        # Only add remove button if sys_col is not 'm' or 'd' AND column_name is not empty
+        remove_btn = None
+        if sys_col not in ['m', 'd'] and column_name.strip():
+            remove_btn = QPushButton()
+            remove_btn.setIcon(QIcon(':/images/minus-solid.svg'))
+            remove_btn.setStyleSheet(self.button_styles['small'])
+            row_layout.addWidget(remove_btn)
+        else:
+            # Add invisible spacer with same dimensions as the button
+            spacer = QWidget()
+            spacer.setFixedSize(24, 24)  # Same size as small button
+            spacer.setStyleSheet("background-color: transparent;")
+            row_layout.addWidget(spacer)
+
+        # Insert before the plus button
+        self.columns_layout.insertWidget(self.columns_layout.count() - 1, row_widget)
+
+        # Store reference to widgets
+        self.column_inputs.append({
+            'row_widget': row_widget,
+            'input_field': input_field,
+            'remove_btn': remove_btn,
+            'sys_col': sys_col
+        })
+
+        # Connect remove button with double-click handling if it exists
+        if remove_btn:
+            # Use a closure that captures the widget reference, not the index
+            self.register_double_click_button(
+                remove_btn,
+                lambda widget=row_widget: self.remove_column_input(widget))
+
+    def remove_column_input(self, widget):
+        # Remove widget from layout
+        self.columns_layout.removeWidget(widget)
+
+        # Clean up and delete the widget
+        widget.deleteLater()
+
+        # Remove from tracking list - find the column by widget reference
+        for i, col in enumerate(self.column_inputs):
+            if col['row_widget'] == widget:
+                self.column_inputs.pop(i)
+                break
+
+    def confirm_changes(self):
+        # Capture input data in a dictionary - each sys_col: user_col
+        is_minute_chart = 'Minute' in self.data_manager.chart_data['type']
+        old_column_map = self.data_manager.chart_data['column_map']
+        plot_columns = self.data_manager.plot_columns
+        new_column_map = {}
+
+        # Only process columns that are still valid (not removed)
+        for column in self.column_inputs:
+            sys_col = column['sys_col']
+
+            # Check if input_field is still valid before accessing
+            try:
+                user_col = column['input_field'].text().strip()
+
+                # Only include non-empty columns
+                if user_col:
+                    # Prevent duplicates by incrementing
+                    base_user_col = user_col
+                    counter = 1
+                    while user_col in new_column_map.values():
+                        user_col = f"{base_user_col}_{counter}"
+                        counter += 1
+                    new_column_map[sys_col] = user_col
+            except (RuntimeError, AttributeError):
+                # Skip this column if the widget has been deleted
+                continue
+
+        # In case m was omitted
+        if 'm' in old_column_map.keys() and 'm' not in new_column_map.keys():
+            new_column_map['m'] = old_column_map['m']
+
+        # Create a mapping of old column names to new column names
+        column_name_mapping = {}
+        for sys_col, new_user_col in new_column_map.items():
+            if sys_col in old_column_map:
+                old_user_col = old_column_map[sys_col]
+                if old_user_col != new_user_col:
+                    column_name_mapping[old_user_col] = new_user_col
+
+        # Re-map plot column instances
+        new_plot_columns = {}
+        discarded_columns = []
+        for old_key, column_obj in plot_columns.items():
+            if column_obj.sys_col in new_column_map:
+                new_key = new_column_map[column_obj.sys_col]
+                column_obj.user_col = new_key
+                new_plot_columns[new_key] = column_obj
+            else:
+                discarded_columns.append(column_obj)
+
+        # Remove discarded columns from chart
+        for column_obj in discarded_columns:
+            column_obj.delete()
+
+        # Create any new necessary columns instances
+        for sys_col, user_col in new_column_map.items():
+
+            # Skip date mapping columns
+            if sys_col == 'd':
+                continue
+            # Skip floor column for non-minute charts
+            if sys_col == 'm' and not is_minute_chart:
+                continue
+
+            if user_col not in new_plot_columns.keys():
+                new_plot_columns[user_col] = self.event_bus.emit('get_data_point_column', {'sys_col': sys_col, 'user_col': user_col})
+
+        # 1. Update view settings
+        view_settings = self.data_manager.chart_data['view']
+        new_view_settings = {}
+
+        for key, value in view_settings.items():
+            if '|' in key:
+                sys_col, user_col = key.split('|')
+                if user_col in column_name_mapping:
+                    new_key = f"{sys_col}|{column_name_mapping[user_col]}"
+                    new_view_settings[new_key] = value
+                else:
+                    new_view_settings[key] = value
+            else:
+                new_view_settings[key] = value
+
+        self.data_manager.chart_data['view'] = new_view_settings
+
+        # 2. Update data_point_styles
+        data_point_styles = self.data_manager.chart_data.get('data_point_styles', {})
+        new_data_point_styles = {}
+
+        for key, value in data_point_styles.items():
+            if isinstance(key, str) and key in column_name_mapping:
+                new_data_point_styles[column_name_mapping[key]] = value
+            else:
+                new_data_point_styles[key] = value
+
+        self.data_manager.chart_data['data_point_styles'] = new_data_point_styles
+
+        # 3. Update trend references (trend_corr, trend_err, trend_misc)
+        for trend_type in ['trend_corr', 'trend_err', 'trend_misc']:
+            trends = self.data_manager.chart_data.get(trend_type, [])
+            for trend in trends:
+                if 'user_col' in trend and trend['user_col'] in column_name_mapping:
+                    trend['user_col'] = column_name_mapping[trend['user_col']]
+
+        # Apply updates
+        self.data_manager.plot_columns = new_plot_columns
+        self.data_manager.chart_data['column_map'] = new_column_map
+        self.event_bus.emit('refresh_plot_mode_widget')
+        self.event_bus.emit('update_legend')
+        self.data_manager.handle_data_saving()
+
+        self.accept()

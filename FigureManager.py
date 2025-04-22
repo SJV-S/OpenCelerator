@@ -23,11 +23,8 @@ class FigureManager(QWidget):
 
         # Event subscriptions
         self.event_bus.subscribe('new_chart', self.new_chart, has_data=True)
+        self.event_bus.subscribe('get_data_point_column', self.get_data_point_column, has_data=True)
         self.event_bus.subscribe('refresh_chart', self.refresh)
-
-        self.fig_init = False  # Control variables for replot
-        self.test_angle = False
-        self.fan_ax = None  # Control variable for celeration fan
 
         # Managers
         self.phase_manager = PhaseManager(self)
@@ -35,6 +32,8 @@ class FigureManager(QWidget):
         self.trend_manager = TrendManager(self)
         self.view_manager = ViewManager(self)
         self.manual_manager = ManualManager(self)
+        self.drag_fan_manager = DraggableFanManager(self)
+        self.plot_draw_manager = PlotDrawManager(self)
 
         self.chart_objects = {'phase_obj': [],
                               'aim_obj': [],
@@ -65,6 +64,8 @@ class FigureManager(QWidget):
         # Other control variables
         self.deceleration_as_division = True
         self.credit_lines_space = True
+        self.test_angle = False
+        self.fig_init = False  # True after figure has been initialized on boot
 
         self.new_chart(start_date=pd.to_datetime('today').normalize())
 
@@ -104,19 +105,20 @@ class FigureManager(QWidget):
         else:
             self.Chart = scc.DailyMinute(floor_grid_on=True, start_date=start_date, width=chart_width, style_color=chart_font_color, custom_grid_color=chart_grid_color)
 
-        # Add celeration fan
-        self.fan_ax = self.Chart.add_cel_fan(chart_type, div_decrease=self.data_manager.user_preferences['div_deceleration'])
-
         self.figure, self.ax = self.Chart.get_figure()
         self.x_to_date = {v: k for k, v in self.Chart.date_to_pos.items()}
         self.credit_lines_object = None
 
-        if self.fig_init:
-            self.replot()
-        else:
-            self.fig_init = True
-            self.event_bus.emit('view_update_credit_lines')
-            self.Chart.floor_grid_lines(False)
+        # Super important to make pickable events working
+        self.ax.set_zorder(5)  # Lifts ax to the top so that pickable objects can be reached
+        self.ax.patch.set_visible(False)  # Make background transparent
+
+        # Add celeration fan
+        self.drag_fan_manager.initialize_fan()
+
+        # Run replot
+        self.replot()
+        self.fig_init = True
 
         # Control variables
         self.temp_point = None
@@ -140,26 +142,41 @@ class FigureManager(QWidget):
 
         self.canvas.draw()  # Draw the initial state of the figure
 
+    def get_data_point_column(self, data):
+        sys_col = data['sys_col']
+        user_col = data['user_col']
+        view_settings = data.get('view_settings', None)
+
+        data_point_column = DataPointColumn(ax=self.ax,
+                                            date_to_x=self.Chart.date_to_pos,
+                                            x_to_day_count=self.Chart.x_to_day_count,
+                                            sys_col=sys_col,
+                                            user_col=user_col,
+                                            view_settings=view_settings)
+        self.data_manager.plot_columns[user_col] = data_point_column
+        return data_point_column
+
     def replot(self):
         self.data_manager.plot_columns = {}  # Clear dict
-        if not self.data_manager.df_raw.empty:
-            column_map = self.data_manager.chart_data['column_map']
-            all_view_settings = self.data_manager.chart_data['view']
-            if column_map:
-                for sys_col, user_col in column_map.items():
-                    if sys_col != 'd':
-                        view_key = f'{sys_col}|{user_col}'
-                        view_settings = all_view_settings[view_key] if view_key in all_view_settings.keys() else None
-                        data_point_column = DataPointColumn(ax=self.ax,
-                                                            date_to_x=self.Chart.date_to_pos,
-                                                            x_to_day_count=self.Chart.x_to_day_count,
-                                                            sys_col=sys_col,
-                                                            user_col=user_col,
-                                                            view_settings=view_settings)
-                        self.data_manager.plot_columns[user_col] = data_point_column
-                        data_point_column.replot_cel_trends()
-                        data_point_column.plot()
-                        data_point_column.sync_visibility()
+        is_minute_chart = 'Minute' in self.data_manager.chart_data['type']
+        column_map = self.data_manager.chart_data['column_map']
+        all_view_settings = self.data_manager.chart_data['view']
+        for sys_col, user_col in column_map.items():
+
+            # Skip date mapping columns
+            if sys_col == 'd':
+                continue
+            # Skip floor column for non-minute charts
+            if sys_col == 'm' and not is_minute_chart:
+                continue
+
+            view_key = f'{sys_col}|{user_col}'
+            view_settings = all_view_settings[view_key] if view_key in all_view_settings.keys() else None
+            data = {'sys_col': sys_col, 'user_col': user_col, 'view_settings': view_settings}
+            data_point_column = self.get_data_point_column(data)
+            data_point_column.replot_cel_trends()
+            data_point_column.plot()
+            data_point_column.sync_visibility()
 
         # Reset graph objects
         self.chart_objects = {'phase_obj': [], 'aim_obj': [], 'legend_obj': []}
@@ -170,12 +187,15 @@ class FigureManager(QWidget):
         self.event_bus.emit('view_update_credit_lines')
 
         # View sync
-        self.event_bus.emit('refresh_view_dropdown')
-        self.event_bus.emit('sync_data_checkboxes')
-        self.event_bus.emit('sync_grid_checkboxes')
-        self.event_bus.emit('sync_misc_checkboxes')
+        if self.fig_init:
+            self.event_bus.emit('refresh_view_dropdown')
+            self.event_bus.emit('sync_data_checkboxes')
+            self.event_bus.emit('sync_grid_checkboxes')
+            self.event_bus.emit('sync_misc_checkboxes')
+
         self.event_bus.emit('apply_all_grid_settings')
         self.event_bus.emit('apply_all_misc_settings')
+
         self.event_bus.emit('refresh_chart')
 
     def replot_chart_objects(self):
@@ -431,6 +451,7 @@ class FigureManager(QWidget):
         # Go back to default on everything except the active chart type
         chart_type = self.data_manager.chart_data['type']
         self.data_manager.chart_data = copy.deepcopy(self.data_manager.chart_data_default)
+        self.data_manager.default_chart_assessment()
         self.data_manager.chart_data['type'] = chart_type
 
         # Clear data
@@ -753,8 +774,15 @@ class TrendManager:
                     self.plot_trend_temp_second_marker(self.trend_second_click_x)
 
     def plot_cel_trend_temp(self, temp):
-        if self.trend_temp_first_marker and self.trend_temp_second_marker and not self.trend_temp_fit_on:
-            user_col = self.event_bus.emit('get_current_trend_column')
+        user_col = self.event_bus.emit('get_current_trend_column')
+        conditions_satisfied = (
+                self.trend_temp_first_marker and
+                self.trend_temp_second_marker and
+                not self.trend_temp_fit_on and
+                user_col != ''
+        )
+
+        if conditions_satisfied:
             col_instance = self.figure_manager.data_manager.plot_columns[user_col]
             x1 = self.trend_temp_first_marker.get_xdata()[0]
             x2 = self.trend_temp_second_marker.get_xdata()[0]
@@ -1001,12 +1029,22 @@ class ViewManager:
         self.event_bus.subscribe('view_credit_lines_toggle', self.view_credit_lines_toggle, has_data=True)
         self.event_bus.subscribe('view_legend_toggle', self.view_legend_toggle, has_data=True)
 
+    def legend_pick(self, event):
+        if event.artist in self.figure_manager.chart_objects['legend_obj']:
+            self.event_bus.emit('modify_columns')
+
     def create_legend(self):
+        is_minute_chart = 'Minute' in self.figure_manager.data_manager.chart_data['type']
         columns = self.figure_manager.data_manager.plot_columns
         handles, labels = [], []
         if columns:
             for user_col, column in columns.items():
                 legend = column.get_legend()  # Returns  None if df_agg is empty
+
+                # Skip floor if not minute chart
+                if column.sys_col == 'm' and not is_minute_chart:
+                    continue
+
                 if legend:
                     handles.append(Line2D([0], [0],
                                           color=legend['line_color'],
@@ -1019,6 +1057,7 @@ class ViewManager:
                     labels.append(legend['user_col'])
 
         legend = self.figure_manager.ax.legend(handles, labels, loc='upper right', framealpha=1)
+        legend.set_picker(5)
         self.figure_manager.chart_objects['legend_obj'].append(legend)
 
     def update_legend(self):
@@ -1098,8 +1137,8 @@ class ViewManager:
             self.event_bus.emit('refresh_chart')
 
     def view_cel_fan_toggle(self, status, refresh=True):
-        self.figure_manager.fan_ax.set_visible(status)
         self.figure_manager.data_manager.chart_data['view']['chart']['cel_fan'] = bool(status)
+        self.figure_manager.drag_fan_manager.update_visibility()
 
         # Adjust right y-label if dealing with a minute chart
         chart_type = self.figure_manager.data_manager.chart_data['type']
@@ -1119,13 +1158,21 @@ class ViewManager:
             if refresh:
                 self.event_bus.emit('refresh_chart')
 
-    def view_update_credit_lines(self):
-        if self.figure_manager.credit_lines_object:
-            self.figure_manager.credit_lines_object.remove()
+    def view_on_credit_line_pick(self, event):
+        if event.artist == self.figure_manager.credit_lines_object:
+            self.event_bus.emit('view_credit_lines_popup')
 
+    def view_update_credit_lines(self):
         rows = self.figure_manager.data_manager.chart_data['credit']
         if rows:
             r1, r2 = rows
+            # Reject revision if credit lines are completely empty
+            if len(r1) + len(r2) == 0:
+                return
+
+            if self.figure_manager.credit_lines_object:
+                self.figure_manager.credit_lines_object.remove()
+
             credit = r1 + '\n\n' + r2
             x_start = -5
             self.figure_manager.credit_lines_object = self.figure_manager.ax.text(
@@ -1136,7 +1183,8 @@ class ViewManager:
                 fontsize=self.figure_manager.Chart.credit_fontsize,
                 color=self.figure_manager.Chart.style_color,
                 ha='left',
-                va='center'
+                va='center',
+                picker=5,
             )
             self.figure_manager.data_manager.chart_data['credit'] = (r1, r2)
 
@@ -1359,6 +1407,7 @@ class Hover:
         # Note-specific elements
         self.note_crosshair_connection = None
         self.note_dates = None
+        self.max_stacked_allowed = 31
 
         # Timer for rate limiting
         self.crosshair_timer = QTimer()
@@ -1393,13 +1442,14 @@ class Hover:
             y_total = y_df[y_df.not_zero_counts][sys_col + '_total'].values
 
             if y.size > 0:
-                if y.size > 20:
+                if y.size > self.max_stacked_allowed:
                     y = [np.median(y)]
             else:
                 y = [0]
 
             # Apply rounding to y values for display
-            y = [self.figure_manager.data_manager.format_y_value(y_i) for y_i in y]
+            if sys_col != 'm':
+                y = [self.figure_manager.data_manager.format_y_value(y_i) for y_i in y]
 
             # Determine visibility based on thresholds and view settings
             threshold = 0 if 'minute' in chart_type else 0.99
@@ -1428,10 +1478,7 @@ class Hover:
         for val, val_tot, show, user_col, sys_col in zip(values, values_total, visibility, user_cols, sys_cols):
             if show:
                 median = np.median(val)
-                if isinstance(val, float):
-                    value = self.figure_manager.data_manager.format_y_value(1 / median)
-                else:
-                    value = int(median) if median.is_integer() else median
+                value = int(median) if median.is_integer() else median
 
                 if sys_col == 'm':
                     value = f'{1 / value:.2f}'
@@ -1746,4 +1793,337 @@ class Hover:
             )
             self.note_crosshair_blit(x)
 
+
+class DraggableFanManager:
+    def __init__(self, figure_manager):
+        self.figure_manager = figure_manager
+        self.event_bus = figure_manager.event_bus
+
+        # Center point and fan properties
+        self.y_mid = None
+        self.x_mid = None
+        self.fan_lines = []
+        self.fan_texts = []
+        self.base_text_distance_factor = 1.1
+        self.ms_throttle = 50
+
+        # Text labels for standard celeration and period
+        self.standard_text = None
+        self.period_text = None
+
+        # Line data for transformation (missing in original)
+        self.line_data = []
+
+        # Drag state
+        self.pressed = False
+        self.drag_start_x = None
+        self.drag_start_y = None
+        self.drag_start_mid_x = None
+        self.drag_start_mid_y = None
+
+        # Throttling mechanism
+        self.update_pending = False
+        self.last_mouse_event = None
+        self.throttle_timer = QTimer()
+        self.throttle_timer.setInterval(self.ms_throttle)
+        self.throttle_timer.timeout.connect(self.process_pending_update)
+
+    def calculate_text_distance(self, label):
+        # Adjust based on label length
+        char_adjustment = 0.05 * len(label)  # 5% increase per character
+        return self.base_text_distance_factor + char_adjustment
+
+    def initialize_fan(self):
+        # Initialize fan's midpoint
+        chart_type = self.figure_manager.data_manager.chart_data['type']
+
+        # Configure based on chart type
+        is_minute_chart = 'Minute' in chart_type
+        self.y_mid_offset = 22
+
+        # Set midpoint and offset based on chart type
+        if is_minute_chart:
+            xmax_proportional_offset = -0.22
+            self.y_mid = 0.01
+            # Adjust right y-label
+            self.figure_manager.ax.yaxis.set_label_coords(-0.1, 0.7)
+        else:
+            xmax_proportional_offset = 1.04
+            self.y_mid = 1000
+
+        self.x_mid = self.figure_manager.Chart.xmax * xmax_proportional_offset
+
+        # Define text configurations by chart type
+        fan_dict = {
+            'DailyMinute': "per week",
+            'WeeklyMinute': "per month",
+            'MonthlyMinute': 'per 6 months',
+            'YearlyMinute': 'per 5 years',
+            'Daily': "per week",
+            'Weekly': "per month",
+            'Monthly': 'per 6 months',
+            'Yearly': 'per 5 years',
+        }
+
+        per_unit_str = fan_dict[chart_type]
+
+        # Store the per unit string for later use
+        self.per_unit_str = per_unit_str
+
+        # Add text annotations and store them as class attributes
+        self.standard_text = self.figure_manager.ax.text(
+            self.x_mid, self.y_mid * self.y_mid_offset,
+            "Standard\nceleration",
+            color=self.figure_manager.Chart.custom_grid_color,
+            weight='bold',
+            ha='left', va='center',
+            fontsize=self.figure_manager.Chart.general_fontsize * 0.7,
+            picker=True
+        )
+
+        self.period_text = self.figure_manager.ax.text(
+            self.x_mid, self.y_mid / self.y_mid_offset,
+            per_unit_str,
+            color=self.figure_manager.Chart.custom_grid_color,
+            weight='bold',
+            ha='left', va='center',
+            fontsize=self.figure_manager.Chart.general_fontsize * 0.7,
+            picker=True
+        )
+
+        # Create initial fan
+        self.create_fan()
+
+    def create_fan(self, fan_size=0.09):
+        # Clear previous fan elements but keep text objects
+        self.cleanup(keep_texts=True)
+
+        # Celeration values
+        cel_values = [16, 4, 2, 1.4, 1, 1 / 1.4, 1 / 2, 1 / 4, 1 / 16]
+        labels = ['×16', '×4', '×2', '×1.4', '×1', '÷1.4', '÷2', '÷4', '÷16']
+
+        # Get chart bounds
+        x_min, x_max = self.figure_manager.ax.get_xlim()
+
+        # Line length
+        actual_line_length = (x_max - x_min) * fan_size
+
+        # Get unit case
+        chart_type = self.figure_manager.data_manager.chart_data['type'][0].lower()
+        doubling = {'d': 7, 'w': 5, 'm': 6, 'y': 5}
+        unit = doubling[chart_type]
+
+        # Draw each line with picker enabled
+        for cel, label in zip(cel_values, labels):
+            # Calculate angle based on celeration
+            angle = np.degrees(np.atan(np.log10(cel) / (np.log10(2) / np.tan(np.radians(34)))))
+            angle_rad = np.radians(angle)
+
+            # Calculate line endpoints
+            dx = actual_line_length * np.cos(angle_rad)
+            dy = actual_line_length * np.sin(angle_rad)
+            x_end = self.x_mid + dx
+            y_end = self.y_mid * (10 ** (np.log10(cel) * dx / unit))
+
+            # Calculate text distance factor based on label length
+            distance = self.calculate_text_distance(label)
+
+            # Update line data
+            self.line_data.append({
+                'cel': cel,
+                'angle': angle,
+                'angle_rad': angle_rad,
+                'dx': dx,
+                'dy': dy,
+                'unit': unit,
+                'distance_factor': distance
+            })
+
+            # Calculate text position
+            text_dx = dx * distance
+            text_x = self.x_mid + text_dx
+            text_y = self.y_mid * (10 ** (np.log10(cel) * text_dx / unit))
+
+            # Create line with picker
+            line = Line2D([self.x_mid, x_end], [self.y_mid, y_end],
+                          linestyle='-', color=self.figure_manager.Chart.custom_grid_color,
+                          linewidth=1, picker=True, pickradius=10, clip_on=False)
+            self.figure_manager.ax.add_line(line)
+            self.fan_lines.append(line)
+
+            # Create label
+            text = self.figure_manager.ax.text(
+                text_x, text_y, label,
+                ha='center', va='center',
+                color=self.figure_manager.Chart.custom_grid_color,
+                weight='bold', rotation=angle,
+                fontsize=self.figure_manager.Chart.general_fontsize * 0.6
+            )
+            self.fan_texts.append(text)
+
+        # Redraw
+        self.event_bus.emit('refresh_chart')
+
+    def update_fan_position(self):
+        """Update fan position based on current x_mid and y_mid values"""
+        # Use stored line_data for transformation
+        for i, line_info in enumerate(self.line_data):
+            cel = line_info['cel']
+            dx = line_info['dx']
+            unit = line_info['unit']
+            distance_factor = line_info['distance_factor']
+
+            # Update line position
+            x_end = self.x_mid + dx
+            y_end = self.y_mid * (10 ** (np.log10(cel) * dx / unit))
+            self.fan_lines[i].set_data([self.x_mid, x_end], [self.y_mid, y_end])
+
+            # Update text position
+            text_dx = dx * distance_factor
+            text_x = self.x_mid + text_dx
+            text_y = self.y_mid * (10 ** (np.log10(cel) * text_dx / unit))
+            self.fan_texts[i].set_position((text_x, text_y))
+
+        # Update position of standard and period texts
+        if self.standard_text and self.period_text:
+            self.standard_text.set_position((self.x_mid, self.y_mid * self.y_mid_offset))
+            self.period_text.set_position((self.x_mid, self.y_mid / self.y_mid_offset))
+
+        # Redraw chart
+        self.event_bus.emit('refresh_chart')
+
+    def update_visibility(self):
+        # Set visibility according to chart settings
+        show_fan = self.figure_manager.data_manager.chart_data['view']['chart']['cel_fan']
+        for line in self.fan_lines:
+            line.set_visible(show_fan)
+        for text in self.fan_texts:
+            text.set_visible(show_fan)
+
+        # Update visibility of standard and period texts
+        if self.standard_text and self.period_text:
+            self.standard_text.set_visible(show_fan)
+            self.period_text.set_visible(show_fan)
+
+    def on_pick(self, event):
+        # Start drag when a fan line or text is picked
+        if event.artist in self.fan_lines or event.artist in [self.standard_text, self.period_text]:
+            self.pressed = True
+
+            # Store the mouse position at click time in display coordinates
+            self.drag_start_x = event.mouseevent.x
+            self.drag_start_y = event.mouseevent.y
+
+            # Store the current fan center
+            self.drag_start_mid_x = self.x_mid
+            self.drag_start_mid_y = self.y_mid
+
+            # Stop any pending throttle timer
+            self.throttle_timer.stop()
+            self.update_pending = False
+
+    def on_release(self, event):
+        # End drag
+        self.pressed = False
+        self.throttle_timer.stop()
+        self.update_pending = False
+        self.last_mouse_event = None
+
+    def on_motion(self, event):
+        # Handle dragging motion - continue even outside axes
+        if not self.pressed:
+            return
+
+        # Store the event for later processing
+        self.last_mouse_event = event
+
+        # If no update is pending, start the timer
+        if not self.update_pending:
+            self.update_pending = True
+            self.throttle_timer.start()
+
+    def process_pending_update(self):
+        """Process the most recent mouse event at the throttled rate"""
+        if self.last_mouse_event is None:
+            self.throttle_timer.stop()
+            self.update_pending = False
+            return
+
+        event = self.last_mouse_event
+        self.last_mouse_event = None
+
+        # Convert displacement to data coordinates
+        display_to_data = self.figure_manager.ax.transData.inverted()
+
+        # Get the data coordinates of the drag start point and current point
+        start_data = display_to_data.transform((self.drag_start_x, self.drag_start_y))
+        current_data = display_to_data.transform((event.x, event.y))
+
+        # Calculate the displacement in data coordinates
+        dx_data = current_data[0] - start_data[0]
+
+        # Update fan center position
+        new_x_mid = self.drag_start_mid_x + dx_data
+
+        # Calculate the y-axis ratio
+        if start_data[1] > 0 and current_data[1] > 0:  # Prevent divide by zero or negative logs
+            y_ratio = current_data[1] / start_data[1]
+            new_y_mid = self.drag_start_mid_y * y_ratio
+
+            # Update the position without bounds checking to allow dragging outside
+            self.x_mid = new_x_mid
+            self.y_mid = new_y_mid
+            self.update_fan_position()
+
+    def cleanup(self, keep_texts=False):
+        # Remove fan elements
+        for line in self.fan_lines:
+            line.remove()
+        for text in self.fan_texts:
+            text.remove()
+
+        # Only remove text labels if keep_texts is False
+        if not keep_texts:
+            if self.standard_text:
+                self.standard_text.remove()
+                self.standard_text = None
+
+            if self.period_text:
+                self.period_text.remove()
+                self.period_text = None
+
+        self.fan_lines = []
+        self.fan_texts = []
+        self.line_data = []
+
+        # Stop any pending updates
+        self.throttle_timer.stop()
+
+
+class PlotDrawManager:
+    def __init__(self, figure_manager):
+        self.figure_manager = figure_manager
+        self.event_bus = self.figure_manager.event_bus
+
+        # Selected date line
+        self.selected_date_line = None
+
+        # Event subscriptions
+        self.event_bus.subscribe('plot_cleanup', self.plot_cleanup)
+
+    def plot_cleanup(self):
+        if self.selected_date_line:
+            self.selected_date_line.remove()
+            self.selected_date_line = None
+
+        self.event_bus.emit('refresh_chart')
+
+    def draw_date_line(self, x_pos):
+        self.plot_cleanup()  # Clear any existing line
+
+        if x_pos is not None:
+            self.selected_date_line = self.figure_manager.ax.axvline(x=x_pos, color='magenta', linestyle='-', linewidth=2, alpha=0.2)
+            self.event_bus.emit('refresh_chart')
+
+        return self.selected_date_line
 
