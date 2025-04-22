@@ -29,5 +29,8 @@
         <file>../images/style-svgrepo-com.svg</file>
         <file>../images/annotation.svg</file>
         <file>../images/circle-question-regular.svg</file>
+        <file>../images/arrow-left-solid.svg</file>
+        <file>../images/arrow-right-solid.svg</file>
+
     </qresource>
 </RCC>
