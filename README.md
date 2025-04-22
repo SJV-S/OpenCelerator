@@ -24,7 +24,8 @@ Contact: opencelerator.9qpel@simplelogin.com
 - Dynamic start date
 - Selective customization of data points
 - Supports the entire family of standard celeration charts
-
+- Direct data entry
+- Import data from spreadsheets
 
 ## Download & Installation
 
