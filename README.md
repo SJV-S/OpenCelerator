@@ -70,12 +70,6 @@ sudo apt install flatpak
 sudo dnf install flatpak
 ```
 ```
-sudo pacman -S flatpak
-```
-```
-sudo zypper install flatpak
-```
-```
 flatpak install --user OpenCelerator.flatpak
 ```
 
