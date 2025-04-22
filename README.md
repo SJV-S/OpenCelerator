@@ -76,7 +76,7 @@ flatpak install --user OpenCelerator.flatpak
 
 **OpenCelerator will forever remain free and open-source**
 
-About half a year's work has gone into this project. There is no team or funding behind it. Just me. If you find the app useful and would like to see its development continue, please consider donating.
+An incredible amount of work has gone into this project. If you find the app useful and would like to see its development continue, please consider donating. The project is only kept alive thanks to your support.
 
 PayPal: https://paypal.me/devpigeon<br>
 Patreon: https://www.patreon.com/johanpigeon/membership<br>
@@ -89,7 +89,7 @@ Bitcoin Lightning (LNURL): pigeon@getalby.com<br>
 - Share this tool with others who might find it useful.
 - If you use this in an official capacity, please acknowledge by linking to my GitHub: https://github.com/SJV-S/OpenCelerator
 
-I am also looking for work! I have a PhD in behavior analysis and obviously know a little bit about coding. Will share CV upon request.<br>
+I am also looking for work. I have a PhD in behavior analysis and obviously know a little bit about coding. Will share CV upon request.<br>
 
 
 
