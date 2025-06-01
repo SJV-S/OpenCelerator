@@ -37,10 +37,6 @@ The app can be downloaded below. Extract content and launch by running executabl
 - [Linux (AppImage)](https://github.com/SJV-S/OpenCelerator/releases/download/0.11.0/OpenCelerator-v0.11.0-Linux.AppImage)
 - [Linux (Flatpak)](https://github.com/SJV-S/OpenCelerator/releases/download/0.11.0/OpenCelerator-v0.11.0-Linux.flatpak)
 
-#### FAQ
-- "I am getting a scary warning when installing." This is normal and inevitable when running unregistered third-party apps. The only way to avoid this is by purchasing a security certificate. That would cost a lot of time and money, and is unnecessary when the code is open-source. I am also transparent about my identity in the "About me" link above.
-- "Is it possible to enter the data directly into the chart?" Yes. Go to "Home" and click on "Plot".
-
 
 #### Mac
 How to run on Sequoia: [video](https://www.youtube.com/watch?v=scdAMJDGJvA)
@@ -70,6 +66,10 @@ sudo dnf install flatpak
 ```
 flatpak install --user OpenCelerator.flatpak
 ```
+
+#### FAQ
+- "I am getting a scary warning when installing." This is normal and inevitable when running unregistered third-party apps. The only way to avoid this is by purchasing a security certificate. That would cost a lot of time and money, and is unnecessary when the code is open-source. I am also transparent about my identity in the "About me" link above.
+- "Is it possible to enter the data directly into the chart?" Yes. Go to "Home" and click on "Plot".
 
 ## Images
 
