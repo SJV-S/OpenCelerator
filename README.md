@@ -29,11 +29,17 @@ Contact: opencelerator.9qpel@simplelogin.com
 
 ## Download & Installation
 
-The latest version 0.11.0 can be [downloaded here](https://github.com/SJV-S/OpenCelerator/releases/tag/0.11.0). Extract content in your preferred directory. Launch by running executable.
+The app can be downloaded below. Extract content and launch by running executable. The latest version will be fetched automatically.
+
+- [macOS (Apple Silicon)](https://github.com/SJV-S/OpenCelerator/releases/download/0.11.0/OpenCelerator-v0.11.0-macOS-Sequoia-Apple-chip.zip)
+- [macOS (Intel)](https://github.com/SJV-S/OpenCelerator/releases/download/0.11.0/OpenCelerator-v0.11.0-macOS-Sequoia-Intel-processor.zip)
+- [Windows 10 and 11](https://github.com/SJV-S/OpenCelerator/releases/download/0.11.0/OpenCelerator-v0.11.0-Windows-10-and-11.zip)
+- [Linux (appimage)](https://github.com/SJV-S/OpenCelerator/releases/download/0.11.0/OpenCelerator-v0.11.0-Linux.AppImage)
+- [Linux (flatpak)](https://github.com/SJV-S/OpenCelerator/releases/download/0.11.0/OpenCelerator-v0.11.0-Linux.flatpak)
 
 #### FAQ
-- “Which file(s) should I download?” To run the app, you only need one single file with the name of your operating system. Normal users can ignore the source code and manifest files.
 - "I am getting a scary warning when installing." This is normal and inevitable when running unregistered third-party apps. The only way to avoid this is by purchasing a security certificate. That would cost a lot of time and money, and is unnecessary when the code is open-source. I am also transparent about my identity in the "About me" link above.
+- "Is it possible to enter the data directly into the chart?" Yes. Go to "Home" and click on "Plot".
 
 
 #### Mac
