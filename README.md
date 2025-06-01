@@ -31,8 +31,8 @@ Contact: opencelerator.9qpel@simplelogin.com
 
 The app can be downloaded below. Pick your platform, extract content, and launch by running executable. The latest version will be fetched automatically.
 
-- [macOS (Apple Silicon)](https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-macOS-Sequoia-Apple-chip.zip)
-- [macOS (Intel)](https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-macOS-Sequoia-Intel-processor.zip)
+- [macOS Sequoia (Apple Silicon)](https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-macOS-Sequoia-Apple-chip.zip)
+- [macOS Sequoia (Intel)](https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-macOS-Sequoia-Intel-processor.zip)
 - [Windows 10 and 11](https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-Windows-10-and-11.zip)
 - [Linux (AppImage)](https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-Linux.AppImage)
 - [Linux (Flatpak)](https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-Linux.flatpak)
