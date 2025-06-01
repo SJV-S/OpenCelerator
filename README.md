@@ -86,7 +86,6 @@ flatpak install --user OpenCelerator.flatpak
 An incredible amount of work has gone into this project. If you find the app useful and would like to see its development continue, please consider donating. The project is only kept alive thanks to your support.
 
 PayPal: https://paypal.me/devpigeon<br>
-Patreon: https://www.patreon.com/johanpigeon/membership<br>
 Bitcoin (base chain): bc1qg8y5pxv5g86mhj59xdk89r6tr70zdw6rh6rwh4<br>
 Bitcoin Lightning (LNURL): pigeon@getalby.com<br>
 
