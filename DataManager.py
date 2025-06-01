@@ -1,17 +1,5 @@
-from PySide6.QtCore import QTimer
-from matplotlib.markers import MarkerStyle
-import pandas as pd
-import colorsys
-import numpy as np
-from pathlib import Path
-import os
-import copy
-import json
-import platform
-import time
-import re
-from datetime import datetime
-from EventBus import EventBus
+from app_imports import *
+from EventStateManager import EventBus
 
 
 class DataManager:
@@ -75,7 +63,7 @@ class DataManager:
                 'linewidth': 0.5,
                 'linestyle': '-',
                 'text_mode': None,
-                'text_position': None,
+                'text_position': 0.8,
             }
 
             self.default_aim_style = {
@@ -163,7 +151,9 @@ class DataManager:
             }
 
             self.user_preferences = {
-                'unix_id': str(int(time.time())),
+                'machine_id': self.get_machine_id(),
+                'db_location': {'local': self.get_config_directory(as_str=True), 'cloud': '', 'other': ''},
+                'last_open_tab': 'local',
                 'chart_font_color': '#05c3de',
                 'chart_grid_color': '#6ad1e3',
                 'width': 11,
@@ -176,10 +166,9 @@ class DataManager:
                 'celeration_unit': 'Weekly (standard)',
                 'forward_projection': 0,
                 'home_folder': str(Path.home()),
-                # 'corr_style': self.default_corr_point_style,
-                # 'err_style': self.default_err_point_style,
-                # 'floor_style': self.default_floor_point_style,
-                # 'misc_style': self.default_misc_point_style,
+                'import_data_folder': '',
+                'chart_export_folder': '',
+                'export_csv_folder': '',
                 'phase_style': self.default_phase_style,
                 'aim_style': self.default_aim_style,
                 'trend_corr_style': self.default_corr_trend_style,
@@ -188,10 +177,15 @@ class DataManager:
                 'recent_imports': [],
                 'recent_charts': [],
                 'autosave': False,
+                'update': 'Off',
+                'last_update_check': '',
+                'last_vacuum': 0,
+                'version': '',
             }
 
             self.chart_data = {
                 'type': 'Daily',
+                'data_modified': '',  # Will be a unix timestamp
                 'import_path': {},
                 'chart_file_path': None,
                 'column_map': {'d': 'dates',
@@ -222,6 +216,7 @@ class DataManager:
                                    'legend': False,
                                    }
                          },  # Uses sys and user cols as keys for specific columns
+                'raw_data': {},
             }
 
             # Necessary for backwards compatibility corrections
@@ -238,8 +233,9 @@ class DataManager:
                                   'Five-yearly (Yearly x5)': 1825,
                                   }
             # Support classes
-            self.file_monitor = FileMonitor(self)
             self.event_bus = EventBus()
+            self.file_manager = FileManager(self)
+            self.sqlite_manager = SQLiteManager(self)
 
             # Control variables
             self.initialized = True  # Set this attribute after initializing
@@ -253,6 +249,7 @@ class DataManager:
             self.df_raw = pd.DataFrame()
             self.plot_columns = {}
             self.ui_column_label = 'Series'
+            self.ui_cel_label = 'Change'
 
             # Apply settings
             self.get_user_preferences()
@@ -273,15 +270,17 @@ class DataManager:
 
         # Define states once
         raw_data_exists = not self.df_raw.empty
-        is_minute_chart = 'Minute' in self.chart_data['type']
-        column_map = self.chart_data['column_map']
+        chart_type = self.event_bus.emit("get_chart_data", ['type', 'Daily'])
+        is_minute_chart = 'Minute' in chart_type
+        column_map = self.event_bus.emit("get_chart_data", ['column_map', {}])
 
         # Create a single row dictionary to gather all data
-        new_row = {'d': data['date_str'], 'm': total_minutes}
+        new_row = {'d': pd.to_datetime(data['date_str']),
+                   'm': total_minutes}
 
         # Create new row
         for sys_col, count_str in zip(data['sys_col'], data['count_str']):
-            count = int(count_str) if count_str else 0
+            count = int(count_str) if count_str else np.nan
             new_row[sys_col] = count
 
         # Add new row
@@ -291,9 +290,6 @@ class DataManager:
             # Add the new consolidated row to df
             new_df_row = pd.DataFrame([new_row])
             self.df_raw = pd.concat([self.df_raw, new_df_row], ignore_index=True)
-
-        # Ensure columns without entries are not registered as NaN
-        self.df_raw = self.df_raw.fillna(0)
 
         # Update plot_column dict
         for user_col, sys_col in zip(data['user_col'], data['sys_col']):
@@ -318,9 +314,6 @@ class DataManager:
         self.event_bus.emit('update_legend')
         self.event_bus.emit('refresh_chart')
         self.handle_data_saving()
-
-        # Prevent file monitor from triggering a redundant update
-        self.file_monitor.acknowledge_update()
 
     def remove_latest_entry(self):
         # Check if dataframe is not empty
@@ -354,13 +347,13 @@ class DataManager:
         return sample_dict
 
     def format_y_value(self, y_value):
-        if y_value >= 10:
+        if y_value >= 100:
             return int(y_value)
-        elif y_value >= 1:
+        elif y_value >= 10:
             return round(y_value, 1)
-        elif y_value >= 0.1:
+        elif y_value >= 1:
             return round(y_value, 2)
-        elif y_value >= 0.01:
+        elif y_value >= 0.1:
             return round(y_value, 3)
         else:
             return round(y_value, 4)
@@ -368,7 +361,7 @@ class DataManager:
     def get_aim_slope_text(self, text_pos, xmin, xmax, ymin, ymax, x_to_day_count):
         # Convert dimensionless x-values to days and get celeration label
         daily_slope = (np.log10(ymin) - np.log10(ymax)) / (x_to_day_count[xmin] - x_to_day_count[xmax])
-        unit = self.user_preferences['celeration_unit']
+        unit = self.event_bus.emit("get_user_preference", ['celeration_unit', 'Weekly (standard)'])
 
         # Unit_case mapping
         if unit.startswith('Monthly'):
@@ -388,7 +381,7 @@ class DataManager:
             cel = 1 / cel
         cel_label = f'c = {symbol}{cel:.2f} / {unit_case}'
 
-        chart_type = self.chart_data['type'][0].lower()
+        chart_type = self.event_bus.emit("get_chart_data", ['type', 'Daily'])[0].lower()
         doubling = {'d': 7, 'w': 5, 'm': 6, 'y': 5}
         unit = doubling[chart_type]
         celeration = (ymax / ymin) ** (unit / (xmax - xmin))
@@ -434,17 +427,22 @@ class DataManager:
             return None
 
     def find_closest_x(self, x, date_to_pos):
-        if x is not None:
-            if x in date_to_pos.values():
-                return x
-            elif (x - 1) in date_to_pos.values():
-                return x - 1
-            elif (x + 1) in date_to_pos.values():
-                return x + 1
-            else:
-                return None
-        else:
+        if x is None:
+            print('find_closest_x returned None')
             return None
+
+        if isinstance(x, float):
+            x = int(x)
+
+        valid_x_values = list(date_to_pos.values())
+
+        # Fast path: check exact and adjacent matches first
+        for candidate in [x, x - 1, x + 1]:
+            if candidate in valid_x_values:
+                return candidate
+
+        # Slow path: find closest match
+        return min(valid_x_values, key=lambda valid_x: abs(valid_x - x))
 
     def _complete_partial_date(self, value_str):
         value_str = str(value_str).strip()
@@ -480,7 +478,8 @@ class DataManager:
 
     def _validate_column_map(self, df):
         column_map = {} if not isinstance(self.chart_data['column_map'], dict) else self.chart_data['column_map']
-        is_minute_chart = 'Minute' in self.chart_data['type']
+        chart_type = self.event_bus.emit("get_chart_data", ['type', 'Daily'])
+        is_minute_chart = 'Minute' in chart_type
         valid_keys = column_map.keys() if is_minute_chart else [k for k in column_map.keys() if k != 'm']
         valid_column_map = {k: column_map[k] for k in valid_keys}
 
@@ -499,22 +498,26 @@ class DataManager:
         return pd.read_csv(file_path, nrows=row_limit)
 
     def get_df_from_data_file(self, file_path, row_limit=None):
-        ext = Path(file_path).suffix
-        if ext in ['.xlsx', '.xls', '.ods']:
-            df = self.read_file_safely(file_path, self.read_excel, row_limit)
-            if df is None:
+        if file_path:
+            ext = Path(file_path).suffix
+            if ext in ['.xlsx', '.xls', '.ods']:
+                df = self.read_file_safely(file_path, self.read_excel, row_limit)
+                if df is None:
+                    df = self.read_file_safely(file_path, self.read_csv, row_limit)
+            else:
                 df = self.read_file_safely(file_path, self.read_csv, row_limit)
-        else:
-            df = self.read_file_safely(file_path, self.read_csv, row_limit)
 
-        if df is None:
-            raise Warning('Failed to read data file.')
+            if df is None:
+                raise Warning('Failed to read data file.')
 
-        return df
+            return df
 
     def column_mapped_raw_data_import(self, file_path):
         # Read data sample
         df = self.get_df_from_data_file(file_path, row_limit=20)
+        if df is None:
+            print('df is none')
+            return
 
         # In column_mapped_raw_data_import:
         if not self._validate_column_map(df):
@@ -523,13 +526,14 @@ class DataManager:
 
             # Check again after user updated the column map
             if not self._validate_column_map(df):
+                print('Column map rejected.')
                 return False
 
         # df approved, read all data
         df = self.get_df_from_data_file(file_path, row_limit=None)
 
         # Rename user column names to system column names
-        column_map = self.chart_data['column_map']
+        column_map = self.event_bus.emit("get_chart_data", ['column_map', {}])
         df = df.rename(columns=dict(zip(column_map.values(), column_map.keys())))
 
         # Add missing columns if any
@@ -537,7 +541,7 @@ class DataManager:
             df['m'] = 1
             # Add to column map as well
             if 'm' not in column_map.keys():
-                self.chart_data['column_map']['m'] = 'minutes'
+                self.event_bus.emit("update_chart_data", [['column_map', 'm'], 'minutes'])
 
         # Drop all non-system columns
         o_cols = [col for col in df.columns if re.match(r'^o\d+$', col)]
@@ -545,20 +549,28 @@ class DataManager:
         data_cols = standard_cols + o_cols
         df = df[data_cols]
 
-        # Clean columns starting with 'o' - set negatives to 0
+        # Clean columns misc
         for col in [c for c in df.columns if c.startswith('o')]:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            df[col] = df[col].apply(lambda x: x if x >= 0 else 0)
 
-        # Clean specific columns with defaults
-        defaults = {'c': 0, 'i': 0, 'm': 1}
-        for col, default in defaults.items():
+            # Strip whitespace before numeric conversion
+            if df[col].dtype == 'object':  # Only for string columns
+                df[col] = df[col].astype(str).str.strip()
+
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[col] = df[col].apply(lambda x: np.nan if x < 0 else x)
+
+        # Clean standard columns
+        for col in ['c', 'i', 'm']:
             if col in df.columns:
-                df.loc[:, col] = pd.to_numeric(df[col], errors='coerce').fillna(default)
-                df.loc[:, col] = df[col].apply(lambda x: x if x >= 0 else default)
+                # Strip whitespace before numeric conversion
+                if df[col].dtype == 'object':  # Only for string columns
+                    df[col] = df[col].astype(str).str.strip()
+
+                df.loc[:, col] = pd.to_numeric(df[col], errors='coerce')
+                df.loc[:, col] = df[col].apply(lambda x: np.nan if x < 0 else x)
 
         # Convert 'd' column to datetime if not already in datetime format
-        date_format = self.chart_data['date_format']  # Will infer if this value is None
+        date_format = self.event_bus.emit("get_chart_data", ['date_format', None])
         if not pd.api.types.is_datetime64_any_dtype(df['d']):
 
             # If dates are incomplete
@@ -574,8 +586,8 @@ class DataManager:
         df['d'] = pd.to_datetime(df['d'])
         df['d'] = df['d'].dt.tz_localize(None)  # Remove timezone info
 
-        # Will clean up any empty rows
-        df = df.dropna().reset_index(drop=True)
+        # Remove rows where all values are NaN
+        df = df.dropna(how='all').reset_index(drop=True)
 
         # Store imported raw data (also clears any previous data points)
         self.df_raw = df
@@ -583,7 +595,8 @@ class DataManager:
         return True
 
     def default_chart_assessment(self):
-        recent_charts = self.user_preferences.get('recent_charts', [])
+        recent_charts = self.event_bus.emit("get_user_preference", ['recent_charts', []])
+
         chart_settings = {
             'type': [],
             'major_grid_dates': [],
@@ -594,138 +607,101 @@ class DataManager:
             'credit': [],
             'legend': []
         }
-        if len(recent_charts) > 4:
-            for chart_file_path in recent_charts:
-                try:
-                    with open(chart_file_path, 'r') as file:
-                        loaded_chart = json.load(file)
-                except (FileNotFoundError, json.JSONDecodeError):
+
+        if len(recent_charts) <= 4:
+            return
+
+        # Ensure database connection
+        if not self.sqlite_manager.initialized:
+            if not self.sqlite_manager.connect():
+                return
+
+        processed_charts = 0
+
+        for chart_id in recent_charts:
+            try:
+                # Load metadata from database
+                self.sqlite_manager.cursor.execute(
+                    f"SELECT metadata FROM {self.sqlite_manager.TABLE_CHART_METADATA} WHERE chart_id = ?",
+                    (chart_id,)
+                )
+                result = self.sqlite_manager.cursor.fetchone()
+
+                if not result:
                     continue
 
-                # Check key agreement
-                if not set(self.chart_data.keys()).issubset(set(loaded_chart.keys())):
-                    continue
+                loaded_chart = json.loads(result[0])
 
-                chart_settings['type'].append(loaded_chart.get('type'))
+            except (json.JSONDecodeError, Exception):
+                continue
 
-                chart_view = loaded_chart['view']['chart']
-                for key in chart_settings.keys():
-                    if key != 'type':  # Skip type as it's not in chart_view
-                        chart_settings[key].append(chart_view.get(key))
+            # Check essential keys exist
+            essential_keys = {'type', 'view'}
+            if not essential_keys.issubset(loaded_chart.keys()):
+                continue
 
-            # Get most frequent values for each setting
-            most_common_settings = {}
-            for key in chart_settings:
-                values = [v for v in chart_settings[key] if v is not None]
-                if values:
-                    most_common_settings[key] = max(set(values), key=values.count)
-                else:
-                    most_common_settings[key] = None
+            # Extract chart type
+            chart_settings['type'].append(loaded_chart.get('type'))
 
-            # Apply most common settings to chart_data
-            if 'type' in most_common_settings and most_common_settings['type']:
-                self.chart_data['type'] = most_common_settings['type']
+            # Extract view settings
+            if 'view' not in loaded_chart or 'chart' not in loaded_chart['view']:
+                continue
+
+            chart_view = loaded_chart['view']['chart']
 
             for key in chart_settings.keys():
-                if key != 'type' and key in most_common_settings and most_common_settings[key] is not None:
-                    self.chart_data['view']['chart'][key] = most_common_settings[key]
+                if key != 'type':
+                    chart_settings[key].append(chart_view.get(key))
 
-    def load_chart_file(self, file_path):
-        with open(file_path, 'r') as file:
-            default_chart = self.default_chart
-            loaded_chart = json.load(file)
-            loaded_chart = self.ensure_backwards_compatibility(loaded_chart, default_chart)
-            self.chart_data = loaded_chart
+            processed_charts += 1
 
-            # Reset credit lines if older version
-            if len(self.chart_data['credit']) == 3:
-                self.chart_data['credit'] = default_chart['credit']
+        if processed_charts == 0:
+            return
 
-            # Clean out view keys that don't have corresponding values in column_map
-            for key in list(self.chart_data['view'].keys()):
-                # Check if key has the expected format and value is not in column_map values
-                parts = key.split('|')
-                if self.chart_data['column_map']:
-                    if len(parts) == 2 and parts[1] not in list(self.chart_data['column_map'].values()):
-                        del self.chart_data['view'][key]
+        # Get most frequent values for each setting
+        most_common_settings = {}
+        for key in chart_settings:
+            values = [v for v in chart_settings[key] if v is not None]
 
-            # Keep only trend fits that have 'user_col' key and the value exists in column_map values
-            for trend_key in ['trend_corr', 'trend_err', 'trend_misc']:
-                self.chart_data[trend_key] = [pairs for pairs in self.chart_data[trend_key]
-                                              if 'user_col' in pairs and
-                                              pairs['user_col'] in self.chart_data['column_map'].values()]
-
-        # If loaded chart file have an old file path
-        if file_path != self.chart_data['chart_file_path']:
-            self.chart_data['chart_file_path'] = file_path
-
-        # Other backwards compatibility fixes
-        if self.chart_data['import_path'] is None or isinstance(self.chart_data['import_path'], (list, str)):
-            self.chart_data['import_path'] = {}
-
-        # Find import path specific to unix id
-        unix_id = self.user_preferences['unix_id']
-        all_import_paths = self.chart_data['import_path']
-
-        if unix_id in all_import_paths.keys() and os.path.exists(all_import_paths[unix_id]):
-            import_path = all_import_paths[unix_id]
-            approved = self.event_bus.emit('column_mapped_raw_data_import', import_path)
-            if not approved:
-                return
-        else:
-            # Check if there's backup data in the chart file
-            if 'Backup' in self.chart_data:
-                data = {
-                    'title': "Data Restored from Backup",
-                    'message': 'Data file not found. Restored from backup.',
-                    'choice': False
-                }
-                self.event_bus.emit('trigger_user_prompt', data)
-
-                try:
-                    backup_data = pd.DataFrame.from_records(self.chart_data['Backup'])
-                    backup_data['d'] = pd.to_datetime(backup_data['d'])  # Convert to datetime
-                    self.df_raw = backup_data
-                except Exception as e:
-                    data = {
-                        'title': "Backup Restoration Failed",
-                        'message': f'Failed to restore from backup: {str(e)}. Click OK to select a data set manually.',
-                        'choice': True
-                    }
-                    accepted = self.event_bus.emit('trigger_user_prompt', data)
-                    if accepted:
-                        import_path = self.event_bus.emit('select_import_path')
-                        self.event_bus.emit('column_mapped_raw_data_import', import_path)
+            if values:
+                most_common_settings[key] = max(set(values), key=values.count)
             else:
-                data = {
-                    'title': "Data not found",
-                    'message': 'This chart is not connected to a data set. Click OK to select one.',
-                    'choice': True
-                }
-                accepted = self.event_bus.emit('trigger_user_prompt', data)
-                if accepted:
-                    import_path = self.event_bus.emit('select_import_path')
-                    self.event_bus.emit('column_mapped_raw_data_import', import_path)
+                most_common_settings[key] = None
 
-        # Final check
-        has_data = hasattr(self, 'df_raw') and not self.df_raw.empty
-        valid_column_map = self.chart_data['column_map'] is not None and bool(self.chart_data['column_map'])
+        # Apply most common settings to chart_data
+        if 'type' in most_common_settings and most_common_settings['type']:
+            self.chart_data['type'] = most_common_settings['type']
 
-        if (unix_id in all_import_paths.keys() and os.path.exists(
-                all_import_paths[unix_id]) and valid_column_map) or has_data:
-            # Generate chart
-            self.event_bus.emit('new_chart', self.chart_data['start_date'])
+        for key in chart_settings.keys():
+            if key != 'type' and key in most_common_settings and most_common_settings[key] is not None:
+                self.chart_data['view']['chart'][key] = most_common_settings[key]
 
-            # Save to recents and refresh list
-            self.event_bus.emit('save_chart_as_recent', data={'file_path': file_path, 'recent_type': 'recent_charts'})
-            self.event_bus.emit('refresh_recent_charts_list')
+    def get_machine_id(self):
+        # Collect system information available across all platforms
+        os_info = [
+            platform.system(),  # OS name (Windows, Darwin, Linux)
+            platform.node(),  # Computer hostname
+            platform.machine(),  # CPU architecture (x86_64, arm64, etc.)
+            platform.processor()  # Processor info
+        ]
+        combined_id = ":".join(filter(None, os_info))
+        return hashlib.sha256(combined_id.encode()).hexdigest()
 
-            # Switch back to view mode by default
-            self.event_bus.emit('view_mode_selected')
+    def get_config_directory(self, as_str=False):
+        system = platform.system()
+        home_dir = Path.home()
 
-            # Monitor data set for updates if it exists
-            if unix_id in all_import_paths.keys() and os.path.exists(all_import_paths[unix_id]):
-                self.file_monitor.start_monitoring(all_import_paths[unix_id])
+        if system == "Linux" or system == "Darwin":  # Darwin is macOS
+            config_dir = home_dir / '.config' / 'OpenCelerator'
+        elif system == "Windows":
+            config_dir = home_dir / 'AppData' / 'Local' / 'OpenCelerator'
+        else:
+            config_dir = home_dir / 'OpenCelerator'  # Fallback
+
+        if as_str:
+            return str(config_dir)
+        else:
+            return config_dir
 
     def get_preferences_path(self):
         system = platform.system()
@@ -753,48 +729,28 @@ class DataManager:
 
     def handle_data_saving(self):
         has_chart_path = self.chart_data.get('chart_file_path') is not None
-        has_valid_column_map = isinstance(self.chart_data.get('column_map'), dict) and bool(self.chart_data.get('column_map'))
+        has_valid_column_map = isinstance(self.chart_data.get('column_map'), dict) and bool(
+            self.chart_data.get('column_map'))
         has_data = not self.df_raw.empty
+
         if has_chart_path and has_data and has_valid_column_map:
-            unix_id = self.user_preferences.get('unix_id')
-            data_import_path = self.chart_data['import_path'].get(unix_id, None)
-            is_minute_chart = 'Minute' in self.chart_data['type']
-
-            if data_import_path is None or not Path(data_import_path).exists():
-                # Create and save data path using chart path
-                chart_path = Path(self.chart_data['chart_file_path'])  # Get chart file path as Path object
-                data_filename = chart_path.stem + "_data"  # Add "_data" suffix to filename
-                data_path_with_json_ext = chart_path.with_stem(data_filename)  # Apply new filename, keep path/extension
-                data_path_without_ext = data_path_with_json_ext.with_suffix('')  # Remove current extension
-                data_import_path = str(data_path_without_ext.with_suffix('.csv'))  # Add .csv extension
-                self.chart_data['import_path'][unix_id] = data_import_path
-
-            # Append '_data' to chart file name to prevent re-writing of original data file
-            chart_path = Path(self.chart_data['chart_file_path'])
-            data_filename = chart_path.stem + "_data"
-            data_path = Path(data_import_path)
-            if data_path.stem != data_filename:
-                new_data_path = data_path.with_stem(data_filename)
-                data_import_path = str(new_data_path)
-                self.chart_data['import_path'][unix_id] = data_import_path
-
-            # Save data formatting
+            # Save data formatting - prepare the dataframe for storage
             df_save = self.df_raw.copy()
             df_save = df_save.assign(d=pd.to_datetime(df_save['d'])).sort_values(by='d')
-            df_save = df_save.reindex(columns=list(self.chart_data['column_map'].keys()))  # Ensure all columns from column_map
+            df_save = df_save.reindex(
+                columns=list(self.chart_data['column_map'].keys()))  # Ensure all columns from column_map
+
+            # Handle minute chart data
+            is_minute_chart = 'Minute' in self.chart_data['type']
             has_m_column = 'm' in df_save.columns
             only_1s_in_m = has_m_column and (df_save['m'] == 1).all()
+
             if not is_minute_chart and only_1s_in_m:  # Discard floor column if safe to do so
                 df_save = df_save.drop(columns=['m'])
-            df_save = df_save.rename(columns=self.chart_data['column_map'])
 
-            # Save data
-            file_ext = Path(data_import_path).suffix.lower()
-            if file_ext in ['.xlsx', '.xls', '.ods']:
-                df_save.to_excel(data_import_path, index=False)
-            else:
-                # Default to CSV for any other extension or if extension is missing
-                df_save.to_csv(data_import_path, index=False)
+            # SQLite
+            self.sqlite_manager.save_chart_data(self.chart_data['chart_file_path'], df_save)
+            self.event_bus.emit("update_chart_data", ['data_modified', str(int(time.time()))])
 
     def save_user_preferences(self):
         filepath = self.get_preferences_path()
@@ -806,9 +762,6 @@ class DataManager:
         if os.path.exists(filepath):
             os.remove(filepath)
 
-        # Replace with defaults but keep unix id
-        unix_id = self.user_preferences['unix_id']
-        self.default_user_preferences['unix_id'] = unix_id
         with open(filepath, 'w') as f:
             json.dump(self.default_user_preferences, f, indent=4)
 
@@ -843,34 +796,6 @@ class DataManager:
             item['text_date'] = item['text_date'].strftime(self.standard_date_string)
             self.chart_data[item_type].append(item)
 
-    def save_chart(self, full_path, start_date):
-        # Save raw data
-        self.handle_data_saving()
-
-        # Ensure the file has a .pkl extension
-        if not full_path.endswith('.json'):
-            full_path += '.json'
-        json_to_save = copy.deepcopy(self.chart_data)
-
-        # Backwards compatibility cleanup
-        if 'raw_df' in json_to_save.keys():
-            del json_to_save['raw_df']
-        if 'raw_data' in json_to_save.keys():
-            del json_to_save['raw_data']
-
-        # Ensure that the current chart type is saved
-        json_to_save['type'] = self.chart_data['type']
-
-        # Save current start date in ISO format
-        json_to_save['start_date'] = start_date.strftime(self.standard_date_string) if isinstance(start_date, datetime) else start_date
-
-        # Backup data to chart file
-        json_to_save['Backup'] = json.loads(self.df_raw.to_json(date_format='iso'))
-
-        # Save chart
-        with open(full_path, 'w') as file:
-            json.dump(json_to_save, file, indent=4)
-
     def prevent_blank_chart(self):
         df = self.df_raw
         if df is None or df.empty:
@@ -878,92 +803,43 @@ class DataManager:
 
         max_date = df['d'].max()
         min_date = df['d'].min()
-        chart_start_date = pd.to_datetime(self.chart_data['start_date'])
+        chart_start_date = pd.to_datetime(self.event_bus.emit("get_chart_data", ['start_date', None]))
 
         data_exists_in_date_range = min_date <= chart_start_date <= max_date
         if data_exists_in_date_range:
-            start_date = self.chart_data['start_date']
+            start_date = chart_start_date
         else:
-            start_date = min_date
+            # Get the chart type to determine how to align the start date
+            chart_type = self.event_bus.emit("get_chart_data", ['type', 'Daily'])
+
+            if 'Daily' in chart_type:
+                # For Daily charts, align to the previous Sunday
+                start_date = min_date - pd.Timedelta(min_date.dayofweek + 1, unit="D")
+            elif 'Weekly' in chart_type:
+                # For Weekly charts, align to the previous month's start
+                prev_month = (min_date.replace(day=1) - pd.Timedelta(days=1)).replace(day=1)
+                start_date = prev_month
+            elif 'Monthly' in chart_type:
+                # For Monthly charts, align to the previous year's start
+                start_date = min_date.replace(year=min_date.year - 1, month=1, day=1)
+            elif 'Yearly' in chart_type:
+                # For Yearly charts, align to the previous decade
+                start_year = min_date.year - (min_date.year % 10)
+                start_date = min_date.replace(year=start_year, month=1, day=1)
+            else:
+                start_date = min_date
+
+            # Normalize to midnight
+            start_date = start_date.normalize()
 
         return start_date
 
 
-class FileMonitor:
-    def __init__(self, data_manager):
-        self.data_manager = data_manager
-        self.timer = QTimer()
-        self.timer.setInterval(2000)  # 2 second interval
-        self.timer.timeout.connect(self.check_file)
-        self.last_modified_time = None
-        self.current_path = None
-
-    def start_monitoring(self, import_path):
-        if not os.path.exists(import_path):
-            return False
-
-        self.current_path = import_path
-        self.last_modified_time = os.path.getmtime(import_path)
-        self.timer.start()
-        return True
-
-    def stop_monitoring(self):
-        self.timer.stop()
-        self.current_path = None
-        self.last_modified_time = None
-
-    def check_file(self):
-        if not self.current_path or not os.path.exists(self.current_path):
-            self.stop_monitoring()
-            return
-
-        current_modified_time = os.path.getmtime(self.current_path)
-        if current_modified_time != self.last_modified_time:
-            self.last_modified_time = current_modified_time
-            self.handle_file_changed(self.current_path)
-
-    def validate_raw_data_format(self, path):
-        # Check before auto importing
-        try:
-            df = self.data_manager.get_df_from_data_file(path)
-            if df is None:
-                return False, 'Failed to read data'
-
-            # Use the existing _validate_column_map method for consistent validation
-            if not self.data_manager._validate_column_map(df):
-                return False, "Column mapping is invalid"
-
-            # Verify date column
-            column_map = self.data_manager.chart_data['column_map']
-            date_col = column_map['d']
-            date_format = self.data_manager.chart_data['date_format']
-            try:
-                if date_format:
-                    pd.to_datetime(df[date_col], format=date_format)
-                else:
-                    pd.to_datetime(df[date_col])
-            except:
-                return False, "Invalid date format"
-
-            return True, ""
-
-        except Exception as e:
-            return False, str(e)
-
-    def handle_file_changed(self, path):
-        approved, message = self.validate_raw_data_format(path)
-        if approved:
-            self.data_manager.event_bus.emit('column_mapped_raw_data_import', path)
-            self.data_manager.event_bus.emit('new_chart', self.data_manager.chart_data['start_date'])
-
-    def acknowledge_update(self):
-        # Reset the last modified time to current to avoid duplicate handling for direct data entry
-        if self.current_path and os.path.exists(self.current_path):
-            self.last_modified_time = os.path.getmtime(self.current_path)
-
-
 class DataPointColumn:
     def __init__(self, ax, date_to_x, x_to_day_count, sys_col, user_col, view_settings=None):
+        # Classes
+        self.event_bus = EventBus()
+
         # Core visualization components
         self.ax = ax
 
@@ -994,7 +870,7 @@ class DataPointColumn:
             'o': self.data_manager.default_misc_point_style
         }
 
-        chart_type = self.data_manager.chart_data['type']
+        chart_type = self.event_bus.emit("get_chart_data", ['type', 'Daily'])
         default_view_settings = {
             'calendar_group': chart_type[0],
             'agg_type': 'raw',
@@ -1053,7 +929,8 @@ class DataPointColumn:
 
         # Calculate frequency values
         df_agg[self.sys_col + '_total'] = df_agg[self.sys_col]  # Add separate total count column
-        if 'Minute' in self.data_manager.chart_data['type']:
+        chart_type = self.data_manager.event_bus.emit("get_chart_data", ['type', 'Daily'])
+        if 'Minute' in chart_type:
             self._calculate_frequency(df_agg)
 
         # Perform calendar aggregation
@@ -1079,7 +956,7 @@ class DataPointColumn:
 
     def _handle_zero_counts(self, df):
         m = df['m'] if 'Minute' in self.data_manager.chart_data['type'] else 1
-        if self.data_manager.chart_data['place_below_floor']:
+        if self.data_manager.event_bus.emit("get_chart_data", ['place_below_floor', True]):
             df.loc[:, self.sys_col] = np.where(df[self.sys_col] == 0, (1 / m) * 0.8, df[self.sys_col])
         else:
             df.loc[:, self.sys_col] = df[self.sys_col].apply(lambda x: np.nan if x == 0 else x)
@@ -1278,12 +1155,16 @@ class DataPointColumn:
                 key = list(style_dict.keys())[0]
                 style_val = style_dict[key]
                 date1, date2, style_cat = [x.strip() for x in key.split(',')]
-                date1 = pd.to_datetime(date1)
-                date2 = pd.to_datetime(date2)
 
-                # Apply style dict
-                mask = (self.df_agg['d'] >= date1) & (self.df_agg['d'] <= date2)
-                self.df_agg.loc[mask, style_cat] = style_val
+                # Check if dates are 'none' - apply style universally
+                if date1.lower() == 'none' or date2.lower() == 'none':
+                    self.df_agg[style_cat] = style_val
+                else:
+                    # Convert to datetime and apply with mask
+                    date1 = pd.to_datetime(date1)
+                    date2 = pd.to_datetime(date2)
+                    mask = (self.df_agg['d'] >= date1) & (self.df_agg['d'] <= date2)
+                    self.df_agg.loc[mask, style_cat] = style_val
 
     def remove_trend(self, index=None, delete_from_json=True):
         if not self.trend_sets:
@@ -1331,6 +1212,13 @@ class DataPointColumn:
                     if result:
                         trend_elements, trend_data = result
                         self.save_trend(trend_elements, trend_data)
+
+                        # Make the cel label draggable
+                        self.event_bus.emit('make_draggable', data={
+                            'objects': trend_elements['cel_label'],
+                            'save_obj': trend_data,
+                            'save_event': 'save_cel_label_pos'
+                        })
                 else:
                     # Necessary index alignment when selectively deleting
                     self.save_trend(None, None)
@@ -1400,7 +1288,7 @@ class DataPointColumn:
 
         if trend_data is None:
             trend_type = self.trend_type_map[self.sys_col[0]]
-            trend_data = copy.deepcopy(self.data_manager.user_preferences[trend_type + '_style'])
+            trend_data = copy.deepcopy(self.data_manager.event_bus.emit("get_user_preference", [trend_type + '_style', {}]))
             trend_data.update({
                 'sys_col': self.sys_col,
                 'user_col': self.user_col,
@@ -1409,9 +1297,9 @@ class DataPointColumn:
                 'text': cel_label,
                 'text_date': est_date.strftime(self.data_manager.standard_date_string),
                 'text_y': est_y,
-                'fit_method': self.data_manager.user_preferences['fit_method'],
-                'bounce_envelope': self.data_manager.user_preferences['bounce_envelope'],
-                'forward_projection': self.data_manager.user_preferences['forward_projection']
+                'fit_method': self.data_manager.event_bus.emit("get_user_preference", ['fit_method', 'Least-squares']),
+                'bounce_envelope': self.data_manager.event_bus.emit("get_user_preference", ['bounce_envelope', 'None']),
+                'forward_projection': self.data_manager.event_bus.emit("get_user_preference", ['forward_projection', 0])
             })
 
         return trend_elements, trend_data
@@ -1447,7 +1335,7 @@ class DataPointColumn:
 
         return df[~df[self.sys_col].isna()]
 
-    def highlight(self, duration_ms=600, size_factor=10):
+    def highlight(self, duration_ms=500, size_factor=10):
         # Highlight data points by superimposing yellow squares
         if not self.column_marker_objects or self.is_highlighting:
             return
@@ -1641,7 +1529,7 @@ class TrendFitter:
         if fit_method in ['Mean', 'Median']:
             return f'{fit_method.lower()} = {self.data_manager.format_y_value(trend_value)}'
 
-        unit = self.data_manager.user_preferences['celeration_unit']
+        unit = self.data_manager.event_bus.emit("get_user_preference", ['celeration_unit', 'Weekly (standard)'])
 
         # Updated unit_case mapping
         if unit.startswith('Monthly'):
@@ -1696,3 +1584,612 @@ class TrendFitter:
 
         return upper_bounce, lower_bounce, f'b = x{bounce_ratio:.2f}'
 
+
+class FileManager:
+    def __init__(self, data_manager):
+        self.data_manager = data_manager
+        self.event_bus = data_manager.event_bus
+        self.standard_date_string = '%Y-%m-%d'
+
+        # Event subscription events
+        self.event_bus.subscribe('save_chart', self.save_chart, has_data=True)
+        self.event_bus.subscribe('load_chart', self.load_chart_file, has_data=True)
+
+    def save_chart(self, data):
+        file_path = data['file_path']
+        start_date = data['start_date']
+
+        # Ensure the file has a .json extension
+        if not file_path.endswith('.json'):
+            file_path += '.json'
+        json_to_save = copy.deepcopy(self.data_manager.chart_data)
+
+        # Backwards compatibility cleanup
+        if 'Backup' in json_to_save:
+            del json_to_save['Backup']  # Remove old Backup field
+
+        # Ensure that the current chart type is saved
+        json_to_save['type'] = self.data_manager.chart_data['type']
+
+        # Save current start date in ISO format
+        json_to_save['start_date'] = start_date.strftime(self.standard_date_string) if isinstance(start_date,
+                                                                                                  datetime) else start_date
+
+        # Save raw data directly in the chart file
+        # Convert DataFrame to JSON-compatible format
+        if not self.data_manager.df_raw.empty:
+            json_to_save['raw_data'] = json.loads(self.data_manager.df_raw.to_json(date_format='iso'))
+        else:
+            json_to_save['raw_data'] = {}  # Empty dictionary for empty dataframe
+
+        # Save chart to file
+        with open(file_path, 'w') as file:
+            json.dump(json_to_save, file, indent=4)
+
+        df_save = self.data_manager.df_raw.copy()
+        self.data_manager.sqlite_manager.save_complete_chart(file_path, df_save, json_to_save)
+
+    def chart_cleaning(self, loaded_chart, file_path):
+        default_chart = self.data_manager.default_chart
+        new_chart_data = self.data_manager.ensure_backwards_compatibility(loaded_chart, default_chart)
+
+        # Fix phase text positions
+        for phase in new_chart_data['phase']:
+            self.event_bus.emit('fix_phase_text_position', phase)
+
+        # Reset credit lines if older version
+        if len(new_chart_data['credit']) == 3:
+            new_chart_data['credit'] = default_chart['credit']
+
+        # Clean out view keys that don't have corresponding values in column_map
+        for key in list(new_chart_data['view'].keys()):
+            # Check if key has the expected format and value is not in column_map values
+            parts = key.split('|')
+            if new_chart_data['column_map']:
+                if len(parts) == 2 and parts[1] not in list(new_chart_data['column_map'].values()):
+                    del new_chart_data['view'][key]
+
+        # Keep only trend fits that have 'user_col' key and the value exists in column_map values
+        for trend_key in ['trend_corr', 'trend_err', 'trend_misc']:
+            new_chart_data[trend_key] = [pairs for pairs in new_chart_data[trend_key]
+                                            if 'user_col' in pairs and
+                                            pairs['user_col'] in new_chart_data['column_map'].values()]
+
+        # If loaded chart file have an old file path
+        if file_path != new_chart_data['chart_file_path']:
+            new_chart_data['chart_file_path'] = file_path
+
+        # Other backwards compatibility fixes
+        if new_chart_data['import_path'] is None or isinstance(new_chart_data['import_path'], (list, str)):
+            new_chart_data['import_path'] = {}
+
+        return new_chart_data
+
+    def _repair_corrupted_chart_file(self, file_path):
+        # Attempts to repair a corrupted chart file by patching missing or invalid fields
+        # with default values from chart_data.
+        try:
+            # Read the file content
+            with open(file_path, 'r') as file:
+                content = file.read()
+
+            # Try to find where the JSON is incomplete
+            # Start by assuming it's valid up to the last complete field
+            last_valid_json = None
+            for i in range(len(content), 0, -1):
+                try:
+                    # Try parsing with added closing brace
+                    test_json = content[:i] + "}"
+                    parsed = json.loads(test_json)
+                    last_valid_json = parsed
+                    break
+                except:
+                    continue
+
+            if last_valid_json:
+                # We found a parseable subset of the file
+                print(f"Repairing corrupted chart file: {file_path}")
+
+                # Start with default values
+                default_chart = copy.deepcopy(self.data_manager.default_chart)
+
+                # Update with the valid parts we found
+                default_chart.update(last_valid_json)
+
+                # Ensure db_location is set and is a string
+                if 'db_location' not in default_chart or default_chart['db_location'] is None:
+                    default_chart['db_location'] = str(self.data_manager.get_config_directory())
+                elif isinstance(default_chart['db_location'], Path):
+                    default_chart['db_location'] = str(default_chart['db_location'])
+
+                # Set the chart file path
+                default_chart['chart_file_path'] = file_path
+
+                return default_chart
+            else:
+                # If we couldn't find any valid JSON, return a default chart
+                print(f"Could not repair chart file, using defaults: {file_path}")
+                default_chart = copy.deepcopy(self.data_manager.default_chart)
+                default_chart['chart_file_path'] = file_path
+                default_chart['db_location'] = str(self.data_manager.get_config_directory())
+                return default_chart
+
+        except Exception as e:
+            print(f"Error attempting to repair chart file: {e}")
+            # Fall back to defaults
+            default_chart = copy.deepcopy(self.data_manager.default_chart)
+            default_chart['chart_file_path'] = file_path
+            default_chart['db_location'] = str(self.data_manager.get_config_directory())
+            return default_chart
+
+    def load_chart_file(self, file):
+        # Detect if this is a file path or just a chart ID
+        is_json_file = isinstance(file, str) and file.endswith('.json')
+        path_exists = Path(file).exists() if isinstance(file, str) else False
+
+        # If it's a JSON file that exists, import it to the database first
+        if is_json_file and path_exists:
+            chart_id = Path(file).stem
+            if not self.import_json_to_database(file, chart_id):
+                return False  # Failed to import JSON to database
+        else:
+            # Extract chart_id from filename if a path is provided
+            chart_id = Path(file).stem if is_json_file else file
+
+        # Always load from the database
+        return self.load_chart_from_db(chart_id)
+
+    def import_json_to_database(self, json_file_path, chart_id):
+        try:
+            with open(json_file_path, 'r') as file:
+                loaded_chart = json.load(file)
+        except json.JSONDecodeError:
+            # File is corrupted, attempt to repair it
+            loaded_chart = self._repair_corrupted_chart_file(json_file_path)
+            # Notify user about the repair
+            data = {
+                'title': "Corrupted Chart File",
+                'message': f"The chart file was corrupted and has been repaired. Some settings may have been reset to defaults.",
+                'options': ['OK']
+            }
+            self.event_bus.emit('trigger_user_prompt', data)
+        except FileNotFoundError:
+            print(f"File not found: {json_file_path}")
+            return False
+
+        # Clean the chart data
+        clean_chart_data = self.chart_cleaning(loaded_chart, chart_id)
+
+        # Process raw_data if it exists
+        raw_data = clean_chart_data.get('raw_data')
+
+        # If raw_data is not available, try using the legacy Backup field
+        if not raw_data:
+            backup_data = clean_chart_data.get('Backup')
+            if backup_data:
+                # Migrate the data to the new raw_data field
+                clean_chart_data['raw_data'] = backup_data
+                raw_data = backup_data
+
+        if raw_data:
+            try:
+                # Convert stored JSON data back to a DataFrame
+                df = pd.DataFrame.from_records(raw_data)
+
+                # Convert 'd' column to datetime
+                if 'd' in df.columns:
+                    df['d'] = pd.to_datetime(df['d'])
+
+                # Save to database
+                self.data_manager.sqlite_manager.save_complete_chart(chart_id, df, clean_chart_data)
+                return True
+            except Exception as e:
+                print(f"Error importing JSON chart to database: {e}")
+                return False
+        else:
+            # For empty charts with no data
+            empty_df = pd.DataFrame()
+            self.data_manager.sqlite_manager.save_complete_chart(chart_id, empty_df, clean_chart_data)
+            return True
+
+    def load_chart_from_db(self, chart_id):
+        # Make sure the database connection is initialized
+        if not self.data_manager.sqlite_manager.initialized:
+            if not self.data_manager.sqlite_manager.connect():
+                return False
+
+        # Load data points from database (this also loads metadata via _load_chart_metadata)
+        df = self.data_manager.sqlite_manager.load_chart_data(chart_id)
+        if df is None or df.empty:
+            print(f"No data points found in database for chart ID: {chart_id}")
+            self.data_manager.df_raw = pd.DataFrame()
+        else:
+            self.data_manager.df_raw = df
+
+        # Apply chart cleaning AFTER metadata has been loaded but BEFORE finalization
+        self.data_manager.chart_data = self.chart_cleaning(self.data_manager.chart_data, chart_id)
+        self.data_manager.chart_data['chart_file_path'] = chart_id
+
+        # Finalize the loading process
+        self._finalize_chart_loading(chart_id)
+        return True
+
+    def _prompt_for_manual_import(self, title, message):
+        data = {'title': title, 'message': message, 'choice': True}
+        if self.event_bus.emit('trigger_user_prompt', data):
+            import_path = self.event_bus.emit('select_import_path')
+            return self.event_bus.emit('column_mapped_raw_data_import', import_path)
+        return False
+
+    def _finalize_chart_loading(self, file_path):
+        # Generate chart
+        self.event_bus.emit('new_chart', self.data_manager.chart_data['start_date'])
+
+        # Save to recents and refresh list
+        self.event_bus.emit('save_chart_as_recent', data={'file_path': file_path, 'recent_type': 'recent_charts'})
+        self.event_bus.emit('refresh_recent_charts_list')
+
+        # Switch to view mode
+        self.event_bus.emit('view_mode_selected')
+
+
+class SQLiteManager:
+    TABLE_DATA_POINTS = "series"
+    TABLE_CHART_METADATA = "chart"
+
+    def __init__(self, data_manager):
+        self.data_manager = data_manager
+        self.event_bus = EventBus()
+        self.connection = None
+        self.cursor = None
+        self.initialized = False
+
+        # Event subscriptions
+        self.event_bus.subscribe('has_chart_changed', self.has_chart_changed, has_data=True)
+        self.event_bus.subscribe('delete_chart', self.delete_chart, has_data=True)
+        self.event_bus.subscribe('vacuum_database', self.vacuum_database)
+
+    def connect(self, db_path=None):
+        """Establish database connection and create tables if needed."""
+        if not db_path:
+            db_path = self.data_manager.get_config_directory(as_str=True)
+
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        db_file = Path(db_path) / "opencelerator.db"
+
+        try:
+            self.connection = sqlite3.connect(str(db_file))
+            self.cursor = self.connection.cursor()
+            self.initialized = True
+            self._create_tables()
+            return True
+        except sqlite3.Error as e:
+            print(f"Database connection error: {e}")
+            self.initialized = False
+            return False
+
+    def _create_tables(self):
+        """Create necessary database tables if they don't exist."""
+        # Data points table
+        self.cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS {self.TABLE_DATA_POINTS} (
+            chart_id TEXT,
+            date TEXT,
+            sys_col TEXT,
+            value REAL,
+            PRIMARY KEY (chart_id, date, sys_col)
+        )
+        ''')
+
+        # Chart metadata table
+        self.cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS {self.TABLE_CHART_METADATA} (
+            chart_id TEXT PRIMARY KEY,
+            metadata TEXT,
+            thumbnail BLOB,
+            metadata_hash TEXT
+        )
+        ''')
+
+        self.connection.commit()
+
+    def _ensure_connection(self):
+        """Ensure database connection is established."""
+        if not self.initialized:
+            return self.connect()
+        return True
+
+    def _extract_chart_id(self, chart_path):
+        """Extract chart ID from file path or return as-is if already an ID."""
+        if isinstance(chart_path, str) and ("/" in chart_path or "\\" in chart_path):
+            return Path(chart_path).stem
+        return chart_path
+
+    def _generate_thumbnail(self):
+        """Generate chart thumbnail."""
+        try:
+            return self.data_manager.event_bus.emit('get_thumbnail', {'size': (96, 96)})
+        except Exception as e:
+            print(f"Error generating thumbnail: {e}")
+            return None
+
+    def _prepare_metadata(self, chart_data=None):
+        """Prepare metadata for storage (removes raw_data)."""
+        metadata = copy.deepcopy(chart_data or self.data_manager.chart_data)
+        metadata.pop('raw_data', None)  # Remove raw_data to avoid duplication
+        return json.dumps(json.loads(json.dumps(metadata, default=str)))
+
+    def _calculate_metadata_hash(self, metadata_json):
+        """Calculate MD5 hash of metadata."""
+        return hashlib.md5(metadata_json.encode('utf-8')).hexdigest()
+
+    def save_complete_chart(self, chart_path, df_data, chart_data):
+        """Save complete chart (data + metadata) to database."""
+        if not self._ensure_connection():
+            return False
+
+        chart_id = self._extract_chart_id(chart_path)
+
+        try:
+            self.cursor.execute("BEGIN IMMEDIATE TRANSACTION")
+
+            # Clear existing data
+            self._delete_chart_data(chart_id)
+
+            # Save data points
+            if not df_data.empty:
+                self._save_data_points(chart_id, df_data)
+
+            # Save metadata
+            self._save_metadata(chart_id, chart_data)
+
+            self.connection.commit()
+            self._cleanup_journal()
+            return True
+
+        except Exception as e:
+            print(f"Error saving complete chart: {e}")
+            self.connection.rollback()
+            return False
+
+    def _save_data_points(self, chart_id, df_data):
+        """Save data points to database."""
+        rows = []
+        for _, row in df_data.iterrows():
+            date = row['d'].strftime('%Y-%m-%d') if hasattr(row['d'], 'strftime') else str(row['d'])
+
+            for col in row.index:
+                if col != 'd' and not pd.isna(row[col]):
+                    rows.append((chart_id, date, col, float(row[col])))
+
+        if rows:
+            self.cursor.executemany(
+                f"INSERT INTO {self.TABLE_DATA_POINTS} (chart_id, date, sys_col, value) VALUES (?, ?, ?, ?)",
+                rows
+            )
+
+    def _save_metadata(self, chart_id, chart_data=None):
+        """Save chart metadata to database."""
+        metadata_json = self._prepare_metadata(chart_data)
+        metadata_hash = self._calculate_metadata_hash(metadata_json)
+        thumbnail_data = self._generate_thumbnail()
+
+        self.cursor.execute(
+            f"INSERT OR REPLACE INTO {self.TABLE_CHART_METADATA} (chart_id, metadata, thumbnail, metadata_hash) VALUES (?, ?, ?, ?)",
+            (chart_id, metadata_json, thumbnail_data, metadata_hash)
+        )
+
+    def _cleanup_journal(self):
+        """Clean up database journal files."""
+        self.cursor.execute("PRAGMA journal_mode=DELETE")
+        self.cursor.execute("PRAGMA wal_checkpoint(FULL)")
+
+    def save_chart_data(self, chart_path, df_data):
+        """Save only chart data points to database."""
+        if not self._ensure_connection():
+            return False
+
+        chart_id = self._extract_chart_id(chart_path)
+
+        try:
+            self.cursor.execute("BEGIN TRANSACTION")
+
+            # Delete existing data points
+            self.cursor.execute(f"DELETE FROM {self.TABLE_DATA_POINTS} WHERE chart_id = ?", (chart_id,))
+
+            # Save new data points
+            self._save_data_points(chart_id, df_data)
+
+            # Update metadata
+            self._save_metadata(chart_id)
+
+            self.connection.commit()
+            return True
+
+        except sqlite3.Error as e:
+            print(f"Error saving chart data: {e}")
+            self.connection.rollback()
+            return False
+
+    def load_chart_data(self, chart_id):
+        """Load chart data from database and return as DataFrame."""
+        if not self._ensure_connection():
+            return None
+
+        chart_id = self._extract_chart_id(chart_id)
+
+        try:
+            # Load data points
+            self.cursor.execute(
+                f"SELECT date, sys_col, value FROM {self.TABLE_DATA_POINTS} WHERE chart_id = ?",
+                (chart_id,)
+            )
+            results = self.cursor.fetchall()
+
+            # Load metadata
+            self._load_chart_metadata(chart_id)
+
+            if not results:
+                return pd.DataFrame()
+
+            return self._build_dataframe_from_results(results)
+
+        except sqlite3.Error as e:
+            print(f"Error loading chart data: {e}")
+            return None
+
+    def _build_dataframe_from_results(self, results):
+        """Build DataFrame from database query results."""
+        # Get unique dates and columns
+        dates = sorted(set(row[0] for row in results))
+        columns = set(row[1] for row in results)
+
+        # Initialize data dictionary
+        data_dict = {'d': dates}
+        for col in columns:
+            data_dict[col] = [None] * len(dates)
+
+        # Fill in values
+        date_to_index = {date: idx for idx, date in enumerate(dates)}
+        for date, col, value in results:
+            data_dict[col][date_to_index[date]] = value
+
+        # Create and return DataFrame
+        df = pd.DataFrame(data_dict)
+        df['d'] = pd.to_datetime(df['d'])
+        return df
+
+    def _load_chart_metadata(self, chart_id):
+        """Load chart metadata from database."""
+        try:
+            self.cursor.execute(
+                f"SELECT metadata FROM {self.TABLE_CHART_METADATA} WHERE chart_id = ?",
+                (chart_id,)
+            )
+            result = self.cursor.fetchone()
+
+            if result:
+                metadata = json.loads(result[0])
+                # Preserve raw_data if it exists
+                raw_data = self.data_manager.chart_data.get('raw_data', {})
+                self.data_manager.chart_data.update(metadata)
+                self.data_manager.chart_data['raw_data'] = raw_data
+                return True
+            return False
+
+        except Exception as e:
+            print(f"Error loading chart metadata: {e}")
+            return False
+
+    def get_chart_thumbnail(self, chart_id):
+        """Get chart thumbnail from database."""
+        if not self._ensure_connection():
+            return None
+
+        chart_id = self._extract_chart_id(chart_id)
+
+        try:
+            self.cursor.execute(
+                f"SELECT thumbnail FROM {self.TABLE_CHART_METADATA} WHERE chart_id = ?",
+                (chart_id,)
+            )
+            result = self.cursor.fetchone()
+            return result[0] if result and result[0] else None
+
+        except Exception as e:
+            print(f"Error retrieving chart thumbnail: {e}")
+            return None
+
+    def get_all_chart_ids(self):
+        """Get list of all chart IDs in database."""
+        if not self._ensure_connection():
+            return []
+
+        try:
+            self.cursor.execute(f"SELECT DISTINCT chart_id FROM {self.TABLE_CHART_METADATA}")
+            return [row[0] for row in self.cursor.fetchall()]
+        except sqlite3.Error as e:
+            print(f"Error retrieving chart IDs: {e}")
+            return []
+
+    def delete_chart(self, chart_id):
+        """Delete chart data and metadata from database."""
+        if not self._ensure_connection():
+            return False
+
+        chart_id = self._extract_chart_id(chart_id)
+
+        try:
+            self.cursor.execute("BEGIN TRANSACTION")
+            self._delete_chart_data(chart_id)
+            self.connection.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Error deleting chart data: {e}")
+            self.connection.rollback()
+            return False
+
+    def _delete_chart_data(self, chart_id):
+        """Delete chart data and metadata (helper method)."""
+        self.cursor.execute(f"DELETE FROM {self.TABLE_DATA_POINTS} WHERE chart_id = ?", (chart_id,))
+        self.cursor.execute(f"DELETE FROM {self.TABLE_CHART_METADATA} WHERE chart_id = ?", (chart_id,))
+
+    def has_chart_changed(self, chart_id):
+        """Check if current chart data differs from stored version."""
+        if not self._ensure_connection():
+            return True  # Assume changed if connection fails
+
+        chart_id = self._extract_chart_id(chart_id)
+
+        try:
+            # Get stored hash
+            self.cursor.execute(
+                f"SELECT metadata_hash FROM {self.TABLE_CHART_METADATA} WHERE chart_id = ?",
+                (chart_id,)
+            )
+            result = self.cursor.fetchone()
+
+            if not result:
+                return True  # Chart doesn't exist, needs saving
+
+            stored_hash = result[0]
+            current_metadata_json = self._prepare_metadata()
+            current_hash = self._calculate_metadata_hash(current_metadata_json)
+
+            return stored_hash != current_hash
+
+        except Exception as e:
+            print(f"Error checking if chart has changed: {e}")
+            return True  # Assume changed if error occurs
+
+    def vacuum_database(self, respect_time_limit=True):
+        if not self.initialized or not self.connection:
+            return  # Skip if no connection
+
+        # Handle type conversion
+        last_vacuum_raw = self.data_manager.event_bus.emit("get_user_preference", ['last_vacuum', 0])
+        if isinstance(last_vacuum_raw, str):
+            if last_vacuum_raw.isdigit():
+                last_vacuum = int(last_vacuum_raw)
+            else:
+                last_vacuum = 0
+        else:
+            last_vacuum = int(last_vacuum_raw)
+
+        # Run max once a week
+        current_time = int(pd.Timestamp.now().timestamp())
+        one_week_seconds = 7 * 24 * 60 * 60
+        time_to_vacuum = current_time - last_vacuum > one_week_seconds
+
+        if not respect_time_limit or time_to_vacuum:
+            try:
+                self.cursor.execute("VACUUM")
+                self.data_manager.event_bus.emit("update_user_preference", ['last_vacuum', current_time])
+            except sqlite3.Error as e:
+                print(f"Error vacuuming database: {e}")
+
+    def close(self):
+        """Close database connection."""
+        if self.connection:
+            self.connection.close()
+            self.initialized = False

@@ -1,10 +1,4 @@
-import matplotlib.pyplot as plt
-from matplotlib import transforms
-import matplotlib.font_manager as font_manager
-import platform
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-import numpy as np
-import pandas as pd
+from app_imports import *
 
 
 class Chart:

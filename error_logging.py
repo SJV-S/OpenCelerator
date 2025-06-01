@@ -1,10 +1,4 @@
-import sys
-import platform
-import logging
-import traceback
-from pathlib import Path
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QLabel, QHBoxLayout, QApplication
-from PySide6.QtCore import Qt
+from app_imports import *
 
 
 def get_error_report_path():

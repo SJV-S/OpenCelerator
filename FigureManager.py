@@ -1,17 +1,7 @@
-import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
-from matplotlib.text import Text
-import numpy as np
-import pandas as pd
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from PySide6.QtWidgets import QWidget, QVBoxLayout
-from PySide6.QtCore import QTimer
-import scc
-from DataManager import DataManager, DataPointColumn
-from EventBus import EventBus
-import copy
-import re
-import textwrap
+from app_imports import *
+from DataManager import DataManager, DataPointColumn  # Direct import to avoid circular dependency
+from EventStateManager import EventBus  # Direct import to avoid circular dependency
+import scc  # Direct import to avoid circular dependency
 
 
 class FigureManager(QWidget):
@@ -25,15 +15,17 @@ class FigureManager(QWidget):
         self.event_bus.subscribe('new_chart', self.new_chart, has_data=True)
         self.event_bus.subscribe('get_data_point_column', self.get_data_point_column, has_data=True)
         self.event_bus.subscribe('refresh_chart', self.refresh)
+        self.event_bus.subscribe('get_thumbnail', self.get_thumbnail, has_data=True)
 
         # Managers
         self.phase_manager = PhaseManager(self)
         self.aim_manager = AimManager(self)
         self.trend_manager = TrendManager(self)
         self.view_manager = ViewManager(self)
-        self.manual_manager = ManualManager(self)
+        self.manual_manager = StyleManager(self)
         self.drag_fan_manager = DraggableFanManager(self)
         self.plot_draw_manager = PlotDrawManager(self)
+        self.drag_manager = DragManager(self)
 
         self.chart_objects = {'phase_obj': [],
                               'aim_obj': [],
@@ -41,11 +33,11 @@ class FigureManager(QWidget):
                               }
 
         # Object styles
-        self.default_phase_item = self.data_manager.user_preferences['phase_style']
-        self.default_aim_item = self.data_manager.user_preferences['aim_style']
-        self.default_trend_corr_item = self.data_manager.user_preferences['trend_corr_style']
-        self.default_trend_err_item = self.data_manager.user_preferences['trend_err_style']
-        self.default_trend_misc_item = self.data_manager.user_preferences['trend_misc_style']
+        self.default_phase_item = self.event_bus.emit("get_user_preference", ['phase_style', {}])
+        self.default_aim_item = self.event_bus.emit("get_user_preference", ['aim_style', {}])
+        self.default_trend_corr_item = self.event_bus.emit("get_user_preference", ['trend_corr_style', {}])
+        self.default_trend_err_item = self.event_bus.emit("get_user_preference", ['trend_err_style', {}])
+        self.default_trend_misc_item = self.event_bus.emit("get_user_preference", ['trend_misc_style', {}])
 
         # Ensure the figure and layout are correctly initialized
         self.figure = plt.figure()
@@ -66,6 +58,7 @@ class FigureManager(QWidget):
         self.credit_lines_space = True
         self.test_angle = False
         self.fig_init = False  # True after figure has been initialized on boot
+        self.pick_event = False # Will block mode mouse events if the user is trying to object-click
 
         self.new_chart(start_date=pd.to_datetime('today').normalize())
 
@@ -79,12 +72,12 @@ class FigureManager(QWidget):
             plt.close(self.figure)
 
         # Select chart type
-        chart_type = self.data_manager.chart_data['type']
-        chart_width = self.data_manager.user_preferences['width']
-        chart_font_color = self.data_manager.user_preferences['chart_font_color']
-        chart_grid_color = self.data_manager.user_preferences['chart_grid_color']
+        chart_type = self.event_bus.emit("get_chart_data", ['type', 'Daily'])
+        chart_width = self.event_bus.emit("get_user_preference", ['width', 10])
+        chart_font_color = self.event_bus.emit("get_user_preference", ['chart_font_color', '#000000'])
+        chart_grid_color = self.event_bus.emit("get_user_preference", ['chart_grid_color', '#000000'])
 
-        self.credit_lines_space = self.data_manager.chart_data['view']['chart']['credit']
+        self.credit_lines_space = self.event_bus.emit("get_chart_data", [['view', 'chart', 'credit'], False])
 
         if chart_type == 'DailyMinute':
             self.Chart = scc.DailyMinute(floor_grid_on=True, start_date=start_date, width=chart_width, style_color=chart_font_color, custom_grid_color=chart_grid_color)
@@ -158,9 +151,10 @@ class FigureManager(QWidget):
 
     def replot(self):
         self.data_manager.plot_columns = {}  # Clear dict
-        is_minute_chart = 'Minute' in self.data_manager.chart_data['type']
-        column_map = self.data_manager.chart_data['column_map']
-        all_view_settings = self.data_manager.chart_data['view']
+        chart_type = self.event_bus.emit("get_chart_data", ['type', 'Daily'])
+        is_minute_chart = 'Minute' in chart_type
+        column_map = self.event_bus.emit("get_chart_data", ['column_map', {}])
+        all_view_settings = self.event_bus.emit("get_chart_data", ['view', {}])
         for sys_col, user_col in column_map.items():
 
             # Skip date mapping columns
@@ -199,10 +193,12 @@ class FigureManager(QWidget):
         self.event_bus.emit('refresh_chart')
 
     def replot_chart_objects(self):
-        for phase in self.data_manager.chart_data['phase']:
+        all_phase_lines = self.event_bus.emit("get_chart_data", ['phase', []])
+        for phase in all_phase_lines:
             self.phase_replot(phase)
 
-        for aim in self.data_manager.chart_data['aim']:
+        all_aim_lines = self.event_bus.emit("get_chart_data", ['aim', []])
+        for aim in all_aim_lines:
             self.aim_replot(aim)
 
     def safe_eval_tuple(self, date_tuple_str):
@@ -243,15 +239,12 @@ class FigureManager(QWidget):
         if date:
             x_i = self.Chart.date_to_pos[date]
 
-            # Set y text position:
+            relative_pos = phase['text_position']
             ymin = self.Chart.ymin
             ymax = self.Chart.ymax
-            if phase['text_position'] == 'Top':
-                y_text_pos = ymax / 3
-            elif phase['text_position'] == 'Center':
-                y_text_pos = (ymin * ymax) ** 0.5
-            elif phase['text_position'] == 'Bottom':
-                y_text_pos = ymin * 2
+            log_ymin = np.log10(ymin)
+            log_ymax = np.log10(ymax)
+            y_text_pos = 10 ** (log_ymin + relative_pos * (log_ymax - log_ymin))
 
             phase_line = self.ax.vlines(x_i,
                                         ymax=ymax,
@@ -262,12 +255,10 @@ class FigureManager(QWidget):
 
             # Add phase line text
             if phase['text_mode'] == 'Flag':
-                bbox = {'facecolor': phase['bg_color'], 'edgecolor': phase['edge_color'], 'linestyle': '-', 'linewidth': 1.5}
                 va = 'bottom'
                 rotation = 0
             elif phase['text_mode'] == 'Banner':
-                bbox = None
-                va = phase['text_position'].lower()
+                va = 'center'
                 rotation = 90
 
             phase_text = self.ax.text(x_i + 1,
@@ -277,7 +268,17 @@ class FigureManager(QWidget):
                                       va=va,
                                       rotation=rotation,
                                       fontsize=phase['font_size'],
-                                      color=phase['font_color'])
+                                      color=phase['font_color']
+                                      )
+
+            # Make the phase text draggable
+            self.event_bus.emit('make_draggable', data={
+                'objects': phase_text,
+                'save_obj': phase,
+                'save_event': 'save_phase_text_pos',
+                'horizontal': False,  # Only allow vertical movement
+                'vertical': True,
+            })
 
             self.chart_objects['phase_obj'].append((phase_line, phase_text))
         else:
@@ -371,16 +372,10 @@ class FigureManager(QWidget):
         self.init_state(start_date=start_date)
         self.setup_layout()
         # Save current start date
-        self.data_manager.chart_data['start_date'] = self.Chart.start_date
+        self.event_bus.emit("update_chart_data", ['start_date', self.Chart.start_date])
 
     def safe_float_convert(self, input):
         return self.manual_manager.safe_float_convert(input)
-
-    def phase_line_from_form(self, text, date):
-        self.phase_manager.phase_line_from_form(text, date)
-
-    def phase_line_handle_click(self, event, text):
-        return self.phase_manager.phase_line_handle_click(event, text)
 
     def phase_undo_line(self):
         self.phase_manager.phase_undo_line()
@@ -388,20 +383,11 @@ class FigureManager(QWidget):
     def phase_cleanup_temp_line(self):
         self.phase_manager.phase_cleanup_temp_line()
 
-    def point_on_click(self, event):
-        self.manual_manager.point_on_click(event)
-
     def plot_trend_temp_first_marker(self, x_i):
         self.trend_manager.plot_trend_temp_first_marker(x_i)
 
     def plot_trend_temp_second_marker(self, x_i):
         self.trend_manager.plot_trend_temp_second_marker(x_i)
-
-    def trend_move_temp_marker(self, direction):
-        self.trend_manager.trend_move_temp_marker(direction)
-
-    def trend_move_temp_est_with_arrows(self, direction):
-        self.trend_manager.trend_move_temp_est_with_arrows(direction)
 
     def trend_date1_changed(self, new_date):
         self.trend_manager.trend_date1_changed(new_date)
@@ -429,9 +415,6 @@ class FigureManager(QWidget):
 
     def aim_undo(self):
         self.aim_manager.aim_undo()
-
-    def aim_click_info(self, event, note):
-        return self.aim_manager.aim_click_info(event, note)
 
     def settings_test_angle(self, show):
         if self.test_angle:
@@ -470,6 +453,32 @@ class FigureManager(QWidget):
             raise PermissionError(
                 f"Permission denied when saving to {full_path}. Please check file/directory permissions.")
 
+    def get_thumbnail(self, data):
+        """
+        Generate a thumbnail of the current chart figure
+
+        Parameters:
+        data (dict): Contains size parameter (width, height) in pixels
+
+        Returns:
+        bytes: PNG image data of the thumbnail
+        """
+        try:
+            # Save to BytesIO buffer
+            buffer = io.BytesIO()
+
+            # Similar to fig_save_image but save to buffer
+            bbox = self.figure.axes[0].get_window_extent().transformed(self.figure.dpi_scale_trans.inverted())
+            self.figure.savefig(buffer, format='png', dpi=100, bbox_inches=bbox)
+
+            # Return the binary data
+            buffer.seek(0)
+            return buffer.getvalue()
+
+        except Exception as e:
+            print(f"Error generating thumbnail: {e}")
+            return None
+
 
 class PhaseManager:
     def __init__(self, figure_manager):
@@ -479,9 +488,52 @@ class PhaseManager:
         self.temp_phase_line_text = None
         self.y_text_pos = None
 
-    def phase_line_from_form(self, text, date):
-        date = pd.to_datetime(date, format='%d-%m-%Y')
+        # Event bus subscriptions
+        self.event_bus.subscribe('phase_line_handle_click', self.phase_line_handle_click, has_data=True)
+        self.event_bus.subscribe('phase_line_from_form', self.phase_line_from_form, has_data=True)
+        self.event_bus.subscribe('fix_phase_text_position', self.fix_phase_text_position, has_data=True)
+        self.event_bus.subscribe('save_phase_text_pos', self.save_phase_text_pos, has_data=True)
 
+    def save_phase_text_pos(self, data):
+        """Called from DragManager when phase text is moved"""
+        phase_data = data['save_obj']
+        drop_y = data['drop_y']
+
+        # Calculate relative position based on chart bounds
+        ymin = self.figure_manager.Chart.ymin
+        ymax = self.figure_manager.Chart.ymax
+
+        if ymin is not None and ymax is not None and ymin > 0 and ymax > 0:
+            # Calculate relative position (0 to 1)
+            relative_pos = (np.log10(drop_y) - np.log10(ymin)) / (np.log10(ymax) - np.log10(ymin))
+
+            phase_data['text_position'] = relative_pos
+
+            # Save to the chart data - find and update the corresponding phase
+            phases = self.figure_manager.event_bus.emit("get_chart_data", ['phase', []])
+            phase_date_str = phase_data['date'].strftime(
+                self.figure_manager.data_manager.standard_date_string) if hasattr(phase_data['date'], 'strftime') else \
+            phase_data['date']
+
+            for i, phase in enumerate(phases):
+                if phase['date'] == phase_date_str and phase['text'] == phase_data['text']:
+                    phases[i]['text_position'] = relative_pos
+                    break
+
+            self.figure_manager.event_bus.emit("update_chart_data", ['phase', phases])
+
+    def fix_phase_text_position(self, phase):
+        # Convert old string-based text_position to relative 0-1 value
+        if isinstance(phase.get('text_position'), str):
+            position_map = {'Top': 0.8, 'Center': 0.5, 'Bottom': 0.2}
+            phase['text_position'] = position_map.get(phase['text_position'], 0.8)
+        return phase
+
+    def phase_line_from_form(self, data):
+        text = data['text']
+        date = data['date']
+
+        date = pd.to_datetime(date, format='%d-%m-%Y')
         date = self.figure_manager.data_manager.find_closest_date(date, self.figure_manager.Chart.date_to_pos)
         if date:
             if self.temp_phase_line and self.temp_phase_line_text:
@@ -490,19 +542,41 @@ class PhaseManager:
                 self.temp_phase_line = None
                 self.temp_phase_line_text = None
 
-            phase = copy.deepcopy(self.figure_manager.data_manager.user_preferences['phase_style'])
-            phase['text_mode'] = self.figure_manager.data_manager.user_preferences['phase_text_type']
-            phase['text_position'] = self.figure_manager.data_manager.user_preferences['phase_text_position']
+            phase = copy.deepcopy(self.figure_manager.event_bus.emit("get_user_preference", ['phase_style', {}]))
+            phase['text_mode'] = self.figure_manager.event_bus.emit("get_user_preference", ['phase_text_type', 'Flag'])
+
+            # Get text position and convert to float if it's a string
+            text_position = self.figure_manager.event_bus.emit("get_user_preference", ['phase_text_position', 'Top'])
+            if isinstance(text_position, str):
+                position_map = {'Top': 0.8, 'Center': 0.5, 'Bottom': 0.2}
+                text_position = position_map.get(text_position, 0.8)
+            phase['text_position'] = text_position
+
             phase['date'] = date
             phase['text'] = text
 
+            # Replot the phase line and text
             self.figure_manager.phase_replot(phase)
+
+            # Make the phase text draggable (get the last added phase text)
+            if self.figure_manager.chart_objects['phase_obj']:
+                phase_line, phase_text = self.figure_manager.chart_objects['phase_obj'][-1]
+                if phase_text:
+                    self.event_bus.emit('make_draggable', data={
+                        'objects': phase_text,
+                        'save_obj': phase,
+                        'save_event': 'save_phase_text_pos',
+                        'horizontal': False,  # Only allow vertical movement
+                        'vertical': True,
+                    })
 
             # Save phase data
             self.figure_manager.data_manager.save_plot_item(item=phase, item_type='phase')
             self.event_bus.emit('refresh_chart')
 
-    def phase_line_handle_click(self, event, text):
+    def phase_line_handle_click(self, data):
+        event = data['event']
+        text = data['text']
 
         if event.inaxes:
             if event.inaxes is not None:  # In case user clicks outside coordinate system
@@ -517,21 +591,25 @@ class PhaseManager:
                     self.temp_phase_line = None
                     self.temp_phase_line_text = None
 
-                phase_text_type = self.figure_manager.data_manager.user_preferences['phase_text_type']
-                phase_text_position = self.figure_manager.data_manager.user_preferences['phase_text_position']
+                phase_text_type = self.figure_manager.event_bus.emit("get_user_preference", ['phase_text_type', 'Flag'])
+                relative_pos = self.figure_manager.event_bus.emit("get_user_preference", ['phase_text_position', 0.8])
+                position_map = {'Top': 0.8, 'Center': 0.5, 'Bottom': 0.2}
+                relative_pos = position_map.get(relative_pos, 0.5)
 
-                # Set y text position:
+                # Calculate y text position using the same method as phase_replot
                 ymin = self.figure_manager.Chart.ymin
                 ymax = self.figure_manager.Chart.ymax
-                if phase_text_position == 'Top':
-                    self.y_text_pos = ymax / 3
-                elif phase_text_position == 'Center':
-                    self.y_text_pos = (ymin * ymax) ** 0.5
-                elif phase_text_position == 'Bottom':
-                    self.y_text_pos = ymin * 2
+
+                if ymin is None or ymax is None or ymin <= 0 or ymax <= 0:
+                    self.y_text_pos = 1000  # Default fallback
+                else:
+                    log_ymin = np.log10(ymin)
+                    log_ymax = np.log10(ymax)
+                    self.y_text_pos = 10 ** (log_ymin + relative_pos * (log_ymax - log_ymin))
 
                 # Draw temporary phase line
-                self.temp_phase_line = self.figure_manager.ax.vlines(x, ymax=ymax, ymin=0, color='magenta', linestyle="--", linewidth=1.5)
+                self.temp_phase_line = self.figure_manager.ax.vlines(x, ymax=ymax, ymin=0, color='magenta',
+                                                                     linestyle="--", linewidth=1.5)
 
                 if phase_text_type == 'Flag':
                     bbox = {'facecolor': 'white', 'edgecolor': 'magenta', 'linestyle': '--', 'linewidth': 1.5}
@@ -539,7 +617,13 @@ class PhaseManager:
                     rotation = 0
                 elif phase_text_type == 'Banner':
                     bbox = None
-                    va = phase_text_position.lower()
+                    # For Banner mode, use relative position to determine vertical alignment
+                    if relative_pos >= 0.8:
+                        va = 'top'
+                    elif relative_pos <= 0.2:
+                        va = 'bottom'
+                    else:
+                        va = 'center'
                     rotation = 90
 
                 self.temp_phase_line_text = self.figure_manager.ax.text(x + 1,
@@ -548,7 +632,10 @@ class PhaseManager:
                                                                         ha="left",
                                                                         va=va,
                                                                         rotation=rotation,
-                                                                        fontsize=self.figure_manager.data_manager.user_preferences['phase_style']['font_size'])
+                                                                        bbox=bbox,
+                                                                        fontsize=self.figure_manager.event_bus.emit(
+                                                                            "get_user_preference", ['phase_style', {}])[
+                                                                            'font_size'])
 
                 self.event_bus.emit('refresh_chart')
 
@@ -556,7 +643,9 @@ class PhaseManager:
 
     def phase_undo_line(self):
         if self.figure_manager.chart_objects['phase_obj']:
-            self.figure_manager.data_manager.chart_data['phase'].pop()
+            phases = self.figure_manager.event_bus.emit("get_chart_data", ['phase', []])
+            phases.pop()
+            self.figure_manager.event_bus.emit("update_chart_data", ['phase', phases])
             line, text = self.figure_manager.chart_objects['phase_obj'].pop()
             line.remove()
             text.remove()
@@ -585,6 +674,9 @@ class AimManager:
         self.aim_first_click_indicator = None
         self.slope = None
 
+        # Event bus subscriptions
+        self.event_bus.subscribe('aim_click_info', self.aim_click_info, has_data=True)
+
     def aim_from_form(self, text, baseline, target, start, deadline):
         try:
             target = float(target)
@@ -603,14 +695,14 @@ class AimManager:
                 self.aim_temp_note.remove()
                 self.aim_temp_note = None
 
-            aim = copy.deepcopy(self.figure_manager.data_manager.user_preferences['aim_style'])
+            aim = copy.deepcopy(self.figure_manager.event_bus.emit("get_user_preference", ['aim_style', {}]))
             aim['date1'] = xmin_date
             aim['date2'] = xmax_date
             aim['y'] = target
             aim['text'] = text
-            aim['text_pos'] = self.figure_manager.data_manager.user_preferences['aim_text_position']
+            aim['text_pos'] = self.figure_manager.event_bus.emit("get_user_preference", ['aim_text_position', 'Middle'])
             aim['baseline'] = None if baseline == '' else baseline
-            aim['line_type'] = self.figure_manager.data_manager.user_preferences["aim_line_type"]
+            aim['line_type'] = self.figure_manager.event_bus.emit("get_user_preference", ["aim_line_type", "Flat"])
 
             self.figure_manager.data_manager.save_plot_item(item=aim, item_type='aim')
             self.figure_manager.aim_replot(aim)
@@ -637,7 +729,9 @@ class AimManager:
 
     def aim_undo(self):
         if self.figure_manager.data_manager.chart_data['aim'] and self.figure_manager.chart_objects['aim_obj']:
-            self.figure_manager.data_manager.chart_data['aim'].pop()
+            aims = self.figure_manager.event_bus.emit("get_chart_data", ['aim', []])
+            aims.pop()
+            self.figure_manager.event_bus.emit("update_chart_data", ['aim', aims])
             line, note = self.figure_manager.chart_objects['aim_obj'].pop()
             line.remove()
             note.remove()
@@ -645,7 +739,7 @@ class AimManager:
 
     def aim_get_text_pos(self, xmin, xmax, text_pos=None):
         if text_pos is None:
-            text_pos = self.figure_manager.data_manager.user_preferences['aim_text_position']
+            text_pos = self.figure_manager.event_bus.emit("get_user_preference", ['aim_text_position', 'Middle'])
 
         if text_pos == 'Left':
             ha = 'left'
@@ -660,8 +754,8 @@ class AimManager:
         return text_x, ha
 
     def aim_temp_line_n_text(self, xmin, xmax, note):
-        text_mode = self.figure_manager.data_manager.user_preferences['aim_line_type']
-        font_size = copy.deepcopy(self.figure_manager.data_manager.user_preferences['aim_style']['font_size'])
+        text_mode = self.figure_manager.event_bus.emit("get_user_preference", ['aim_line_type', 'Flat'])
+        font_size = copy.deepcopy(self.figure_manager.event_bus.emit("get_user_preference", ['aim_style', {}])['font_size'])
         if text_mode == 'Flat':
             text_x, ha = self.aim_get_text_pos(xmin, xmax)
             self.aim_temp_line = self.figure_manager.ax.hlines(xmin=xmin, xmax=xmax, y=self.aim_first_click_y, colors="magenta", linewidth=1.5, linestyle="--")
@@ -669,7 +763,7 @@ class AimManager:
         else:
             if xmax > xmin:
                 self.aim_temp_line, = self.figure_manager.ax.plot([xmin, xmax], [self.aim_first_click_y, self.aim_second_click_y], color='magenta', linewidth=1.5, linestyle='--')
-                text_pos = self.figure_manager.data_manager.user_preferences['aim_text_position']
+                text_pos = self.figure_manager.event_bus.emit("get_user_preference", ['aim_text_position', 'Middle'])
                 pos_x, pos_y, ha, angle, self.slope, text_offset_x, text_offset_y = self.figure_manager.data_manager.get_aim_slope_text(text_pos,
                                                                                                           xmin,
                                                                                                           xmax,
@@ -681,7 +775,12 @@ class AimManager:
             else:
                 self.aim_cleanup()
 
-    def aim_click_info(self, event, note):
+    def aim_click_info(self, data):
+        if self.figure_manager.pick_event:
+            return
+
+        event = data['event']
+        note = data['note']
         if event.xdata is not None:
 
             # Handling for Weekly
@@ -736,21 +835,36 @@ class TrendManager:
         self.trend_current_temp_marker = None
         self.trend_first_click_x = None
         self.trend_second_click_x = None
-        self.trend_temp_est = None
-        # self.trend_temp_line = None
-        self.upper_bounce_temp_line = None
-        self.lower_bounce_temp_line = None
-        self.trend_temp_fit_on = False
         self.trend_elements = None
         self.trend_data = None
 
         # Event bus subscriptions
-        self.event_bus.subscribe('plot_cel_trend_temp', self.plot_cel_trend_temp, has_data=True)
+        self.event_bus.subscribe('plot_cel_trend', self.plot_cel_trend, has_data=True)
         self.event_bus.subscribe('trend_on_click', self.trend_on_click, has_data=True)
+        self.event_bus.subscribe('save_cel_label_pos', self.save_cel_label_pos, has_data=True)
+        self.event_bus.subscribe('get_trend_temp_marker_status', self.get_trend_temp_marker_status)
         self.event_bus.subscribe('trend_cleanup', self.trend_cleanup)
         self.event_bus.subscribe('trend_finalize', self.trend_finalize)
 
+    def save_cel_label_pos(self, data):
+        # Called from DragManager
+        trend_data = data['save_obj']
+        x_i = data['drop_x']
+        y_i = data['drop_y']
+
+        est_x = self.figure_manager.data_manager.find_closest_x(x_i, self.figure_manager.Chart.date_to_pos)
+        if est_x in self.figure_manager.x_to_date.keys():
+            est_date = self.figure_manager.x_to_date[est_x]
+            trend_data['text_date'] = est_date.strftime(self.figure_manager.data_manager.standard_date_string)
+            trend_data['text_y'] = y_i
+
+    def get_trend_temp_marker_status(self):
+        return self.trend_temp_first_marker, self.trend_temp_second_marker
+
     def trend_on_click(self, event):
+        if self.figure_manager.pick_event:
+            return
+
         # Handling for Weekly
         if event.xdata is not None:
             x = self.figure_manager.data_manager.find_closest_x(int(event.xdata), self.figure_manager.Chart.date_to_pos)
@@ -762,23 +876,18 @@ class TrendManager:
                     self.trend_first_click_x = None
                     self.trend_second_click_x = x
 
-            if self.trend_temp_fit_on:
-                if event.ydata is not None:
-                    y = event.ydata
-                    self.trend_temp_est.set_position((x, y))
-                    self.event_bus.emit('refresh_chart')
-            else:
                 if self.trend_first_click_x is not None and self.trend_second_click_x is None:
                     self.plot_trend_temp_first_marker(self.trend_first_click_x)
                 elif self.trend_second_click_x is not None:
                     self.plot_trend_temp_second_marker(self.trend_second_click_x)
 
-    def plot_cel_trend_temp(self, temp):
+                self.event_bus.emit('update_trend_button_state')
+
+    def plot_cel_trend(self, temp):
         user_col = self.event_bus.emit('get_current_trend_column')
         conditions_satisfied = (
                 self.trend_temp_first_marker and
                 self.trend_temp_second_marker and
-                not self.trend_temp_fit_on and
                 user_col != ''
         )
 
@@ -788,15 +897,14 @@ class TrendManager:
             x2 = self.trend_temp_second_marker.get_xdata()[0]
             date1 = self.figure_manager.x_to_date[x1]
             date2 = self.figure_manager.x_to_date[x2]
-            fit_method = self.figure_manager.data_manager.user_preferences['fit_method']
-            forecast = self.figure_manager.data_manager.user_preferences['forward_projection']
-            bounce_envelope = self.figure_manager.data_manager.user_preferences['bounce_envelope']
+            fit_method = self.figure_manager.event_bus.emit("get_user_preference", ['fit_method', 'Least-squares'])
+            forecast = self.figure_manager.event_bus.emit("get_user_preference", ['forward_projection', 0])
+            bounce_envelope = self.figure_manager.event_bus.emit("get_user_preference", ['bounce_envelope', 'None'])
 
             result = col_instance.plot_cel_trend(date1, date2, fit_method, forecast, bounce_envelope, temp)
             if result:
                 self.trend_elements, self.trend_data = result
                 self.trend_temp_fit_on = True
-                self.trend_temp_est = self.trend_elements['cel_label']
 
     def plot_trend_temp_first_marker(self, x_i):
         self.trend_current_temp_marker = 'first'
@@ -809,68 +917,9 @@ class TrendManager:
         self.trend_current_temp_marker = 'second'
         if self.trend_temp_second_marker:
             self.trend_temp_second_marker.remove()
-        self.trend_temp_second_marker = self.figure_manager.ax.axvline(x_i, color='magenta', linestyle='--', linewidth=1)
+        self.trend_temp_second_marker = self.figure_manager.ax.axvline(x_i, color='magenta', linestyle='--',
+                                                                       linewidth=1)
         self.event_bus.emit('refresh_chart')
-
-    def trend_move_temp_marker(self, direction):
-        if not self.trend_temp_est:
-            if self.trend_current_temp_marker == 'first':
-                x = self.trend_temp_first_marker.get_xdata()[0]
-                if direction == 'right':
-                    x += 1
-                    if x not in self.figure_manager.Chart.date_to_pos.values():  # Handling for Weekly
-                        x += 1
-                elif direction == 'left':
-                    x -= 1
-                    if x not in self.figure_manager.Chart.date_to_pos.values():  # Handling for Weekly
-                        x -= 1
-
-                if x < self.figure_manager.Chart.xmin:
-                    x = self.figure_manager.Chart.xmin
-                elif x > self.figure_manager.Chart.xmax - 1:
-                    x = self.figure_manager.Chart.xmax - 1
-
-                self.trend_temp_first_marker.set_xdata([x])
-
-            elif self.trend_current_temp_marker == 'second':
-                x = self.trend_temp_second_marker.get_xdata()[0]
-                if direction == 'right':
-                    x += 1
-                    if x not in self.figure_manager.Chart.date_to_pos.values():  # Handling for Weekly
-                        x += 1
-                elif direction == 'left':
-                    x -= 1
-                    if x not in self.figure_manager.Chart.date_to_pos.values():  # Handling for Weekly
-                        x -= 1
-
-                if x < self.figure_manager.Chart.xmin:
-                    x = self.figure_manager.Chart.xmin
-                elif x > self.figure_manager.Chart.xmax - 1:
-                    x = self.figure_manager.Chart.xmax - 1
-
-                self.trend_temp_second_marker.set_xdata([x])
-
-            self.event_bus.emit('refresh_chart')
-
-    def trend_move_temp_est_with_arrows(self, direction):
-        if self.trend_temp_est:
-            x, y = self.trend_temp_est.get_position()
-
-            if direction == 'right':
-                x += 1
-                if x not in self.figure_manager.Chart.date_to_pos.values():  # Handling for Weekly
-                    x += 1
-            elif direction == 'left':
-                x -= 1
-                if x not in self.figure_manager.Chart.date_to_pos.values():  # Handling for Weekly
-                    x -= 1
-            elif direction == 'up':
-                y *= 1.1
-            elif direction == 'down':
-                y *= 0.9
-
-            self.trend_temp_est.set_position((x, y))
-            self.event_bus.emit('refresh_chart')
 
     def trend_date1_changed(self, new_date):
         new_date = pd.to_datetime(new_date.toString('dd-MM-yyyy'), format='%d-%m-%Y')
@@ -898,33 +947,8 @@ class TrendManager:
 
         self.event_bus.emit('refresh_chart')
 
-    def trend_undo(self, corr):
-        if corr:
-            data, trend_obj, bounce_obj, est_obj = 'trend_corr', 'trend_corr_obj', 'trend_corr_bounce_obj', 'trend_corr_est_obj'
-        else:
-            data, trend_obj, bounce_obj, est_obj = 'trend_err', 'trend_err_obj', 'trend_err_bounce_obj', 'trend_err_est_obj'
-
-        if self.figure_manager.chart_objects[trend_obj] and self.figure_manager.data_manager.chart_data[data]:
-            self.figure_manager.data_manager.chart_data[data].pop()
-            line = self.figure_manager.chart_objects[trend_obj].pop()
-            line.remove()
-
-            if self.figure_manager.chart_objects[est_obj]:
-                est = self.figure_manager.chart_objects[est_obj].pop()
-                est.remove()
-
-            if self.figure_manager.chart_objects[bounce_obj]:
-                upper, lower = self.figure_manager.chart_objects[bounce_obj].pop()
-                upper.remove()
-                lower.remove()
-
-            self.event_bus.emit('refresh_chart')
-
-        self.trend_cleanup()
-
     def trend_finalize(self):
         if self.trend_elements and self.trend_data:
-
             new_trend_elements = {}
             for name, original in self.trend_elements.items():
                 if 'line' in name:  # Keep all line elements including None values
@@ -938,20 +962,31 @@ class TrendManager:
                     else:
                         new_trend_elements[name] = None  # Preserve None values
                 elif 'label' in name and original:
-                    new_text = Text(original.get_position()[0], original.get_position()[1],
-                                    original.get_text(), color=self.trend_data['line_color'],
+                    # Position the cel label at a reasonable default position
+                    est_x, est_y = original.get_position()
+                    est_text = original.get_text()
+                    new_text = Text(est_x, est_y,
+                                    est_text, color=self.trend_data['line_color'],
                                     rotation=original.get_rotation(),
                                     verticalalignment=original.get_verticalalignment(),
                                     horizontalalignment=original.get_horizontalalignment(),
                                     clip_on=False,
                                     transform=self.figure_manager.ax.transData,
-                                    fontweight=original.get_weight()
+                                    fontweight=original.get_weight(),
+                                    fontsize=self.trend_data['font_size']
                                     )
                     new_trend_elements[name] = new_text
                     self.figure_manager.ax.add_artist(new_text)
 
-            # Revise cel label position
-            est_x, est_y = self.trend_temp_est.get_position()
+                    # Make the text draggable
+                    self.event_bus.emit('make_draggable', data={
+                        'objects': new_text,
+                        'save_obj': self.trend_data,
+                        'save_event': 'save_cel_label_pos'
+                    })
+
+            # Get text position for data
+            est_x, est_y = self.trend_elements['cel_label'].get_position()
             est_x = self.figure_manager.data_manager.find_closest_x(est_x, self.figure_manager.Chart.date_to_pos)
             est_date = self.figure_manager.x_to_date[est_x]
             self.trend_data['text_date'] = est_date.strftime(self.figure_manager.data_manager.standard_date_string)
@@ -972,17 +1007,11 @@ class TrendManager:
             self.trend_temp_first_marker.remove()
         if self.trend_temp_second_marker:
             self.trend_temp_second_marker.remove()
-        if self.upper_bounce_temp_line:
-            self.upper_bounce_temp_line.remove()
-        if self.lower_bounce_temp_line:
-            self.lower_bounce_temp_line.remove()
-        self.trend_temp_est = None
-        self.upper_bounce_temp_line = None
-        self.lower_bounce_temp_line = None
-        self.trend_first_click_x = None
-        self.trend_second_click_x = None
+
         self.trend_temp_first_marker = None
         self.trend_temp_second_marker = None
+        self.trend_first_click_x = None
+        self.trend_second_click_x = None
         self.trend_current_temp_marker = None
         self.trend_temp_fit_on = False
 
@@ -1006,6 +1035,327 @@ class TrendManager:
             x2 = self.trend_temp_second_marker.get_xdata()[0]
             d2 = self.figure_manager.x_to_date[x2]
             return d2, 'second'
+
+
+class DragManager:
+    def __init__(self, figure_manager, throttle_ms=25):
+        self.figure_manager = figure_manager
+        self.event_bus = figure_manager.event_bus
+
+        # Drag state
+        self.draggable_items = {}
+        self.active_drag_id = None
+
+        # Throttling
+        self.throttle_ms = throttle_ms
+        self.throttle_timer = QTimer()
+        self.throttle_timer.setSingleShot(True)
+        self.throttle_timer.timeout.connect(self._process_pending_update)
+
+        self.update_pending = False
+        self.last_mouse_event = None
+
+        # Canvas connections
+        self.pick_connection = None
+        self.motion_connection = None
+        self.release_connection = None
+
+        # Blitting optimization
+        self.drag_background = None
+
+        # Event bus subscriptions
+        self.event_bus.subscribe('make_draggable', self.make_draggable, has_data=True)
+        self.event_bus.subscribe('refresh_drag_connections', self.refresh_drag_connections)
+
+    def refresh_drag_connections(self):
+        """Clean up and re-establish canvas connections"""
+        self._cleanup_canvas_connections()
+        if self.draggable_items:
+            self._setup_canvas_connections()
+
+    def make_draggable(self, data):
+        """Make objects draggable"""
+        objects = data['objects']
+        save_obj = data['save_obj']
+        save_event = data['save_event']
+        drag_id = data.get('drag_id')
+        picker_radius = data.get('picker_radius', 20)
+        horizontal = data.get('horizontal', True)
+        vertical = data.get('vertical', True)
+
+        # Normalize to list
+        if not isinstance(objects, (list, tuple)):
+            objects = [objects]
+
+        # Generate ID if not provided
+        if drag_id is None:
+            drag_id = f"drag_{len(self.draggable_items)}_{id(objects[0])}"
+
+        # Make objects pickable
+        for obj in objects:
+            if hasattr(obj, 'set_picker'):
+                obj.set_picker(picker_radius)
+
+        # Store drag item
+        self.draggable_items[drag_id] = {
+            'objects': objects,
+            'is_dragging': False,
+            'start_pos': None,  # Store initial position
+            'horizontal': horizontal,
+            'vertical': vertical,
+            'save_obj': save_obj,
+            'save_event': save_event
+        }
+
+        # Set up canvas connections if this is the first item
+        if self.pick_connection is None:
+            self._setup_canvas_connections()
+
+        return drag_id
+
+    def remove_draggable(self, drag_id):
+        """Remove draggable item"""
+        if drag_id in self.draggable_items:
+            item = self.draggable_items[drag_id]
+
+            # Make objects non-pickable
+            for obj in item['objects']:
+                if hasattr(obj, 'set_picker'):
+                    obj.set_picker(False)
+
+            # Clean up if this was active
+            if self.active_drag_id == drag_id:
+                self.active_drag_id = None
+
+            del self.draggable_items[drag_id]
+
+        # Remove canvas connections if no items left
+        if not self.draggable_items:
+            self._cleanup_canvas_connections()
+
+    def _setup_canvas_connections(self):
+        """Set up canvas event connections"""
+        canvas = self.figure_manager.canvas
+        self.pick_connection = canvas.mpl_connect('pick_event', self._on_pick)
+        self.motion_connection = canvas.mpl_connect('motion_notify_event', self._on_motion)
+        self.release_connection = canvas.mpl_connect('button_release_event', self._on_release)
+
+    def _cleanup_canvas_connections(self):
+        """Clean up canvas event connections"""
+        connections = [
+            (self.pick_connection, 'pick_connection'),
+            (self.motion_connection, 'motion_connection'),
+            (self.release_connection, 'release_connection')
+        ]
+
+        for connection, attr_name in connections:
+            if connection:
+                self.figure_manager.canvas.mpl_disconnect(connection)
+                setattr(self, attr_name, None)
+
+    def _find_drag_item(self, artist):
+        """Find which drag item contains the given artist"""
+        for drag_id, item in self.draggable_items.items():
+            if artist in item['objects']:
+                return drag_id, item
+        return None, None
+
+    def _get_object_position(self, obj):
+        """Get the current position of an object"""
+        if hasattr(obj, 'get_position'):
+            return obj.get_position()
+        elif hasattr(obj, 'get_data'):
+            # For line objects, use the first point
+            xdata, ydata = obj.get_data()
+            if len(xdata) > 0 and len(ydata) > 0:
+                return xdata[0], ydata[0]
+        return None, None
+
+    def _save_background(self):
+        """Save the background for blitting"""
+        self.figure_manager.canvas.draw_idle()
+        self.figure_manager.canvas.flush_events()
+        self.drag_background = self.figure_manager.canvas.copy_from_bbox(
+            self.figure_manager.figure.bbox
+        )
+
+    def _make_animated(self, objects, animated=True):
+        """Make objects animated for blitting"""
+        for obj in objects:
+            if hasattr(obj, 'set_animated'):
+                obj.set_animated(animated)
+
+    def _on_pick(self, event):
+        """Handle pick event - start dragging"""
+        # Announce pick event
+        self.figure_manager.pick_event = True
+
+        drag_id, item = self._find_drag_item(event.artist)
+        if not (drag_id and item):
+            return
+
+        # Start dragging
+        self.active_drag_id = drag_id
+        item['is_dragging'] = True
+
+        # Make objects animated and save background
+        self._make_animated(item['objects'], True)
+        self._save_background()
+
+        # Store initial position (mouse and object)
+        item['start_pos'] = {
+            'mouse_x': event.mouseevent.x,
+            'mouse_y': event.mouseevent.y,
+            'object_pos': self._get_object_position(event.artist)
+        }
+
+        # Stop any pending throttle timer
+        self.throttle_timer.stop()
+        self.update_pending = False
+
+        # Initial draw
+        self._blit_draw_objects(item['objects'])
+
+    def _on_motion(self, event):
+        """Handle motion event - update drag position"""
+        if not self.active_drag_id:
+            return
+
+        item = self.draggable_items.get(self.active_drag_id)
+        if not item or not item['is_dragging']:
+            return
+
+        # Store event for throttled processing
+        self.last_mouse_event = event
+
+        # Start throttle timer if not already pending
+        if not self.update_pending:
+            self.update_pending = True
+            self.throttle_timer.start(self.throttle_ms)
+
+    def _on_release(self, event):
+        """Handle release event - finish dragging"""
+        # Announce end of pick event
+        self.figure_manager.pick_event = False
+
+        if not self.active_drag_id:
+            return
+
+        item = self.draggable_items.get(self.active_drag_id)
+        if not (item and item['is_dragging']):
+            return
+
+        # Make objects non-animated
+        self._make_animated(item['objects'], False)
+
+        # Get final position and save
+        text_obj = item['objects'][0]
+        final_x, final_y = text_obj.get_position()
+
+        data = {
+            'save_obj': item['save_obj'],
+            'drop_x': final_x,
+            'drop_y': final_y
+        }
+        self.event_bus.emit(item['save_event'], data)
+
+        # Clean up drag state
+        item['is_dragging'] = False
+        self.active_drag_id = None
+
+        # Stop throttling
+        self.throttle_timer.stop()
+        self.update_pending = False
+        self.last_mouse_event = None
+
+        # Final refresh
+        self.figure_manager.event_bus.emit('refresh_chart')
+
+    def _blit_draw_objects(self, objects):
+        """Draw objects using blitting"""
+        if not self.drag_background:
+            return
+
+        # Restore background
+        self.figure_manager.canvas.restore_region(self.drag_background)
+
+        # Draw the dragged objects
+        for obj in objects:
+            if obj:
+                self.figure_manager.ax.draw_artist(obj)
+
+        # Blit the result
+        self.figure_manager.canvas.blit(self.figure_manager.figure.bbox)
+
+    def _process_pending_update(self):
+        """Process the most recent mouse event at the throttled rate"""
+        if not self.last_mouse_event or not self.active_drag_id:
+            self.throttle_timer.stop()
+            self.update_pending = False
+            return
+
+        item = self.draggable_items.get(self.active_drag_id)
+        if not (item and item['is_dragging'] and item['start_pos']):
+            self.update_pending = False
+            return
+
+        event = self.last_mouse_event
+        self.last_mouse_event = None
+
+        # Calculate new position
+        new_pos = self._calculate_new_position(event, item)
+        if new_pos:
+            # Update object positions
+            for obj in item['objects']:
+                if hasattr(obj, 'set_position'):
+                    obj.set_position(new_pos)
+
+            # Draw with blitting
+            self._blit_draw_objects(item['objects'])
+
+        # Continue throttling if still dragging
+        if self.update_pending and self.active_drag_id:
+            self.throttle_timer.start(self.throttle_ms)
+        else:
+            self.update_pending = False
+
+    def _calculate_new_position(self, event, item):
+        """Calculate new object position based on mouse movement"""
+        start_pos = item['start_pos']
+        original_x, original_y = start_pos['object_pos']
+
+        if original_x is None or original_y is None:
+            return None
+
+        # Convert mouse positions to data coordinates
+        display_to_data = self.figure_manager.ax.transData.inverted()
+        current_mouse_data = display_to_data.transform((event.x, event.y))
+        start_mouse_data = display_to_data.transform((start_pos['mouse_x'], start_pos['mouse_y']))
+
+        # Calculate displacement
+        dx = current_mouse_data[0] - start_mouse_data[0]
+
+        # Handle y-axis movement (with log scale support)
+        if self.figure_manager.ax.get_yscale() == 'log':
+            # Work in log space for proportional movement
+            if original_y > 0 and start_mouse_data[1] > 0 and current_mouse_data[1] > 0:
+                log_ratio = current_mouse_data[1] / start_mouse_data[1]
+                new_y = original_y * log_ratio
+            else:
+                new_y = original_y  # Fallback if any value <= 0
+        else:
+            # Linear scale - use regular displacement
+            dy = current_mouse_data[1] - start_mouse_data[1]
+            new_y = original_y + dy
+
+        # Apply movement constraints
+        new_x = original_x + dx if item['horizontal'] else original_x
+        new_y = new_y if item['vertical'] else original_y
+
+        # Ensure x is integer for grid alignment
+        new_x = int(new_x)
+
+        return (new_x, new_y)
 
 
 class ViewManager:
@@ -1034,7 +1384,8 @@ class ViewManager:
             self.event_bus.emit('modify_columns')
 
     def create_legend(self):
-        is_minute_chart = 'Minute' in self.figure_manager.data_manager.chart_data['type']
+        chart_type = self.figure_manager.event_bus.emit("get_chart_data", ['type', 'Daily'])
+        is_minute_chart = 'Minute' in chart_type
         columns = self.figure_manager.data_manager.plot_columns
         handles, labels = [], []
         if columns:
@@ -1056,7 +1407,7 @@ class ViewManager:
                                           linewidth=legend['line_width']))
                     labels.append(legend['user_col'])
 
-        legend = self.figure_manager.ax.legend(handles, labels, loc='upper right', framealpha=1)
+        legend = self.figure_manager.ax.legend(handles, labels, loc='best', framealpha=1)
         legend.set_picker(5)
         self.figure_manager.chart_objects['legend_obj'].append(legend)
 
@@ -1071,48 +1422,50 @@ class ViewManager:
 
     def view_legend_toggle(self, show, refresh=True):
         if self.figure_manager.chart_objects['legend_obj']:
-            self.figure_manager.data_manager.chart_data['view']['chart']['legend'] = bool(show)
+            self.figure_manager.event_bus.emit("update_chart_data", [['view', 'chart', 'legend'], bool(show)])
             for legend in self.figure_manager.chart_objects['legend_obj']:
                 legend.set_visible(show)
             if refresh:
                 self.event_bus.emit('refresh_chart')
 
     def apply_all_grid_settings(self):
-        chart_data = self.figure_manager.data_manager.chart_data
-        self.view_minor_gridlines(chart_data['view']['chart']['minor_grid'], False)
-        self.view_major_date_gridlines(chart_data['view']['chart']['major_grid_dates'], False)
-        self.view_major_count_gridlines(chart_data['view']['chart']['major_grid_counts'], False)
-        self.view_floor_grid(chart_data['view']['chart']['floor_grid'], False)
+        self.view_minor_gridlines(self.figure_manager.event_bus.emit("get_chart_data", [['view', 'chart', 'minor_grid'], False]), False)
+        self.view_major_date_gridlines(self.figure_manager.event_bus.emit("get_chart_data", [['view', 'chart', 'major_grid_dates'], False]), False)
+        self.view_major_count_gridlines(self.figure_manager.event_bus.emit("get_chart_data", [['view', 'chart', 'major_grid_counts'], False]), False)
+        self.view_floor_grid(self.figure_manager.event_bus.emit("get_chart_data", [['view', 'chart', 'floor_grid'], False]), False)
 
     def apply_all_misc_settings(self):
-        chart_data = self.figure_manager.data_manager.chart_data
-        self.view_phase_lines_toggle(chart_data['view']['chart']['phase'], False)
-        self.view_aims_toggle(chart_data['view']['chart']['aims'], False)
-        self.view_cel_fan_toggle(chart_data['view']['chart']['cel_fan'], False)
-        self.view_credit_lines_toggle(chart_data['view']['chart']['credit'], False)
-        self.view_legend_toggle(chart_data['view']['chart']['legend'], False)
+        self.view_phase_lines_toggle(self.figure_manager.event_bus.emit("get_chart_data", [['view', 'chart', 'phase'], False]), False)
+        self.view_aims_toggle(self.figure_manager.event_bus.emit("get_chart_data", [['view', 'chart', 'aims'], False]),False)
+        self.view_cel_fan_toggle(self.figure_manager.event_bus.emit("get_chart_data", [['view', 'chart', 'cel_fan'], False]), False)
+        self.view_credit_lines_toggle(self.figure_manager.event_bus.emit("get_chart_data", [['view', 'chart', 'credit'], False]), False)
+        self.view_legend_toggle(self.figure_manager.event_bus.emit("get_chart_data", [['view', 'chart', 'legend'], False]), False)
 
     def view_minor_gridlines(self, show, refresh=True):
         self.figure_manager.Chart.minor_grid_lines(show)
-        self.figure_manager.data_manager.chart_data['view']['chart']['minor_grid'] = bool(show)
+        self.figure_manager.event_bus.emit("update_chart_data", [['view', 'chart', 'minor_grid'], bool(show)])
         if refresh:
             self.event_bus.emit('refresh_chart')
 
     def view_major_date_gridlines(self, show, refresh=True):
         self.figure_manager.Chart.major_grid_dates(show)
-        self.figure_manager.data_manager.chart_data['view']['chart']['major_grid_dates'] = bool(show)
+        self.figure_manager.event_bus.emit("update_chart_data", [['view', 'chart', 'major_grid_dates'], bool(show)])
         if refresh:
             self.event_bus.emit('refresh_chart')
 
     def view_major_count_gridlines(self, show, refresh=True):
         self.figure_manager.Chart.major_grid_counts(show)
-        self.figure_manager.data_manager.chart_data['view']['chart']['major_grid_counts'] = bool(show)
+        view = self.figure_manager.event_bus.emit("get_chart_data", ['view', {}])
+        view['chart']['major_grid_counts'] = bool(show)
+        self.figure_manager.event_bus.emit("update_chart_data", ['view', view])
         if refresh:
             self.event_bus.emit('refresh_chart')
 
     def view_floor_grid(self, show, refresh=True):
         self.figure_manager.Chart.floor_grid_lines(show)
-        self.figure_manager.data_manager.chart_data['view']['chart']['floor_grid'] = bool(show)
+        view = self.figure_manager.event_bus.emit("get_chart_data", ['view', {}])
+        view['chart']['floor_grid'] = bool(show)
+        self.figure_manager.event_bus.emit("update_chart_data", ['view', view])
         if refresh:
             self.event_bus.emit('refresh_chart')
 
@@ -1122,7 +1475,9 @@ class ViewManager:
                 line, text = pair
                 line.set_visible(show)
                 text.set_visible(show)
-        self.figure_manager.data_manager.chart_data['view']['chart']['aims'] = bool(show)
+        view = self.figure_manager.event_bus.emit("get_chart_data", ['view', {}])
+        view['chart']['aims'] = bool(show)
+        self.figure_manager.event_bus.emit("update_chart_data", ['view', view])
         if refresh:
             self.event_bus.emit('refresh_chart')
 
@@ -1132,16 +1487,18 @@ class ViewManager:
                 line, text = pair
                 line.set_visible(show)
                 text.set_visible(show)
-        self.figure_manager.data_manager.chart_data['view']['chart']['phase'] = bool(show)
+        view = self.figure_manager.event_bus.emit("get_chart_data", ['view', {}])
+        view['chart']['phase'] = bool(show)
+        self.figure_manager.event_bus.emit("update_chart_data", ['view', view])
         if refresh:
             self.event_bus.emit('refresh_chart')
 
     def view_cel_fan_toggle(self, status, refresh=True):
-        self.figure_manager.data_manager.chart_data['view']['chart']['cel_fan'] = bool(status)
+        self.figure_manager.event_bus.emit("update_chart_data", [['view', 'chart', 'cel_fan'], bool(status)])
         self.figure_manager.drag_fan_manager.update_visibility()
 
         # Adjust right y-label if dealing with a minute chart
-        chart_type = self.figure_manager.data_manager.chart_data['type']
+        chart_type = self.figure_manager.event_bus.emit("get_chart_data", ['type', 'Daily'])
         if 'Minute' in chart_type:
             if status:
                 self.figure_manager.Chart.ax.yaxis.set_label_coords(-0.1, 0.7)
@@ -1152,7 +1509,10 @@ class ViewManager:
             self.event_bus.emit('refresh_chart')
 
     def view_credit_lines_toggle(self, status, refresh=True):
-        self.figure_manager.data_manager.chart_data['view']['chart']['credit'] = bool(status)
+        view = self.figure_manager.event_bus.emit("get_chart_data", ['view', {}])
+        view['chart']['credit'] = bool(status)
+        self.figure_manager.event_bus.emit("update_chart_data", ['view', view])
+
         if self.figure_manager.credit_lines_object:
             self.figure_manager.credit_lines_object.set_visible(status)
             if refresh:
@@ -1163,7 +1523,7 @@ class ViewManager:
             self.event_bus.emit('view_credit_lines_popup')
 
     def view_update_credit_lines(self):
-        rows = self.figure_manager.data_manager.chart_data['credit']
+        rows = self.event_bus.emit("get_chart_data", ['credit', ('', '')])
         if rows:
             r1, r2 = rows
             # Reject revision if credit lines are completely empty
@@ -1186,13 +1546,15 @@ class ViewManager:
                 va='center',
                 picker=5,
             )
-            self.figure_manager.data_manager.chart_data['credit'] = (r1, r2)
+            self.event_bus.emit("update_chart_data", ['credit', (r1, r2)])
 
 
-class ManualManager:
+class StyleManager:
     def __init__(self, figure_manager):
+        # Classes
         self.figure_manager = figure_manager
         self.event_bus = EventBus()
+
         # Control variables
         self.point_temp_first_marker = None
         self.point_temp_second_marker = None
@@ -1201,12 +1563,13 @@ class ManualManager:
         self.point_second_click_x = None
 
         # Event bus subscriptions
+        self.event_bus.subscribe('style_point_on_click', self.style_point_on_click, has_data=True)
         self.event_bus.subscribe('update_point_styles', self.update_point_styles, has_data=True)
         self.event_bus.subscribe('apply_styles', self.apply_styles)
         self.event_bus.subscribe('style_cleanup', self.manual_cleanup)
 
     def apply_styles(self):
-        data_point_styles = self.figure_manager.data_manager.chart_data['data_point_styles']
+        data_point_styles = self.figure_manager.event_bus.emit("get_chart_data", ['data_point_styles', {}])
         plot_columns = self.figure_manager.data_manager.plot_columns
         for user_col, styles in data_point_styles.items():
             if user_col in plot_columns.keys():
@@ -1223,29 +1586,28 @@ class ManualManager:
         df = col_instance.get_df()
         if not df.empty:
             x_to_date = self.figure_manager.x_to_date
-            chart_data = self.figure_manager.data_manager.chart_data
 
-            # Get slice boundaries
-            x1 = self.point_temp_first_marker.get_xdata()[0] if self.point_temp_first_marker else 0
-            x2 = self.point_temp_second_marker.get_xdata()[0] if self.point_temp_second_marker else max(x_to_date.keys())
-
-            # Get start and end
-            date_start = pd.to_datetime(x_to_date[min(x1, x2)])
-            date_end = pd.to_datetime(x_to_date[max(x1, x2)])
-
-            mask = (df['d'] >= date_start) & (df['d'] <= date_end)
-            df.loc[mask, style_cat] = style_val
+            # Specific date boundary
+            if self.point_temp_first_marker and self.point_temp_second_marker:
+                x1 = self.point_temp_first_marker.get_xdata()[0]
+                x2 = self.point_temp_second_marker.get_xdata()[0]
+                x1, x2 = min(x1, x2), max(x1, x2)  # Ensure order
+                date_start, date_end = pd.to_datetime(x_to_date[x1]), pd.to_datetime(x_to_date[x2])
+                mask = (df['d'] >= date_start) & (df['d'] <= date_end)
+                df.loc[mask, style_cat] = style_val
+                date_string_format = self.figure_manager.data_manager.standard_date_string
+                date1 = date_start.strftime(date_string_format)
+                date2 = date_end.strftime(date_string_format)
+            else:  # No date boundary
+                date1 = 'none'
+                date2 = 'none'
+                df[style_cat] = style_val
 
             col_instance.update_style()
 
             self.event_bus.emit('refresh_chart')
 
-            # Save style configuration
-            date_string_format = self.figure_manager.data_manager.standard_date_string
-            date1 = date_start.strftime(date_string_format)
-            date2 = date_end.strftime(date_string_format)
-
-            data_point_styles = chart_data['data_point_styles']
+            data_point_styles = self.figure_manager.event_bus.emit("get_chart_data", ['data_point_styles', {}])
             if user_col not in data_point_styles:
                 data_point_styles[user_col] = []
 
@@ -1291,7 +1653,10 @@ class ManualManager:
         self.point_temp_second_marker = self.figure_manager.ax.axvline(x_i, color='magenta', linestyle='--', linewidth=1)
         self.event_bus.emit('refresh_chart')
 
-    def point_on_click(self, event):
+    def style_point_on_click(self, event):
+        if self.figure_manager.pick_event:
+            return
+
         if event.xdata is not None:
             x = self.figure_manager.data_manager.find_closest_x(int(event.xdata), self.figure_manager.Chart.date_to_pos)
             if x is not None:
@@ -1341,7 +1706,7 @@ class NoteManager:
         self.show_note_locations()
 
     def show_note_locations(self):
-        all_notes = self.figure_manager.data_manager.chart_data['notes']
+        all_notes = self.figure_manager.event_bus.emit("get_chart_data", ['notes', []])
         xs, ys = [], []
         for note in all_notes:
             text, date_str, y_val = note.split('|')
@@ -1426,7 +1791,7 @@ class Hover:
         self.crosshair_timer.start(self.crosshair_rate_limit)
 
     def _get_data_values(self, x_i):
-        chart_type = self.figure_manager.data_manager.chart_data['type'].lower()
+        chart_type = self.figure_manager.event_bus.emit("get_chart_data", ['type', 'Daily']).lower()
 
         plot_columns = self.figure_manager.data_manager.plot_columns
         values = []
@@ -1469,7 +1834,7 @@ class Hover:
         month = date.strftime('%b, %m')
         year = date.strftime("%Y")
 
-        chart_type = self.figure_manager.data_manager.chart_data['type'].lower()
+        chart_type = self.figure_manager.event_bus.emit("get_chart_data", ['type', 'Daily']).lower()
         return date, day, month, year, chart_type
 
     def _format_data_label(self, day, month, year, x, y, values, values_total, visibility, user_cols, sys_cols):
@@ -1521,7 +1886,8 @@ class Hover:
                                                                   linewidth=1)
 
             x_ann = -0.1
-            y_ann = 0.5 if 'minute' in self.figure_manager.data_manager.chart_data['type'].lower() else 0.22
+            chart_type = self.figure_manager.event_bus.emit("get_chart_data", ['type', 'Daily']).lower()
+            y_ann = 0.5 if 'minute' in chart_type else 0.22
 
             self.crosshair_annotation = self.figure_manager.ax.text(
                 x_ann, y_ann, '', transform=self.figure_manager.ax.transAxes,
@@ -1575,7 +1941,7 @@ class Hover:
 
     def _handle_notes(self, date):
         hover_date_str = date.strftime(self.figure_manager.data_manager.standard_date_string)
-        all_notes = self.figure_manager.data_manager.chart_data['notes']
+        all_notes = self.figure_manager.event_bus.emit("get_chart_data", ['notes', []])
 
         hover_date_notes = []
         for note in all_notes:
@@ -1673,7 +2039,8 @@ class Hover:
     def save_crosshair_background(self):
         # Captures the figure background for blitting. Runs once when shift is pressed
         self.note_dates = []
-        for note in self.figure_manager.data_manager.chart_data['notes']:
+        all_notes = self.figure_manager.event_bus.emit("get_chart_data", ['notes', []])
+        for note in all_notes:
             t, d, y = note.split('|')
             # Snap dates if necessary
             closest_note_date_pd = self.figure_manager.data_manager.find_closest_date(d, self.figure_manager.Chart.date_to_pos)
@@ -1805,13 +2172,13 @@ class DraggableFanManager:
         self.fan_lines = []
         self.fan_texts = []
         self.base_text_distance_factor = 1.1
-        self.ms_throttle = 50
+        self.ms_throttle = 25
 
         # Text labels for standard celeration and period
         self.standard_text = None
         self.period_text = None
 
-        # Line data for transformation (missing in original)
+        # Line data for transformation
         self.line_data = []
 
         # Drag state
@@ -1821,12 +2188,21 @@ class DraggableFanManager:
         self.drag_start_mid_x = None
         self.drag_start_mid_y = None
 
+        # Blitting optimization
+        self.drag_background = None
+        self.use_blitting = True
+
         # Throttling mechanism
         self.update_pending = False
         self.last_mouse_event = None
         self.throttle_timer = QTimer()
         self.throttle_timer.setInterval(self.ms_throttle)
         self.throttle_timer.timeout.connect(self.process_pending_update)
+
+        # Canvas connections
+        self.pick_connection = None
+        self.motion_connection = None
+        self.release_connection = None
 
     def calculate_text_distance(self, label):
         # Adjust based on label length
@@ -1865,34 +2241,13 @@ class DraggableFanManager:
             'Yearly': 'per 5 years',
         }
 
-        per_unit_str = fan_dict[chart_type]
-
-        # Store the per unit string for later use
-        self.per_unit_str = per_unit_str
-
-        # Add text annotations and store them as class attributes
-        self.standard_text = self.figure_manager.ax.text(
-            self.x_mid, self.y_mid * self.y_mid_offset,
-            "Standard\nceleration",
-            color=self.figure_manager.Chart.custom_grid_color,
-            weight='bold',
-            ha='left', va='center',
-            fontsize=self.figure_manager.Chart.general_fontsize * 0.7,
-            picker=True
-        )
-
-        self.period_text = self.figure_manager.ax.text(
-            self.x_mid, self.y_mid / self.y_mid_offset,
-            per_unit_str,
-            color=self.figure_manager.Chart.custom_grid_color,
-            weight='bold',
-            ha='left', va='center',
-            fontsize=self.figure_manager.Chart.general_fontsize * 0.7,
-            picker=True
-        )
+        self.per_unit_str = fan_dict[chart_type]
 
         # Create initial fan
         self.create_fan()
+
+        # Set up canvas connections for picking
+        self._setup_canvas_connections()
 
     def create_fan(self, fan_size=0.09):
         # Clear previous fan elements but keep text objects
@@ -1961,8 +2316,101 @@ class DraggableFanManager:
             )
             self.fan_texts.append(text)
 
+        # Midpoint for the flat line (×1) to place labels
+        middle_line_index = 4  # Index for the ×1 line in your arrays
+        middle_line_data = self.line_data[middle_line_index]
+        dx = middle_line_data['dx']
+        x_text_position = self.x_mid + (dx / 2)
+
+        # Add text annotations and store them as class attributes
+        self.standard_text = self.figure_manager.ax.text(
+            x_text_position, self.y_mid * self.y_mid_offset,
+            f"Standard\n{self.figure_manager.data_manager.ui_cel_label}",
+            color=self.figure_manager.Chart.custom_grid_color,
+            weight='bold',
+            ha='center', va='center',
+            fontsize=self.figure_manager.Chart.general_fontsize * 0.7,
+            picker=True
+        )
+        self.period_text = self.figure_manager.ax.text(
+            x_text_position, self.y_mid / self.y_mid_offset,
+            self.per_unit_str,
+            color=self.figure_manager.Chart.custom_grid_color,
+            weight='bold',
+            ha='center', va='center',
+            fontsize=self.figure_manager.Chart.general_fontsize * 0.7,
+            picker=True
+        )
+
         # Redraw
         self.event_bus.emit('refresh_chart')
+
+    def _setup_canvas_connections(self):
+        """Set up canvas event connections for fan dragging"""
+        canvas = self.figure_manager.canvas
+        self.pick_connection = canvas.mpl_connect('pick_event', self.on_pick)
+        self.motion_connection = canvas.mpl_connect('motion_notify_event', self.on_motion)
+        self.release_connection = canvas.mpl_connect('button_release_event', self.on_release)
+
+    def _cleanup_canvas_connections(self):
+        """Clean up canvas event connections"""
+        if self.pick_connection:
+            self.figure_manager.canvas.mpl_disconnect(self.pick_connection)
+            self.pick_connection = None
+        if self.motion_connection:
+            self.figure_manager.canvas.mpl_disconnect(self.motion_connection)
+            self.motion_connection = None
+        if self.release_connection:
+            self.figure_manager.canvas.mpl_disconnect(self.release_connection)
+            self.release_connection = None
+
+    def _save_background(self):
+        """Save the background for blitting"""
+        if self.use_blitting:
+            # Force a draw to ensure animated elements are removed from the display
+            self.figure_manager.canvas.draw_idle()
+            self.figure_manager.canvas.flush_events()
+
+            # Now save the background without the animated elements
+            self.drag_background = self.figure_manager.canvas.copy_from_bbox(
+                self.figure_manager.figure.bbox
+            )
+
+    def _make_animated(self, animated=True):
+        """Make fan elements animated for blitting"""
+        for line in self.fan_lines:
+            if hasattr(line, 'set_animated'):
+                line.set_animated(animated)
+        for text in self.fan_texts:
+            if hasattr(text, 'set_animated'):
+                text.set_animated(animated)
+        if self.standard_text and hasattr(self.standard_text, 'set_animated'):
+            self.standard_text.set_animated(animated)
+        if self.period_text and hasattr(self.period_text, 'set_animated'):
+            self.period_text.set_animated(animated)
+
+    def _blit_draw_fan(self):
+        """Draw fan elements using blitting for better performance"""
+        if not self.use_blitting or not self.drag_background:
+            return
+
+        # Restore background
+        self.figure_manager.canvas.restore_region(self.drag_background)
+
+        # Draw all fan elements
+        for line in self.fan_lines:
+            if line:
+                self.figure_manager.ax.draw_artist(line)
+        for text in self.fan_texts:
+            if text:
+                self.figure_manager.ax.draw_artist(text)
+        if self.standard_text:
+            self.figure_manager.ax.draw_artist(self.standard_text)
+        if self.period_text:
+            self.figure_manager.ax.draw_artist(self.period_text)
+
+        # Blit the result
+        self.figure_manager.canvas.blit(self.figure_manager.figure.bbox)
 
     def update_fan_position(self):
         """Update fan position based on current x_mid and y_mid values"""
@@ -1986,15 +2434,26 @@ class DraggableFanManager:
 
         # Update position of standard and period texts
         if self.standard_text and self.period_text:
-            self.standard_text.set_position((self.x_mid, self.y_mid * self.y_mid_offset))
-            self.period_text.set_position((self.x_mid, self.y_mid / self.y_mid_offset))
+            # Recalculate the midpoint for the ×1 line
+            middle_line_index = 4  # Index for the ×1 line
+            if len(self.line_data) > middle_line_index:
+                middle_line_data = self.line_data[middle_line_index]
+                dx = middle_line_data['dx']
+                x_text_position = self.x_mid + (dx / 2)
 
-        # Redraw chart
-        self.event_bus.emit('refresh_chart')
+                self.standard_text.set_position((x_text_position, self.y_mid * self.y_mid_offset))
+                self.period_text.set_position((x_text_position, self.y_mid / self.y_mid_offset))
+
+        # Use blitting for smooth updates during drag
+        if self.pressed and self.use_blitting:
+            self._blit_draw_fan()
+        else:
+            # Normal redraw when not dragging
+            self.event_bus.emit('refresh_chart')
 
     def update_visibility(self):
         # Set visibility according to chart settings
-        show_fan = self.figure_manager.data_manager.chart_data['view']['chart']['cel_fan']
+        show_fan = self.figure_manager.event_bus.emit("get_chart_data", [['view', 'chart', 'cel_fan'], False])
         for line in self.fan_lines:
             line.set_visible(show_fan)
         for text in self.fan_texts:
@@ -2010,6 +2469,12 @@ class DraggableFanManager:
         if event.artist in self.fan_lines or event.artist in [self.standard_text, self.period_text]:
             self.pressed = True
 
+            # Make elements animated for blitting
+            self._make_animated(True)
+
+            # Force canvas update and save background after making elements animated
+            self._save_background()
+
             # Store the mouse position at click time in display coordinates
             self.drag_start_x = event.mouseevent.x
             self.drag_start_y = event.mouseevent.y
@@ -2022,12 +2487,25 @@ class DraggableFanManager:
             self.throttle_timer.stop()
             self.update_pending = False
 
+            # Initial blit draw
+            if self.use_blitting:
+                self._blit_draw_fan()
+
     def on_release(self, event):
         # End drag
-        self.pressed = False
-        self.throttle_timer.stop()
-        self.update_pending = False
-        self.last_mouse_event = None
+        if self.pressed:
+            self.pressed = False
+
+            # Make elements non-animated
+            self._make_animated(False)
+
+            # Stop throttling
+            self.throttle_timer.stop()
+            self.update_pending = False
+            self.last_mouse_event = None
+
+            # Final refresh to show non-animated elements
+            self.event_bus.emit('refresh_chart')
 
     def on_motion(self, event):
         # Handle dragging motion - continue even outside axes
@@ -2044,7 +2522,7 @@ class DraggableFanManager:
 
     def process_pending_update(self):
         """Process the most recent mouse event at the throttled rate"""
-        if self.last_mouse_event is None:
+        if self.last_mouse_event is None or not self.pressed:
             self.throttle_timer.stop()
             self.update_pending = False
             return
@@ -2075,6 +2553,12 @@ class DraggableFanManager:
             self.y_mid = new_y_mid
             self.update_fan_position()
 
+        # Continue throttling if still dragging
+        if self.update_pending and self.pressed:
+            self.throttle_timer.start(self.ms_throttle)
+        else:
+            self.update_pending = False
+
     def cleanup(self, keep_texts=False):
         # Remove fan elements
         for line in self.fan_lines:
@@ -2099,6 +2583,9 @@ class DraggableFanManager:
         # Stop any pending updates
         self.throttle_timer.stop()
 
+        # Clean up canvas connections
+        self._cleanup_canvas_connections()
+        
 
 class PlotDrawManager:
     def __init__(self, figure_manager):

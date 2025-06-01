@@ -1,1186 +1,1284 @@
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QTabWidget, QHBoxLayout, QPushButton, QGroupBox,
-                               QVBoxLayout, QLabel, QFileDialog, QCheckBox, QComboBox, QMessageBox,
-                               QStackedWidget, QDialog, QSpacerItem, QSizePolicy, QSpinBox, QColorDialog, QListWidget,
-                               QListWidgetItem)
-from PySide6.QtCore import Qt, QDate, QDir, QKeyCombination, QEvent, QObject
-from PySide6.QtGui import QPainter, QColor, QIcon, QPixmap, QShortcut, QDragEnterEvent, QDropEvent
-
+# Standard library imports
+import io
 import sys
-import os
+import json
+import time
+import re
+import copy
 import platform
-from pathlib import Path
-from urllib.parse import urlparse, unquote
-from FigureManager import FigureManager
-from DataManager import DataManager
-from Popups import SaveImageDialog, StartDateDialog, SupportDevDialog, NoteDialog, DataColumnMappingDialog, UserPrompt
-from EventBus import EventBus
-import styles
-import Modes as chart_mode
+import logging
+import traceback
+import textwrap
+import inspect
+import zipfile
+import importlib.util
+import hashlib
 import warnings
+import requests
+import tempfile
+from pathlib import Path
+from os import environ
+from datetime import datetime
+from urllib.parse import urlparse, unquote
+from threading import Thread
+import sqlite3
 
-# For generating error reports
-import error_logging
-logger = error_logging.logger
+# External modules
+import numpy as np
+import pandas as pd
+import matplotlib
+import pgpy
+import colorsys
 
-# Windows splash screen
-if os.name == 'nt':  # Check if OS is Windows
-    import tempfile
-    if "NUITKA_ONEFILE_PARENT" in os.environ:
-        splash_filename = os.path.join(
-            tempfile.gettempdir(),
-            "onefile_%d_splash_feedback.tmp" % int(os.environ["NUITKA_ONEFILE_PARENT"]),
-        )
-        if os.path.exists(splash_filename):
-            os.unlink(splash_filename)
-    print("Splash Screen has been removed")
+# PySide6 GUI implementation
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QDialog, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QProgressBar, QFrame, QMessageBox, QWidget
+)
+from PySide6.QtCore import Qt, QTimer, Signal, QObject, QUrl
+from PySide6.QtGui import QFont, QDesktopServices, QPixmap, QIcon, QPainter, QColor
+from resources.resources_rc import *
 
-# I had to use Y and M instead of YE and ME because the executable won't currently run with YE and ME
-warnings.filterwarnings(action='ignore', category=FutureWarning, message=".*'Y' is deprecated.*")
-warnings.filterwarnings(action='ignore', category=FutureWarning, message=".*'M' is deprecated.*")
+# Fingerprint: 7621B7F1341F46231C2410A9BB1FEF6686C62068
+PUBLIC_KEY = """-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mQINBGgQ+vUBEADNaLs2OmpOBeHlDvbgiOd0KxAsLNpXf5KTcxWTnpNmP5sMLBix
+SNaR9/zMqYQpncidUoa0nrFWzNuqfBX31A8IsRkq6XOhQvXVxax0k+RbuyLnYsTp
+KZb/cdovLtR+ZcXJ3Y9AFkc3bAUO5zg6ivhX0h1FuDXsYpoSlt7BqqLXd1ZnIb2p
+mpFAyVZwp5VaiVsNjnP7IxOJBvewaLXE3NEFBmOxTtaa9q040r1V8osT3FWFhu6t
+cN3dHu+b8T8J1fVGr7/e5udTNrk8ADg1zN4UgWPyH8p3xPyy7lWjjOyYGlZHK9jp
+Xbrk5jSgTv78yM9gZlaWQzyQiT1SqwvpR6XDeabtIIwH5lU/X3KkZJGPu6W/Yu+Y
+AMx/KE+jJIBo4mW2zLUAkw7xHYG+bjJKxUFNu4MNLwxAeG7WfPR2EOKGyEmyVbH9
+qsel0MVdV6yZAzzXlsRwx2pluKyPwHfpPJZD1j1P2wBFUnepfn+ThyDZT8xmbZhK
+XGoUkX/BwQkgR5dfecxljYj1t61JbeQuiVnkygrdGY2sc78Qzv9Oy0m/nhMfglLa
+RfcoZqvgf78VYsvVjwoIrzc0eEWUXl+SywS1L290irHMMDWqn2i5PtFHUOR6TXGc
+XR3236383Pkgb8TV+i8s3XOlLc/3UM077NChgI8g2xXZrVPUwev9F6t+UwARAQAB
+tDlKb2hhbiBWaWtsdW5kIChEZXYga2V5KSA8cGlnZW9uZGV2LnFtcDNjQHNpbXBs
+ZWxvZ2luLmNvbT6JAlcEEwEIAEEWIQR2IbfxNB9GIxwkEKm7H+9mhsYgaAUCaBD6
+9QIbAwUJCWYBgAULCQgHAgIiAgYVCgkICwIEFgIDAQIeBwIXgAAKCRC7H+9mhsYg
+aMD4EACBxEBT+PDXJuY+BWtGMSueUB+BDMiYdZ78c8CwBKNlaCs0O8L9QUlOLmrX
+15GdLX/mt8qM3kazjJq5w4zf/ScXJNn3EMr98mJrQR/d8ynxyeGsXfnstWAKcE8D
+wtGcj2JjmUkt6hoJ94FGyduqxEUaNebf3eDG6ybkZvwr/EP5a9o3MLp/f+rVhvQm
+WUQKXD6jHlJWNZwb/+xKFGO2/RRVzAq2inZFIaLjgmKKpHcTV9vZb0QG01dE9ZpY
+DakHpIiMpr0aPPoaCAELy5Hv1Rgk3mEzdD/fhEgjy2raJGZw4RfD2PQxdAR0Lwqx
+RRMwXE+9mcDN6hnzbXIna17Tt4Oq4n/UwLpAyBgZqgw5VCsHlgoKhHi9U8FDl1WV
+OVbHJgrR+XQ/IIKGS/dGqHk7sozWmLCvvJHm3rwKvmFQvgSAykSoyhgFWi9pZylj
+ZMU8oUKXh0P7XnizeMcH6Ox3Zk0dBoJuJJ6owH/ENXPGnNL1SfZqUz6OUtq0juKX
+R4Eb8EdpP0v5VhxU6FguFsLA6M5lZtyWTny7AhcYUpIOLPk3NKOwKoHml9z+Aot2
+MqJl2yNVVbG4JdxpRZfxbKJIC7nu+jFYk6gUclEkb4PtYRg2Tiu2XXLKH7qrkKyk
+3QLMCOKb0G7KjkQb/Oj8LOE2rSshsSsbB+Ugej4Sd/IRh+6ExLkCDQRoEPr1ARAA
+06I1JorDKWZdx/bptfyfMbTXtwAwW0iSb8K+X1yoramBDdxaZ5Q9KjhFK2M+Xtna
+zUvfkDL7NO3FBi6rf4kx3zP0pHFFSTbpO7KXPz9GPzIzoUZ7t1ElQa3Ayots4P2G
++83Yl9HS8BFmCjScWTXCy0VOA7rCoorBhBCp+JaPjcEH0wcrThMMsOjuXmGeulWb
+RFUSBI1hyMKdR4EXcNFXGUvybzkbZG93YfN10ltNlM6jBzjY9tIMUz3/u0ui+b2N
+zsXIJ4IY7rmHIej2fNWNDlUFyJpYzgUIk2XJrjM46cs72VNlhQG7YgJL64d0yWcf
+CJoBTdhGmQiLbwd/qcXA9jIk1zcCrVfcY/RkrCIs5jO+FV/e6WduQGEnBSyarvHL
+D2A3vt3y79wNVwyuoaTkH7pboP28qlpgJGhnCqppsijRcQ7GAjEXy9NeAtup6pMu
+7NcVB++qoPo1O9eZYP7yczzTlVTHT5/+VVLKaoipgVgXs6sUMuNNvElAXBi0HPXU
+oIVfae79qz5+SCTYqJKS0WF2bPTBK6y/KIgPoAUMjigFoEwLkiZ+lTQe1wVtPnxD
+suIWwVnjOnatXsNPsnuQ+af6czbeGEQ0oFTQTeYcnmxEhZqjMVKzTc5tn65nbQjp
+3oL2nYL02jx9+su4yZTIQ4wOquf0GDOZ5MwT3mjiGH8AEQEAAYkCPAQYAQgAJhYh
+BHYht/E0H0YjHCQQqbsf72aGxiBoBQJoEPr1AhsMBQkJZgGAAAoJELsf72aGxiBo
+bEkQAIPjhJ5cA98/xMfmMNigJuEt8COxvong/DAjAla9AWYXij1s1vG93PzVb1Gw
+XfrLxTB+YnauMRnEtd4pVkA2aSb6uv8AEg7XleA4otEHWzh5zoubowsVLtaH9lLP
+ut2wPuWe5XQnQGBLxGFOEZprHOalJ3tdEJ38gGhVabteztEOoE2/qeBDP9acWqX7
+x8EULwCoYLTalqrPuZX2Amos+0w9ZzUViwFPvPwiTufPwzFAaz/KQBNKSgwCQl2B
+Da5FAqOTMekC8dxN+V7Z1cvDzNXatpnNcq72Kv0ouXZZBZYpU6LeAS5c1BvjXcbr
+ABNXbOtFUIHUPv/WUDbaNhFt0xA82fLNIudL+F90St/bvvAbzVFb6PvGFSJKpatM
+dldOpY97tXNYpB+JRUjSunDyhPo9OPePlpXCYzN+UR0Y5ZWwpo+/uKJNAmsfBdp0
+Ld3PBnB2EdSD6pNjez1h2zQerTTsakE/X4zfEmTxCfFRyeOHg9kTjk8zafizCp+N
+c2klsUhebxHEwToK0iYAj8YukGde4xw6g4uwbQOb8yPDAOm5zHjfFFFwKnxlzH2D
+M/80Hl71aUah83bLz0S6A637e9ZyDp2QKBwKjsF0a/oziMgiGVKAyDLRGb246IAY
+N3tjIwoU6hY7Ieap37pYGmWeeufMhC9ri7+HeM9C7swFGNBo
+=0ass
+-----END PGP PUBLIC KEY BLOCK-----
+"""
 
 
-class ChartApp(QMainWindow):
+def get_config_directory():
+    system = platform.system()
+    home_dir = Path.home()
+
+    if system == "Linux" or system == "Darwin":  # Darwin is macOS
+        config_dir = home_dir / '.config' / f'{APP_NAME}'
+    elif system == "Windows":
+        config_dir = home_dir / 'AppData' / 'Local' / f'{APP_NAME}'
+    else:
+        logger.warning(f"Unsupported operating system: {system}")
+        config_dir = home_dir / f'.{APP_NAME}'  # Fallback
+
+    return config_dir
+
+
+# Parameters
+DEBUGGING = True
+LAUNCHER_ENVIRONMENT = '0.12.0'
+APP_ZIP_FILENAME = "app_modules"
+MAIN_MODULE_NAME = "app"
+APP_NAME = 'OpenCelerator'
+GITHUB_REPO = f"https://github.com/SJV-S/{APP_NAME}"
+CONFIG_DIR = get_config_directory()
+MESSAGES = {
+    "DOWNLOAD_PERMISSION": f"Welcome to {APP_NAME}. The latest version will be downloaded. Would you like to continue? Manage update settings in the Config tab.",
+    "UPDATE_AVAILABLE": "Version {} has been released. Download?",
+    "DOWNLOAD_FAILED": "Failed to download or verify the update. Please try again later.",
+    "NO_UPDATES": "No updates found or error checking for updates.",
+    "ERROR_OCCURRED": "An error occurred: {}",
+    "PREPARING_DOWNLOAD": "Preparing to download...",
+    "DOWNLOADING_UPDATE": "Downloading update...",
+    "DOWNLOADING_PROGRESS": "Downloading: {:.1f}%",
+    "DOWNLOADING_SIGNATURE": "Downloading signature...",
+    "VERIFYING_DOWNLOAD": "Verifying download...",
+    "ENVIRONMENT_MISMATCH": f"The app needs to be updated manually. Please download a new version:"
+}
+
+#  PGPy warnings - not relevant for signature verification:
+# - Using known trusted public key, not parsing unknown keys
+# - Security handled via launcher updates, not revocation
+# - Only using signature verification, usage flags irrelevant
+warnings.filterwarnings("ignore", category=UserWarning, module="pgpy")
+
+
+class Logger:
+    def __init__(self, name=f"{APP_NAME}", level=logging.INFO):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(level)
+
+        # Check if handlers are already configured to avoid duplicates
+        if not self.logger.handlers:
+            # Console handler
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(level)
+
+            # Format for console output
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+            console_handler.setFormatter(formatter)
+
+            # Add handler to logger
+            self.logger.addHandler(console_handler)
+
+    # Convenience methods for different log levels
+    def debug(self, msg):
+        self.logger.debug(msg)
+
+    def info(self, msg):
+        self.logger.info(msg)
+
+    def warning(self, msg):
+        self.logger.warning(msg)
+
+    def error(self, msg):
+        self.logger.error(msg)
+
+    def critical(self, msg):
+        self.logger.critical(msg)
+
+    def exception(self, msg):
+        self.logger.exception(msg)
+
+    def set_level(self, level):
+        self.logger.setLevel(level)
+        for handler in self.logger.handlers:
+            handler.setLevel(level)
+
+
+# Initialize global logger
+logger = Logger()
+
+
+def download_file_with_progress(url, destination, progress_callback=None):
+    try:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+
+        total_size = int(response.headers.get('content-length', 0))
+        block_size = 8192
+        downloaded = 0
+
+        with open(destination, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=block_size):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size and progress_callback:
+                        progress = (downloaded / total_size) * 100
+                        progress_callback(MESSAGES["DOWNLOADING_PROGRESS"].format(progress))
+
+        return True
+    except Exception as e:
+        logger.error(f"Error downloading file from {url}: {e}")
+        return False
+
+
+class ModuleVerifier:
+    def calculate_file_hash(self, file_path):
+        hash_obj = hashlib.sha256()
+        try:
+            with open(file_path, 'rb') as f:
+                # Read the file in chunks to handle large files efficiently
+                for chunk in iter(lambda: f.read(4096), b''):
+                    hash_obj.update(chunk)
+            return hash_obj.hexdigest()
+        except Exception as e:
+            logger.error(f"Error calculating file hash: {e}")
+            return None
+
+    def verify_module_integrity(self, module_path, version_str=None):
+        # Calculate initial file hash
+        file_hash = self.calculate_file_hash(module_path)
+        if file_hash is None:
+            logger.error("Failed to calculate initial file hash!")
+            return False, None
+
+        logger.info("\n==== STARTING PGP SIGNATURE VERIFICATION ====")
+        logger.info(f"Module to verify: {module_path}")
+        if version_str:
+            logger.info(f"Module version: v{version_str}")
+        logger.info(f"Initial file hash (SHA-256): {file_hash}")
+
+        try:
+            # File paths
+            module_path = Path(module_path)
+            sig_file = Path(f"{module_path}.sig")
+
+            # Verify signature file exists
+            if not sig_file.exists():
+                logger.error(f"Signature file {sig_file} not found!")
+                return False, None
+            logger.info(f"Found signature file: {sig_file}")
+
+            # Import the public key
+            try:
+                # Use the parse method that worked in debug
+                key = pgpy.PGPKey()
+                key.parse(PUBLIC_KEY)
+                logger.info(f"Successfully imported public key: {key.fingerprint}")
+            except Exception as e:
+                logger.error(f"Failed to parse public key: {e}")
+                return False, None
+
+            # Read the file to be verified
+            try:
+                with open(module_path, 'rb') as f:
+                    file_data = f.read()
+                logger.info(f"Read {len(file_data)} bytes from file")
+            except Exception as e:
+                logger.error(f"Failed to read file: {e}")
+                return False, None
+
+            # Read and parse the signature - use ASCII mode as shown in debug output
+            try:
+                with open(sig_file, 'r') as f:  # Open as text, not binary
+                    sig_content = f.read()
+
+                # Use the method that worked in debug output
+                signature = pgpy.PGPSignature.from_blob(sig_content)
+                logger.info("Successfully parsed signature")
+            except Exception as e:
+                logger.error(f"Failed to parse signature: {e}")
+                return False, None
+
+            # Verify the signature
+            try:
+                # Handle the "No signatures to verify" error properly
+                try:
+                    verified = key.verify(file_data, signature)
+                    if verified:
+                        logger.info("SIGNATURE VERIFICATION SUCCESSFUL!")
+                        return True, file_hash
+                    else:
+                        logger.info("Signature verification failed: Invalid signature")
+                        return False, None
+                except pgpy.errors.PGPError as pgp_err:
+                    if "No signatures to verify" in str(pgp_err):
+                        # This means it's a valid signature but from a different key
+                        logger.error("Signature exists but was created with a different key")
+                        return False, None
+                    else:
+                        raise
+            except Exception as e:
+                logger.error(f"ERROR during verification: {e}")
+                return False, None
+
+        except Exception as e:
+            logger.critical(f"CRITICAL ERROR during signature verification: {e}")
+            return False, None
+        finally:
+            logger.info("==== PGP SIGNATURE VERIFICATION COMPLETE ====\n")
+
+
+class GuiInterface:
     def __init__(self):
-        super().__init__()
+        self._download_window = None
+        self.loop_is_initialized = False
+        sys.app = QApplication(sys.argv)
 
+    def center_window(self, window):
+        window_geometry = window.frameGeometry()
+        screen_center = window.screen().availableGeometry().center()
+        window_geometry.moveCenter(screen_center)
+        window.move(window_geometry.topLeft())
+        return window.width(), window.height()
 
-        # Set widget to accept drops
-        self.setAcceptDrops(True)
+    def show_download_permission_dialog(self, version=None):
+        # Create the dialog without fixed size
+        dialog = QDialog()
+        dialog.setWindowTitle(f"{APP_NAME}")
+        dialog.resize(400, 160)  # Initial size, but resizable
+        dialog.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
 
-        # Define a custom data role
-        self.FullFilePathRole = Qt.ItemDataRole.UserRole
+        # Main layout
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
 
-        # Initialize and add the Matplotlib widget to the right panel
-        self.data_manager = DataManager()
-        # Set revise chart defaults according to user preferences
-        self.data_manager.default_chart_assessment()
-        self.figure_manager = FigureManager(self)
-        self.event_bus = EventBus()
+        # Create horizontal layout
+        top_layout = QHBoxLayout()
+        top_layout.setSpacing(15)
+        layout.addLayout(top_layout)
 
-        # Event subscriptions without data
-        self.event_bus.subscribe("view_mode_selected", lambda: self.change_mode(0), has_data=False)
-        self.event_bus.subscribe("style_mode_selected", lambda: self.change_mode(1), has_data=False)
-        self.event_bus.subscribe("phase_mode_selected", lambda: self.change_mode(2), has_data=False)
-        self.event_bus.subscribe("aim_mode_selected", lambda: self.change_mode(3), has_data=False)
-        self.event_bus.subscribe("celeration_mode_selected", lambda: self.change_mode(4), has_data=False)
-        self.event_bus.subscribe("note_mode_selected", lambda: self.change_mode(5), has_data=False)
-        self.event_bus.subscribe("plot_mode_selected", lambda: self.change_mode(6), has_data=False)
+        # Create icon label with celeration.svg
+        icon_label = QLabel()
+        icon_pixmap = QPixmap(":/images/celeration.svg")
+        colored_pixmap = QPixmap(icon_pixmap.size())
+        colored_pixmap.fill(Qt.GlobalColor.transparent)
 
-        # Event subscriptions with data
-        self.event_bus.subscribe('save_decision', self.save_decision, has_data=True)
+        painter = QPainter(colored_pixmap)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        painter.drawPixmap(0, 0, icon_pixmap)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.setBrush(QColor('#05c3de'))
+        painter.setPen(QColor('#05c3de'))
+        painter.drawRect(colored_pixmap.rect())
+        painter.end()
 
-        # Event chains
-        self.event_bus.add_event_trigger('new_chart', 'cleanup_after_chart_update')
+        icon_label.setPixmap(colored_pixmap.scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        top_layout.addWidget(icon_label)
 
-        # Setup interaction handling
-        self.current_connection = None
-        self.previous_mode = None
-        self.manual_mode_widget = None
-        # Initialize the main window properties
-        self.window_title_str = 'OpenCelerator v0.11.0'
-        self.setWindowTitle(self.window_title_str)
-        self.setWindowIcon(QIcon(':/images/opencelerator_logo_no_text.svg'))
-
-        # Create and set the central widget and layout
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
-
-        # Create a vertical layout as the main layout wrapper
-        self.wrapper_layout = QVBoxLayout(self.central_widget)
-        self.main_layout = QHBoxLayout()
-        self.wrapper_layout.addLayout(self.main_layout)
-
-        # Initialize EventHandlers
-        self.event_handlers = EventHandlers(self, self.figure_manager, self.data_manager)
-
-        # Create the FilesTab instance
-        self.files_tab = FilesTab(self, self.event_handlers, self.data_manager)
-
-        # Initialize the tabs for the left panel
-        self.tabs = QTabWidget()
-
-        self.main_layout.addWidget(self.tabs)
-        self.tab_home = QWidget()
-        self.tab_settings = QWidget()
-
-        # Crosshair control variables
-        self.shift_key_down = False
-        self.alt_key_down = False
-        QApplication.instance().installEventFilter(self)
-
-        # Set up home tab
-        self.home_layout = QVBoxLayout()  # Main layout for the home tab
-        self.main_layout.addWidget(self.figure_manager)
-
-        # Setup tabs
-        self.setup_home_tab()
-        self.setup_settings_tab()
-
-        # Add tabs to the tab widget
-        self.tabs.addTab(self.tab_home, 'Home')
-        self.tabs.addTab(self.files_tab, 'Files')  # Use the FilesTab instance
-        self.tabs.addTab(self.tab_settings, 'Config')
-
-        # Set view interaction mode
-        self.mode = 0  # View mode by default
-        selected = '#05c3de'
-        self.button_view.setStyleSheet(self.get_mode_button_style(selected))
-        self.set_interaction_mode()
-
-        # Define the key press handling methods for different modes
-        self.currentMode = 'view'  # Start in Manual mode by default
-
-        # Enable key event handling
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setFocus()  # Set focus to the main window
-
-        # Mode key bindings
-        self.shortcut_view = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_V), self)
-        self.shortcut_manual = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_T), self)
-        self.shortcut_phase = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_P), self)
-        self.shortcut_aim = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_A), self)
-        self.shortcut_trend = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_C), self)
-        self.shortcut_note = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_M), self)
-        self.shortcut_plot = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_G), self)
-        self.shortcut_view.activated.connect(lambda: [self.event_bus.emit('view_mode_selected'), self.tabs.setCurrentIndex(0)])
-        self.shortcut_manual.activated.connect(lambda: [self.event_bus.emit('style_mode_selected'), self.tabs.setCurrentIndex(0)])
-        self.shortcut_phase.activated.connect(lambda: [self.event_bus.emit('phase_mode_selected'), self.tabs.setCurrentIndex(0)])
-        self.shortcut_aim.activated.connect(lambda: [self.event_bus.emit('aim_mode_selected'), self.tabs.setCurrentIndex(0)])
-        self.shortcut_trend.activated.connect(lambda: [self.event_bus.emit('celeration_mode_selected'), self.tabs.setCurrentIndex(0)])
-        self.shortcut_note.activated.connect(lambda: [self.event_bus.emit('note_mode_selected'), self.tabs.setCurrentIndex(0)])
-        self.shortcut_plot.activated.connect(lambda: [self.event_bus.emit('plot_mode_selected'), self.tabs.setCurrentIndex(0)])
-
-        # Tab key bindings
-        self.shortcut_home = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_H), self)
-        self.shortcut_home.activated.connect(lambda: self.tabs.setCurrentIndex(0))
-        self.shortcut_files = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_F), self)
-        self.shortcut_files.activated.connect(lambda: self.tabs.setCurrentIndex(1))
-        self.shortcut_config = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_O), self)
-        self.shortcut_config.activated.connect(lambda: self.tabs.setCurrentIndex(2))
-
-        # File keybindings
-        self.shortcut_import = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_D), self)
-        self.shortcut_import.activated.connect(lambda: self.event_handlers.import_data())
-        self.shortcut_load = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_L), self)
-        self.shortcut_load.activated.connect(lambda: self.event_handlers.load_chart(None))
-        self.shortcut_export = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_E), self)
-        self.shortcut_export.activated.connect(self.event_handlers.save_image)
-        self.shortcut_new = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_N), self)
-        self.shortcut_new.activated.connect(self.files_tab.new_chart_dialog)
-        self.shortcut_save = QShortcut(QKeyCombination(Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_S), self)
-        self.shortcut_save.activated.connect(lambda: self.event_handlers.save_chart())
-
-        # Control variables
-        self.current_connection = None
-        self.legend_pick_cid = None
-        self.credit_pick_cid = None
-        self.fan_pick_cid = None
-        self.fan_release_cid = None
-        self.fan_motion_cid = None
-        self.xy_coord = None
-        self.save_preferences_upon_close = True
-
-    def eventFilter(self, obj, event):
-        # Check if obj is a valid QObject and event is a valid QEvent
-        if not isinstance(obj, QObject) or not isinstance(event, QEvent):
-            # If not proper types, just return false (don't handle)
-            return False
-
-        # Check if the event is a key press event
-        if event.type() == QEvent.Type.KeyPress:
-            if (event.key() == Qt.Key.Key_Shift and not self.shift_key_down) or \
-                    (event.key() == Qt.Key.Key_Alt and not self.alt_key_down):
-
-                # Set key state
-                if event.key() == Qt.Key.Key_Shift:
-                    self.shift_key_down = True
-                    self.figure_manager.hover_manager.show_lines = True
-                else:  # Alt key
-                    self.alt_key_down = True
-                    self.figure_manager.hover_manager.show_lines = False
-
-                # Save the background for blitting using hover manager
-                self.figure_manager.hover_manager.save_crosshair_background()
-
-                # Connect mouse motion event to update hover coordinates
-                self.figure_manager.canvas.mpl_connect('motion_notify_event', self.update_hover_coordinates)
-
-        # Check if the event is a key release event
-        elif event.type() == QEvent.Type.KeyRelease:
-            if (event.key() == Qt.Key.Key_Shift and self.shift_key_down) or \
-                    (event.key() == Qt.Key.Key_Alt and self.alt_key_down):
-
-                # Reset appropriate key state
-                if event.key() == Qt.Key.Key_Shift:
-                    self.shift_key_down = False
-                else:  # Alt key
-                    self.alt_key_down = False
-
-                # Clear the crosshairs using hover manager
-                self.figure_manager.hover_manager.clear_crosshair_blit()
-
-        return super().eventFilter(obj, event)
-
-    def update_hover_coordinates(self, event):
-        ax = event.inaxes
-        if (self.shift_key_down and QApplication.keyboardModifiers() == Qt.KeyboardModifier.ShiftModifier) or \
-                (self.alt_key_down and QApplication.keyboardModifiers() == Qt.KeyboardModifier.AltModifier):
-            if ax and event.xdata is not None and event.ydata is not None:
-                x, y = event.xdata, event.ydata
-                x = self.figure_manager.data_manager.find_closest_x(int(x), self.figure_manager.Chart.date_to_pos)
-                y = self.data_manager.format_y_value(y)
-                self.figure_manager.hover_manager.crosshair_blit(x, y)
-
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        if event.mimeData().hasText():
-            event.acceptProposedAction()
+        # Set dialog message based on version
+        if version:
+            message = MESSAGES["UPDATE_AVAILABLE"].format(version)
         else:
-            event.ignore()
+            message = MESSAGES["DOWNLOAD_PERMISSION"]
 
-    def dropEvent(self, event: QDropEvent):
-        if event.mimeData().hasText():
-            dropped_data = event.mimeData().text()
+        # Create message label
+        msg_label = QLabel(message)
+        msg_label.setWordWrap(True)
+        top_layout.addWidget(msg_label, 1)
 
-            # Parse the URI and decode it
-            parsed_uri = urlparse(dropped_data)
-            file_path = unquote(parsed_uri.path)
+        # Create button layout
+        button_layout = QHBoxLayout()
+        layout.addLayout(button_layout)
 
-            # Handle Windows file paths
-            if platform.system() == 'Windows':
-                if parsed_uri.netloc:  # For paths with a drive letter
-                    file_path = f"{parsed_uri.netloc}:{file_path}"
-                file_path = Path(file_path.lstrip("\\/"))
-            else:
-                # Handle Unix (macOS/Linux) file paths
-                file_path = Path(file_path)
+        # Add stretchers on both sides to center the buttons
+        button_layout.addStretch(1)
 
-            # Check if dropped data is a legitimate path and correct file format
-            if file_path.exists():
-                if file_path.suffix.lower() in ['.csv', '.xls', '.xlsx', '.ods']:
-                    self.event_handlers.import_data(str(file_path))
-                elif file_path.suffix.lower() == '.json':
-                    self.event_handlers.load_chart(str(file_path))
-                else:
-                    print(f"Unsupported file type: {file_path}")
-            else:
-                print(f"Invalid file path: {file_path}")
+        # Create buttons
+        yes_btn = QPushButton("Yes")
+        no_btn = QPushButton("No")
+        yes_btn.setMinimumWidth(80)
+        no_btn.setMinimumWidth(80)
+        button_layout.addWidget(yes_btn)
+        button_layout.addWidget(no_btn)
 
-            event.acceptProposedAction()
-        else:
-            event.ignore()
+        # Add equal stretch on the right side
+        button_layout.addStretch(1)
 
-    def support_dev_btn_clicked(self):
-        dialog = SupportDevDialog()
-        dialog.exec()
+        # Connect buttons
+        no_btn.clicked.connect(dialog.reject)
+        yes_btn.clicked.connect(dialog.accept)
 
-    def get_mode_button_style(self, background_color='#e7efff'):
-        button_style = f"""
-            QPushButton {{
-                background-color: {background_color};
-                border: 0px solid lightblue;
-                border-radius: 0px;
-                margin: 0px;
-                padding: 5px;
-                font-style: normal;
-            }}
-            QPushButton:hover {{
-                background-color: #96deeb;
-            }}
-        """
-        return button_style
+        # Center the dialog
+        self.center_window(dialog)
 
-    def change_mode(self, index):
-        # Change the currently visible widget in the stack.
-        self.previous_mode = self.stacked_widget.currentIndex()
-        self.stacked_widget.setCurrentIndex(index)
-        self.mode = index
-        self.set_interaction_mode()
-
-        # To make keybindings work
-        self.currentMode = self.mode_dict[index]
-
-        # Mode styling
-        selected = '#6ad1e3'
-        non_selected = '#e7efff'
-        self.button_view.setStyleSheet(self.get_mode_button_style(selected if index == 0 else non_selected))
-        self.button_manual.setStyleSheet(self.get_mode_button_style(selected if index == 1 else non_selected))
-        self.button_phase.setStyleSheet(self.get_mode_button_style(selected if index == 2 else non_selected))
-        self.button_aim.setStyleSheet(self.get_mode_button_style(selected if index == 3 else non_selected))
-        self.button_trend.setStyleSheet(self.get_mode_button_style(selected if index == 4 else non_selected))
-        self.button_note.setStyleSheet(self.get_mode_button_style(selected if index == 5 else non_selected))
-        self.button_plot.setStyleSheet(self.get_mode_button_style(selected if index == 6 else non_selected))
-
-        # Run for selected mode
-        if index == 5:
-            # Refresh note listbox when switching to note mode
-            self.event_bus.emit('refresh_note_listbox')
-            self.event_bus.emit('refresh_note_locations')
-        elif index == 4:
-            self.event_bus.emit('refresh_trend_column_list')
-        elif index == 1:
-            self.event_bus.emit('refresh_style_columns')
-        elif index == 0:
-            self.event_bus.emit('refresh_view_dropdown')
-            self.event_bus.emit('view_update_aggregate_dropdown')
-        elif index == 6:
-            self.event_bus.emit('refresh_plot_mode_widget')
-            self.event_bus.emit('update_plot_mode')
-
-        # Cleanup edit objects from previous mode
-        if self.previous_mode == 2:
-            self.figure_manager.phase_cleanup_temp_line()
-        elif self.previous_mode == 3:
-            self.figure_manager.aim_cleanup()
-        elif self.previous_mode == 4:
-            self.event_bus.emit('trend_cleanup')
-        elif self.previous_mode == 1:
-            self.event_bus.emit('style_cleanup')
-        elif self.previous_mode == 5:
-            self.figure_manager.hover_manager.disable_note_crosshair()
-            self.event_bus.emit('remove_note_locations')
-            self.event_bus.emit('clear_previous_individual_note_object', data={'refresh': True})
-        elif self.previous_mode == 0:
-            self.event_bus.emit('view_column_dropdown_update_label')
-        elif self.previous_mode == 6 and index != 6:
-            self.event_bus.emit('plot_cleanup')
-
-    def setup_home_tab(self):
-        self.tab_home.setContentsMargins(0, 0, 0, 0)  # Add this line to remove margins from the tab
-        self.home_layout = QVBoxLayout(self.tab_home)  # Ensure this is the layout for tab_home
-        self.home_layout.setContentsMargins(0, 0, 0, 0)  # Add this line to remove margins from the home layout
-
-        # Setup layout for mode selection
-        mode_selection_layout = QVBoxLayout()
-        mode_selection_layout.setSpacing(0)
-        mode_selection_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Helper function to create a button with an icon above the text
-        def create_icon_text_button(icon_path, text, color='black', icon_width=16, icon_height=16, button_height=50):
-            button = QPushButton()
-            layout = QHBoxLayout()
-
-            icon_pixmap = QPixmap(icon_path)
-            colored_pixmap = QPixmap(icon_pixmap.size())
-            colored_pixmap.fill(Qt.GlobalColor.transparent)
-
-            painter = QPainter(colored_pixmap)
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
-            painter.drawPixmap(0, 0, icon_pixmap)
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-            painter.setBrush(QColor(color))
-            painter.setPen(QColor(color))
-            painter.drawRect(colored_pixmap.rect())
-            painter.end()
-
-            icon_label = QLabel()
-            icon_label.setPixmap(colored_pixmap.scaled(icon_width, icon_height, Qt.AspectRatioMode.KeepAspectRatio,
-                                                       Qt.TransformationMode.SmoothTransformation))
-            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-            text_label = QLabel(text)
-            text_label.setStyleSheet(f"font-style: normal; color: {color};")
-            text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-            layout.addWidget(text_label)
-            layout.addWidget(icon_label)
-            layout.setContentsMargins(0, 0, 0, 0)
-
-            container = QWidget()
-            container.setLayout(layout)
-
-            button_layout = QVBoxLayout(button)
-            button_layout.addWidget(container)
-            button_layout.setContentsMargins(0, 0, 0, 0)
-            button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            button.setLayout(button_layout)
-
-            button.setFixedHeight(button_height)
-            return button
-
-        # Create buttons with icons and text
-        self.button_view = create_icon_text_button(':/images/eye-regular.svg', 'View ')
-        self.button_phase = create_icon_text_button(':/images/flag-regular.svg', 'Phase ')
-        self.button_aim = create_icon_text_button(':/images/crosshairs-solid.svg', 'Aim ')
-        self.button_trend = create_icon_text_button(':/images/celeration.svg', 'Celeration ')
-        self.button_note = create_icon_text_button(':/images/note-sticky-regular.svg', 'Notes ')
-        self.button_manual = create_icon_text_button(':/images/style-svgrepo-com.svg', 'Style ')
-        self.button_plot = create_icon_text_button(':/images/pen-to-square-regular.svg', 'Plot ')
-
-        self.button_view.setStyleSheet(self.get_mode_button_style())
-        self.button_manual.setStyleSheet(self.get_mode_button_style())
-        self.button_phase.setStyleSheet(self.get_mode_button_style())
-        self.button_aim.setStyleSheet(self.get_mode_button_style())
-        self.button_trend.setStyleSheet(self.get_mode_button_style())
-        self.button_note.setStyleSheet(self.get_mode_button_style())
-        self.button_plot.setStyleSheet(self.get_mode_button_style())
-
-        # Add push buttons to the mode selection layout with vertical alignment
-        mode_selection_layout.addWidget(self.button_view)
-        mode_selection_layout.addWidget(self.button_plot)
-        mode_selection_layout.addWidget(self.button_phase)
-        mode_selection_layout.addWidget(self.button_aim)
-        mode_selection_layout.addWidget(self.button_trend)
-        mode_selection_layout.addWidget(self.button_note)
-        mode_selection_layout.addWidget(self.button_manual)
-
-        self.mode_dict = {
-            0: 'view',
-            1: 'manual',
-            2: 'phase',
-            3: 'aim',
-            4: 'trend',
-            5: 'note',
-            6: 'plot'
-        }
-
-        # Add mode selection layout directly to the home layout
-        self.home_layout.addLayout(mode_selection_layout)
-
-        # Create the stacked widget
-        self.stacked_widget = QStackedWidget()
-        self.stacked_widget.setContentsMargins(0, 0, 0, 0)  # Ensure no margins around the stacked widget
-        self.home_layout.addWidget(self.stacked_widget)
-
-        # Create and add widgets for each mode
-        self.view_mode_widget = chart_mode.ViewModeWidget(self.figure_manager)
-        self.manual_mode_widget = chart_mode.DataModeWidget(self.figure_manager)
-        self.phase_mode_widget = chart_mode.PhaseModeWidget(self.figure_manager)
-        self.aim_mode_widget = chart_mode.AimModeWidget(self.figure_manager)
-        self.trend_mode_widget = chart_mode.TrendModeWidget(self.figure_manager)
-        self.note_mode_widget = chart_mode.NoteModeWidget(self.figure_manager)
-        self.plot_mode_widget = chart_mode.PlotModeWidget(self.figure_manager)
-
-        # Sync on boot
-        self.event_bus.emit('sync_grid_checkboxes')
-        self.event_bus.emit('sync_misc_checkboxes')
-        self.event_bus.emit('apply_all_grid_settings')
-        self.event_bus.emit('apply_all_misc_settings')
-
-        self.stacked_widget.addWidget(self.view_mode_widget)
-        self.stacked_widget.addWidget(self.manual_mode_widget)
-        self.stacked_widget.addWidget(self.phase_mode_widget)
-        self.stacked_widget.addWidget(self.aim_mode_widget)
-        self.stacked_widget.addWidget(self.trend_mode_widget)
-        self.stacked_widget.addWidget(self.note_mode_widget)
-        self.stacked_widget.addWidget(self.plot_mode_widget)
-
-        # Connect push buttons to set interaction mode
-        self.button_view.clicked.connect(lambda: self.event_bus.emit("view_mode_selected"))
-        self.button_manual.clicked.connect(lambda: self.event_bus.emit("style_mode_selected"))
-        self.button_phase.clicked.connect(lambda: self.event_bus.emit('phase_mode_selected'))
-        self.button_aim.clicked.connect(lambda: self.event_bus.emit('aim_mode_selected'))
-        self.button_trend.clicked.connect(lambda: self.event_bus.emit('celeration_mode_selected'))
-        self.button_note.clicked.connect(lambda: self.event_bus.emit('note_mode_selected'))
-        self.button_plot.clicked.connect(lambda: self.event_bus.emit("plot_mode_selected"))
-
-        # Stretch at the bottom to push everything up
-        self.home_layout.addStretch(1)
-
-        # Apply the layout to the home tab
-        self.tab_home.setLayout(self.home_layout)
-
-    def setup_settings_tab(self):
-        # Create settings layout
-        settings_layout = QVBoxLayout()
-        self.tab_settings.setLayout(settings_layout)
-
-        # Create a group for preferences
-        preferences_group = QGroupBox("Preferences")
-        preferences_group_layout = QVBoxLayout()
-        preferences_group.setLayout(preferences_group_layout)
-
-        # Autosave
-        settings_autosave_label = QLabel('Autosave')
-        self.settings_autosave_options = QComboBox()
-        self.settings_autosave_options.addItem("On")
-        self.settings_autosave_options.addItem("Off")
-        initial_value = self.data_manager.user_preferences.get('autosave', False)
-        self.settings_autosave_options.setCurrentText("On" if initial_value else "Off")
-        self.settings_autosave_options.currentIndexChanged.connect(
-            lambda index: self.data_manager.user_preferences.update(
-                {'autosave': self.settings_autosave_options.currentText() == "On"}))
-
-        preferences_group_layout.addWidget(settings_autosave_label)
-        preferences_group_layout.addWidget(self.settings_autosave_options)
-
-        # Add button below the start date dropdown
-        full_path = Path(self.data_manager.user_preferences['home_folder'])
-        short_path = Path(*full_path.parts[-1:])
-        path_label = QLabel('Default folder')
-        preferences_group_layout.addWidget(path_label)
-        self.settings_folder_btn = QPushButton(str(short_path))
-        self.settings_folder_btn.setToolTip(self.data_manager.user_preferences['home_folder'])
-        self.settings_folder_btn.clicked.connect(self.event_handlers.set_data_folder)
-        preferences_group_layout.addWidget(self.settings_folder_btn)
-
-        # Reset preferences to default
-        self.reset_preferences_btn = QPushButton('Reset')
-        self.reset_preferences_btn.clicked.connect(self.reset_preferences_msg)
-        preferences_group_layout.addWidget(self.reset_preferences_btn)
-
-        # Create group for Chart types
-        chart_type_settings_group = QGroupBox('Chart')
-        chart_type_settings_layout = QVBoxLayout()
-        chart_type_settings_group.setLayout(chart_type_settings_layout)
-
-        chart_type_label = QLabel("Type")
-        chart_type_settings_layout.addWidget(chart_type_label)
-        chart_type_options = [
-            ('Daily', 'Daily'),
-            ('Weekly', 'Weekly'),
-            ('Monthly', 'Monthly'),
-            ('Yearly', 'Yearly'),
-            ('DailyMinute', 'DailyMinute'),
-            ('WeeklyMinute', 'WeeklyMinute'),
-            ('MonthlyMinute', 'MonthlyMinute'),
-            ('YearlyMinute', 'YearlyMinute')
-        ]
-        self.chart_type_settings_dropdown = QComboBox()
-        for display, value in chart_type_options:
-            self.chart_type_settings_dropdown.addItem(display, value)
-        chart_type_settings_layout.addWidget(self.chart_type_settings_dropdown)
-
-        # Load chart preference
-        chart_type = self.data_manager.chart_data['type']
-        index = self.chart_type_settings_dropdown.findData(chart_type)
-        if index != -1:
-            self.chart_type_settings_dropdown.setCurrentIndex(index)
-        self.chart_type_settings_dropdown.currentIndexChanged.connect(self.event_handlers.change_chart_type)
-        settings_layout.addWidget(chart_type_settings_group)
-
-        # Zero counts below timing floor or don't display
-        settings_zero_count_handling_label = QLabel('Zero counts')
-        self.settings_zero_count_handling = QComboBox()
-        self.settings_zero_count_handling.addItem('Place below floor', True)
-        self.settings_zero_count_handling.addItem('Do not show', False)
-        # Set default selection based on bool_type
-        if self.data_manager.chart_data['place_below_floor']:
-            # Select 'Place below floor'
-            self.settings_zero_count_handling.setCurrentIndex(0)
-        else:
-            # Select 'Do not show'
-            self.settings_zero_count_handling.setCurrentIndex(1)
-
-        chart_type_settings_layout.addWidget(settings_zero_count_handling_label)
-        chart_type_settings_layout.addWidget(self.settings_zero_count_handling)
-        self.settings_zero_count_handling.currentIndexChanged.connect(
-            lambda index: self.event_handlers.update_zero_count_handling(self.settings_zero_count_handling.itemData(index)))
-        settings_layout.addWidget(preferences_group)
-
-        # SpinBox for chart size
-        chart_size_label = QLabel("Width (6 - 15)")
-        self.chart_size_spinbox = QSpinBox()
-        self.chart_size_spinbox.setRange(6, 15)  # Set the range as required
-        self.chart_size_spinbox.setValue(self.data_manager.user_preferences.get('Width', 0))
-        self.chart_size_spinbox.setValue(self.data_manager.user_preferences['width'])
-        self.chart_size_spinbox.valueChanged.connect(self.event_handlers.change_width)
-        chart_type_settings_layout.addWidget(chart_size_label)
-        chart_type_settings_layout.addWidget(self.chart_size_spinbox)
-
-        # Change start date
-        self.change_start_date_btn = QPushButton('Start Date', self)
-        self.change_start_date_btn.clicked.connect(self.event_handlers.show_date_dialog)
-        chart_type_settings_layout.addWidget(self.change_start_date_btn)
-
-        # Label for the font color button
-        self.chart_font_color_button = QPushButton("Font Color")
-        chart_type_settings_layout.addWidget(self.chart_font_color_button)
-        self.chart_font_color_button.clicked.connect(lambda: self.event_handlers.choose_color(color_category='chart_font_color'))
-
-        # Label for the font color button
-        self.chart_grid_color_button = QPushButton("Grid Color")
-        chart_type_settings_layout.addWidget(self.chart_grid_color_button)
-        self.chart_grid_color_button.clicked.connect(lambda: self.event_handlers.choose_color(color_category='chart_grid_color'))
-
-        # Create a group for Other settings
-        other_settings_group = QGroupBox("Misc")
-        other_settings_layout = QVBoxLayout()
-        other_settings_group.setLayout(other_settings_layout)
-        settings_test_angle_check = QCheckBox('Test angle')
-        other_settings_layout.addWidget(settings_test_angle_check)
-        settings_test_angle_check.stateChanged.connect(self.event_handlers.test_angle)
-        settings_layout.addWidget(other_settings_group)
-
-        self.right_dev_btn = QPushButton('Support developer')
-        self.right_dev_btn.setStyleSheet("font-weight: bold; background-color: #96deeb")
-        other_settings_layout.addWidget((self.right_dev_btn))
-        self.right_dev_btn.clicked.connect(self.support_dev_btn_clicked)
-
-        # Push everything to the top
-        settings_layout.addStretch()
-
-    def reset_preferences_msg(self):
-        msg_box = QMessageBox()
-        msg_box.setWindowTitle('Reset preferences')
-        msg_box.setIcon(QMessageBox.Icon.Warning)
-        msg_box.setText("Everything will go back to default. A manual reboot of OpenCelerator is required. Are you sure?")
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
-        msg_box.setDefaultButton(QMessageBox.StandardButton.Cancel)
-
-        reply = msg_box.exec()
-
-        if reply == QMessageBox.StandardButton.Yes:
-            self.save_preferences_upon_close = False
-            self.data_manager.delete_user_preferences()
-            QApplication.instance().quit()
-
-    def keyPressEvent(self, event):
-        # Custom key handling for trend mode
-        if self.currentMode == 'trend':
-            if event.key() == Qt.Key.Key_Left:
-                self.figure_manager.trend_move_temp_marker('left')
-                self.trend_adjust_dates()
-                self.figure_manager.trend_move_temp_est_with_arrows('left')
-            elif event.key() == Qt.Key.Key_Right:
-                self.figure_manager.trend_move_temp_marker('right')
-                self.trend_adjust_dates()
-                self.figure_manager.trend_move_temp_est_with_arrows('right')
-            elif event.key() == Qt.Key.Key_Up:
-                self.figure_manager.trend_move_temp_est_with_arrows('up')
-            elif event.key() == Qt.Key.Key_Down:
-                self.figure_manager.trend_move_temp_est_with_arrows('down')
-
-        # Ensure default key event handling
-        super().keyPressEvent(event)
-
-    def set_interaction_mode(self):
-        if self.current_connection:
-            self.figure_manager.canvas.mpl_disconnect(self.current_connection)
-
-        # Universal connections
-        self.legend_pick_cid = self.figure_manager.canvas.mpl_connect('pick_event', self.figure_manager.view_manager.legend_pick)
-        self.credit_pick_cid = self.figure_manager.canvas.mpl_connect('pick_event', self.figure_manager.view_manager.view_on_credit_line_pick)
-        self.fan_pick_cid = self.figure_manager.canvas.mpl_connect('pick_event', self.figure_manager.drag_fan_manager.on_pick)
-        self.fan_release_cid = self.figure_manager.canvas.mpl_connect('button_release_event', self.figure_manager.drag_fan_manager.on_release)
-        self.fan_motion_cid = self.figure_manager.canvas.mpl_connect('motion_notify_event', self.figure_manager.drag_fan_manager.on_motion)
-
-        if self.mode == 0:  # View mode
-            pass
-        elif self.mode == 1:  # Data mode
-            self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.point_click)
-        elif self.mode == 2:  # Phase mode
-            self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.phase_click)
-        elif self.mode == 3:  # Aim mode
-            self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.aim_click)
-        elif self.mode == 4:  # Trend mode
-            self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.trend_click)
-        elif self.mode == 5:  # Note mode
-            self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.note_click)
-        elif self.mode == 6:  # Plot mode
-            self.current_connection = self.figure_manager.canvas.mpl_connect('button_press_event', self.event_handlers.plot_click)
-
-    def trend_adjust_dates(self):
-        result = self.figure_manager.trend_adjust_dates()
-        if result:
-            date, order = result
-            if order == 'first':
-                self.trend_mode_widget.trend_start_date_input.setDate(QDate(date.year, date.month, date.day))
-            elif order == 'second':
-                self.trend_mode_widget.trend_end_date_input.setDate(QDate(date.year, date.month, date.day))
-
-    def save_decision(self, event=None):
-        autosave = self.data_manager.user_preferences['autosave']
-        chart_file_path = self.data_manager.chart_data['chart_file_path']
-        data_exists = self.data_manager.df_raw is not None and not self.data_manager.df_raw.empty
-
-        if chart_file_path and not autosave:
-            file_name = os.path.splitext(os.path.basename(chart_file_path))[0]
-
-            if event:
-                reply = QMessageBox.question(self, 'Save Chart',
-                                             f"Save {file_name}?",
-                                             QMessageBox.StandardButton.Yes |
-                                             QMessageBox.StandardButton.No |
-                                             QMessageBox.StandardButton.Cancel)
-            else:
-                reply = QMessageBox.question(self, 'Save Chart',
-                                             f"Save {file_name}?",
-                                             QMessageBox.StandardButton.Yes |
-                                             QMessageBox.StandardButton.No)
-
-            if reply == QMessageBox.StandardButton.Yes:
-                self.event_handlers.save_chart(chart_file_path)
-            elif reply == QMessageBox.StandardButton.Cancel:
-                if event:
-                    event.ignore()
-
-        elif autosave and chart_file_path:
-                self.event_handlers.save_chart(chart_file_path)
-                if event:
-                    event.accept()
-
-        elif not chart_file_path and data_exists:
-            data = {'title': "No chart file",
-                    'message': 'Save this chart?',
-                    'choice': True,
-                    'ok_text': 'Yes',
-                    'cancel_text': 'No'}
-            accepted = self.event_bus.emit('trigger_user_prompt', data)
-            if accepted:
-                self.event_handlers.save_chart(chart_file_path)
-            if event:
-                event.accept()
-
-    def closeEvent(self, event):
-        # Stuff to do before closing application
-        self.event_bus.emit('save_decision', data=event)
-
-        # Save current preferences
-        if self.save_preferences_upon_close:
-            self.data_manager.save_user_preferences()
-
-
-class FilesTab(QWidget):
-    def __init__(self, chart_app, event_handlers, data_manager):
-        super().__init__()
-        self.chart_app = chart_app
-        self.event_handlers = event_handlers
-        self.data_manager = data_manager
-        self.event_bus = EventBus()
-
-        # Event bus subscriptions without data
-        self.event_bus.subscribe('refresh_recent_charts_list', self.refresh_recent_charts_list)
-
-        self.setup_ui()
-
-    def setup_ui(self):
-        files_layout = QVBoxLayout()  # Create a QVBoxLayout instance
-        self.setLayout(files_layout)  # Set the layout to the FilesTab instance
-
-        # Chart GroupBox
-        group_box_chart = QGroupBox("Chart")
-        layout_chart = QVBoxLayout()
-        btn_new = QPushButton('New')
-        btn_new.setToolTip('Get default chart')
-        btn_import_delete = QPushButton('Import Data')
-        btn_import_delete.setToolTip('Import spreadsheet data onto existing chart')
-        btn_load = QPushButton('Open')
-        btn_load.setToolTip('Open chart file')
-        btn_save = QPushButton('Save')
-        btn_save.setToolTip('Save chart file (data plus chart settings)')
-        btn_image = QPushButton('Export Chart')
-        btn_image.setToolTip('Get chart as png, jpeg, pdf, or svg')
-        layout_chart.addWidget(btn_new)
-        layout_chart.addWidget(btn_load)
-        layout_chart.addWidget(btn_save)
-        layout_chart.addWidget(btn_import_delete)
-        layout_chart.addWidget(btn_image)
-        group_box_chart.setLayout(layout_chart)
-        files_layout.addWidget(group_box_chart)
-
-        spacer = QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        files_layout.addItem(spacer)
-
-        # Recent Charts ListBox
-        lbl_recent_charts = QLabel("Recent")
-        lbl_recent_charts.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_recent_charts.setStyleSheet("font-weight: bold; font-style: normal; font-size: 12px")
-        self.lst_recent_charts = QListWidget()
-
-        self.lst_recent_charts.setStyleSheet("""
-            QListWidget {
-                font-size: 14px;
-            }
-            QListWidget::item {
-                padding: 5px;
-                text-align: center;
-                margin: 3px 0px;
-            }
-            
-            QListWidget::item:hover {
-            background-color: #96deeb;
-            }
-                
-            QListWidget::item:selected {
-                background-color: #05c3de;
-                color: white;
-            }
-        """)
-
-        self.lst_recent_charts.setFixedHeight(500)
-        files_layout.addWidget(lbl_recent_charts)
-        files_layout.addWidget(self.lst_recent_charts)
-
-        # Populate recents for listboxes
-        self.event_bus.emit('refresh_recent_charts_list')
-
-        # Button connections
-        btn_import_delete.clicked.connect(lambda: self.event_handlers.import_data())
-        btn_new.clicked.connect(self.new_chart_dialog)
-        btn_image.clicked.connect(self.event_handlers.save_image)
-        btn_save.clicked.connect(self.event_handlers.save_chart)
-        btn_load.clicked.connect(lambda: self.event_handlers.load_chart(None))
-
-        # Double-click connections for list items
-        self.lst_recent_charts.itemDoubleClicked.connect(self.handle_chart_double_click)
-
-        self.lst_recent_charts.installEventFilter(self)
-
-        files_layout.addStretch()  # Prevents the buttons from vertically filling the whole panel
-
-    def eventFilter(self, obj, event):
-        # Check if obj is a valid QObject and event is a valid QEvent
-        if not isinstance(obj, QObject) or not isinstance(event, QEvent):
-            # If not proper types, just return false (don't handle)
-            return False
-
-        if event.type() == QEvent.Type.KeyPress:
-            if event.key() == Qt.Key.Key_Delete or event.key() == Qt.Key.Key_D:
-                if obj == self.lst_recent_charts:
-                    self.remove_selected_item(self.lst_recent_charts, 'recent_charts')
-                    return True
-        return super().eventFilter(obj, event)
-
-    def remove_selected_item(self, list_widget, preference_key):
-        selected_item = list_widget.currentItem()
-        if selected_item:
-            file_path = selected_item.data(self.chart_app.FullFilePathRole)
-            if file_path in self.data_manager.user_preferences[preference_key]:
-                self.data_manager.user_preferences[preference_key].remove(file_path)
-            list_widget.takeItem(list_widget.row(selected_item))
-
-    def refresh_recent_charts_list(self):
-        self.lst_recent_charts.clear()
-        recent_charts = self.data_manager.user_preferences.get('recent_charts', [])
-        for chart_path in recent_charts:
-            if os.path.isfile(chart_path):
-                name = os.path.splitext(os.path.basename(chart_path))[0]
-                item = QListWidgetItem(name)
-                item.setData(self.chart_app.FullFilePathRole, chart_path)
-                self.lst_recent_charts.addItem(item)
-            else:
-                self.data_manager.user_preferences['recent_charts'].remove(chart_path)
-
-    def handle_chart_double_click(self, item):
-        chart_path = item.data(self.chart_app.FullFilePathRole)
-        if os.path.isfile(chart_path):
-            self.event_handlers.load_chart(chart_path)
-        else:
-            self.data_manager.user_preferences['recent_charts'].remove(chart_path)
-        self.event_bus.emit('refresh_recent_charts_list')
-
-    def new_chart_dialog(self):
-        # Create a QMessageBox
-        msg_box = QMessageBox()
-        msg_box.setWindowTitle("New chart")
-        msg_box.setText("Remove current chart?")
-        msg_box.setIcon(QMessageBox.Icon.Question)
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
-
-        # Execute the message box and get the response
-        response = msg_box.exec()
-
-        if response == QMessageBox.StandardButton.Yes:
-
-            # Decide whether to save chart
-            self.event_bus.emit('save_decision', data=None)
-
-            # Save current chart if any and if autosave is enabled
-            autosave = self.data_manager.user_preferences['autosave']
-            if self.data_manager.chart_data['chart_file_path'] and autosave:
-                self.event_handlers.save_chart(self.data_manager.chart_data['chart_file_path'])
-
-            # Prevents from accidentally saving default chart
-            self.data_manager.chart_data['chart_file_path'] = None
-            self.chart_app.figure_manager.back_to_default()
-
-            # Remove display name of imported/loaded chart
-            self.chart_app.setWindowTitle(self.chart_app.window_title_str)
-
-            # Select view mode by default
-            self.event_bus.emit('view_mode_selected')
-
-
-class EventHandlers:
-    def __init__(self, chart_app, figure_manager, data_manager):
-        self.chart_app = chart_app
-        self.figure_manager = figure_manager
-        self.data_manager = data_manager
-        self.event_bus = self.chart_app.event_bus
-
-        # Event subscriptions without data
-        self.event_bus.subscribe('cleanup_after_chart_update', self.cleanup_after_chart_update)
-        self.event_bus.subscribe('select_import_path', self.select_import_path)
-
-        # Event subscriptions with data
-        self.event_bus.subscribe('column_map_dialog', self.column_map_dialog, has_data=True)
-        self.event_bus.subscribe('save_chart_as_recent', self.save_recent, has_data=True)
-        self.event_bus.subscribe('trigger_user_prompt', self.trigger_user_prompt, has_data=True)
-
-    def show_date_dialog(self):
-        dialog = StartDateDialog(self.chart_app)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            new_start_date = dialog.get_date()
-            self.data_manager.chart_data['start_date'] = new_start_date
-            self.event_bus.emit('new_chart', new_start_date)
+            return True
+        return False
 
-    def save_recent(self, data):
-        file_path = data['file_path']
-        recent_type = data['recent_type']
-        max_recent = 25
-        if file_path in self.data_manager.user_preferences[recent_type]:
-            self.data_manager.user_preferences[recent_type].remove(file_path)
-        self.data_manager.user_preferences[recent_type].insert(0, file_path)
-        self.data_manager.user_preferences[recent_type] = self.data_manager.user_preferences[recent_type][:max_recent]
+    def show_error_dialog(self, message):
+        # Create error dialog
+        error_dialog = QDialog()
+        error_dialog.setWindowTitle("Update Required")
+        error_dialog.setMinimumSize(450, 180)  # Increased height for link
+        error_dialog.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
 
-    def column_map_dialog(self, file_path):
-        dialog = DataColumnMappingDialog(self.chart_app, file_path)
-        dialog.exec()
+        # Create layout
+        layout = QVBoxLayout(error_dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
 
-    def select_import_path(self, file_path=None):
-        if file_path is None:
-            # Open file dialog with support for CSV and Excel files
-            file_path, _ = QFileDialog.getOpenFileName(self.chart_app, 'Select data set',
-                                                       self.data_manager.user_preferences['home_folder'],
-                                                       'CSV, Excel, ODS files (*.csv *.xls *.xlsx *.ods)')
+        # Create message label - centered
+        msg_label = QLabel(message)
+        msg_label.setWordWrap(True)
+        msg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(msg_label)
 
-            if file_path:
-                # Save import path
-                unix_id = self.data_manager.user_preferences['unix_id']
-                import_paths = self.data_manager.chart_data['import_path']
-                import_paths[unix_id] = file_path
+        # Add GitHub repo link if this is an environment mismatch
+        if "manually" in message.lower():
+            # Add some spacing
+            layout.addSpacing(10)
 
-            return file_path
+            # Create clickable link
+            download_from_github_string = 'https://github.com/SJV-S/OpenCelerator?tab=readme-ov-file#download--installation'
+            link_label = QLabel(f'<a href="{download_from_github_string}" style="color: #0066cc; text-decoration: none;">{GITHUB_REPO}</a>')
+            link_label.setOpenExternalLinks(True)
+            link_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            link_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+            layout.addWidget(link_label)
 
-    def import_data(self):
-        file_path = self.select_import_path()
-        if not file_path:
+        # Add spacing before button
+        layout.addSpacing(15)
+
+        # Create button layout
+        button_layout = QHBoxLayout()
+        layout.addLayout(button_layout)
+
+        # Add spacer to center the OK button
+        button_layout.addStretch()
+
+        # Create OK button
+        ok_btn = QPushButton("OK")
+        ok_btn.setMinimumWidth(80)
+        ok_btn.clicked.connect(error_dialog.accept)
+        button_layout.addWidget(ok_btn)
+        button_layout.addStretch()
+
+        # Center the dialog
+        self.center_window(error_dialog)
+
+        # Show the dialog
+        error_dialog.exec()
+
+        # Exit
+        sys.exit(0)
+
+    def create_download_window(self, version):
+        class DownloadWindow(QDialog):
+            def __init__(self, version, gui_interface):
+                super().__init__()
+                self.gui_interface = gui_interface
+
+                # Configure window
+                self.setWindowTitle(f"{APP_NAME} Update v{version}")
+                self.setMinimumSize(450, 150)
+                self.setFixedSize(450, 150)
+                self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
+
+                # Create layout
+                main_layout = QVBoxLayout(self)
+
+                # Version label
+                version_label = QLabel(f"Updating to v{version}")
+                version_font = QFont(version_label.font())
+                version_font.setBold(True)
+                version_font.setPointSize(12)
+                version_label.setFont(version_font)
+                main_layout.addWidget(version_label)
+
+                # Status frame
+                status_frame = QFrame()
+                status_layout = QHBoxLayout(status_frame)
+                status_layout.setContentsMargins(0, 0, 0, 0)
+                main_layout.addWidget(status_frame)
+
+                # Status icon
+                self.status_icon = QLabel("⏳")
+                status_layout.addWidget(self.status_icon)
+
+                # Status text
+                self.status_label = QLabel(MESSAGES["PREPARING_DOWNLOAD"])
+                status_layout.addWidget(self.status_label)
+                status_layout.addStretch()
+
+                # Progress bar
+                self.progress_bar = QProgressBar()
+                self.progress_bar.setTextVisible(True)
+                self.progress_bar.setRange(0, 0)  # Indeterminate mode
+                main_layout.addWidget(self.progress_bar)
+
+                # Center the window
+                self.gui_interface.center_window(self)
+
+                # Show the window
+                self.show()
+                self.raise_()
+                self.activateWindow()
+
+            def update_status(self, message):
+                self.status_label.setText(message)
+
+                # If message contains a percentage, update progress bar and icon
+                if "%" in message:
+                    try:
+                        percentage = float(message.split("%")[0].split(": ")[1])
+                        self.progress_bar.setRange(0, 100)
+                        self.progress_bar.setValue(int(percentage))
+
+                        # Update icon based on progress
+                        if percentage < 25:
+                            self.status_icon.setText("⏳")
+                        elif percentage < 50:
+                            self.status_icon.setText("📦")
+                        elif percentage < 75:
+                            self.status_icon.setText("📥")
+                        else:
+                            self.status_icon.setText("🔄")
+                    except (ValueError, IndexError):
+                        pass
+                else:
+                    # Reset to indeterminate
+                    self.progress_bar.setRange(0, 0)
+                    self.status_icon.setText("⏳")
+
+            def show(self):
+                super().show()
+                self.raise_()
+                self.activateWindow()
+
+            def close(self):
+                try:
+                    super().close()
+                except:
+                    pass  # Ignore errors if window is already closed
+
+        self._download_window = DownloadWindow(version, self)
+        return self._download_window
+
+    def create_progress_signals(self):
+        class ProgressCallbacks(QObject):
+            # Define signals
+            progress_signal = Signal(str)
+            finished_signal = Signal(bool, object)
+
+            def __init__(self, gui_interface):
+                super().__init__()
+                self.gui = gui_interface
+                self.progress_callback = None
+                self.finished_callback = None
+
+                # Connect signals to slots
+                self.progress_signal.connect(self._on_progress_internal)
+                self.finished_signal.connect(self._on_finished_internal)
+
+            def update_progress(self, message):
+                self.progress_signal.emit(message)
+
+            def complete(self, success, file_path):
+                self.finished_signal.emit(success, file_path)
+
+            def _on_progress_internal(self, message):
+                if self.progress_callback:
+                    self.progress_callback(message)
+
+            def _on_finished_internal(self, success, file_path):
+                # Clean up the download window first
+                if self.gui._download_window:
+                    try:
+                        self.gui._download_window.close()
+                        self.gui._download_window = None
+                    except:
+                        pass
+
+                # Then call the callback if there is one
+                if self.finished_callback:
+                    self.finished_callback(success, file_path)
+
+            def on_progress(self, callback):
+                self.progress_callback = callback
+
+            def on_finished(self, callback):
+                self.finished_callback = callback
+
+        return ProgressCallbacks(self)
+
+    def run_event_loop(self):
+        self.loop_is_initialized = True
+        return sys.app.exec()
+
+
+class ModuleLoader:
+    def __init__(self, app_zip_filename=APP_ZIP_FILENAME):
+        self.app_zip_filename = app_zip_filename
+        self.verifier = ModuleVerifier()
+
+    def find_external_module(self):
+        directory = CONFIG_DIR
+
+        if not directory.exists():
+            logger.info(f"Config directory does not exist: {directory}")
+            return None, False, None, None, None
+
+        module_pattern = re.compile(r'app_modules_v([\d\.]+)(?:_e([\d\.]+))?')
+        found_modules = []
+
+        for item in directory.iterdir():
+            if not item.is_dir():
+                continue
+
+            match = module_pattern.match(item.name)
+            if not match:
+                continue
+
+            version_str = match.group(1)
+            env_str = match.group(2)
+
+            logger.info(f"Found module folder: {item} (v{version_str}, e{env_str})")
+
+            zip_filename = f"{self.app_zip_filename}_v{version_str}"
+            if env_str:
+                zip_filename += f"_e{env_str}"
+            zip_filename += ".zip"
+
+            zip_path = item / zip_filename
+
+            if not (zip_path.exists() and zip_path.is_file()):
+                logger.info(f"Expected zip file not found: {zip_path}")
+                continue
+
+            logger.info(f"Found zip file: {zip_path}")
+
+            sig_path = Path(f"{zip_path}.sig")
+            if sig_path.exists():
+                logger.info(f"Found signature file: {sig_path}")
+                found_modules.append((zip_path, version_str, env_str))
+            else:
+                logger.warning(f"Found zip file but missing signature: {sig_path}")
+
+        if not found_modules:
+            logger.info("No module zip file found.")
+            return None, False, None, None, None
+
+        # Sort by semantic version (convert version components to integers)
+        found_modules.sort(key=lambda x: [int(part) for part in x[1].split('.')], reverse=True)
+        latest_module = found_modules[0]
+        zip_path, version_str, env_str = latest_module
+
+        logger.info(f"Selected latest module: v{version_str}")
+        return zip_path, True, MAIN_MODULE_NAME, version_str, env_str
+
+    def extract_version_info_from_filename(self, filename):
+        """Extract version and environment strings from a filename
+        Expected format: app_modules_v0.11.0_e0.11.0.zip
+        Returns (version_str, env_str) or (None, None) if not found
+        """
+        try:
+            # Parse the new format: app_modules_v0.11.0_e0.11.0.zip
+            parts = filename.split('_')
+            if len(parts) >= 4:
+                # Extract version without 'v' prefix
+                version_str = parts[2][1:]  # Remove 'v' from v0.11.0
+                # Extract environment without 'e' prefix
+                env_str = parts[3][1:].split('.zip')[0]  # Remove 'e' from e0.11.0
+
+                logger.info(f"Extracted version: {version_str}, environment: {env_str}")
+                return version_str, env_str
+            else:
+                logger.info(f"Filename format does not match expected pattern: {filename}")
+                return None, None
+        except (IndexError, ValueError) as e:
+            logger.error(f"Could not extract version info from filename '{filename}': {e}")
+            return None, None
+
+    def load_module_from_zip(self, zip_path, main_module_name, version_str=None, env_str=None):
+        # For macOS, extract to temp directory instead of using direct ZIP imports
+        if platform.system() == "Darwin":  # macOS
+            temp_dir = tempfile.mkdtemp(prefix=f"{APP_NAME}_")
+            logger.info(f"Extracting module to temporary directory: {temp_dir}")
+
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(temp_dir)
+
+            # Add the temp directory to sys.path
+            if temp_dir not in sys.path:
+                sys.path.insert(0, temp_dir)
+        else:
+            # Original approach for other platforms
+            zip_path_str = str(zip_path.resolve())
+            if zip_path_str not in sys.path:
+                sys.path.insert(0, zip_path_str)
+
+        # Import the main module
+        try:
+            main_module = __import__(main_module_name)
+
+            # Store version and environment information
+            if version_str:
+                main_module.version = version_str
+            if env_str:
+                main_module.environment = env_str
+
+            return main_module
+        except ImportError:
+            # If main module not found, try to find any Python file
+            if platform.system() == "Darwin":
+                # Look in temp directory
+                py_files = list(Path(temp_dir).glob("*.py"))
+                if py_files:
+                    module_name = py_files[0].stem
+                    spec = importlib.util.spec_from_file_location(module_name, py_files[0])
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+
+                    if version_str:
+                        module.version = version_str
+                    if env_str:
+                        module.environment = env_str
+
+                    return module
+            else:
+                # Look in ZIP file
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    py_files = [f for f in zip_ref.namelist() if f.endswith(".py")]
+                    if py_files:
+                        fallback_name = py_files[0][:-3]  # Remove .py extension
+                        module = __import__(fallback_name)
+
+                        if version_str:
+                            module.version = version_str
+                        if env_str:
+                            module.environment = env_str
+
+                        return module
+
+        raise ImportError(f"No suitable Python module found in {zip_path}")
+
+
+class UpdateChecker:
+    def __init__(self, github_repo=GITHUB_REPO, app_zip_filename=APP_ZIP_FILENAME):
+        self.github_repo = github_repo
+        self.app_zip_filename = app_zip_filename
+        self.verifier = ModuleVerifier()
+        self.loader = ModuleLoader()
+
+    def check_for_updates_after_app_termination(self):
+        try:
+            # Read update preference
+            update_policy = self.get_update_preference()
+
+            # If updates are disabled, do nothing
+            if update_policy != 'Auto':
+                return
+
+            # Check the last update date
+            prefs_file = CONFIG_DIR / 'preferences.json'
+            today = datetime.now().strftime('%Y-%m-%d')
+            check_for_update = True
+
+            if prefs_file.exists():
+                try:
+                    with open(prefs_file, 'r') as f:
+                        preferences = json.load(f)
+                        last_update_date = preferences.get('last_update_check', '')
+
+                        # Don't check for updates if already checked today
+                        if last_update_date == today:
+                            logger.info(f"Already checked for updates today ({today}). Skipping.")
+                            check_for_update = False
+                except Exception as e:
+                    logger.error(f"Error reading preferences: {e}")
+
+            if not check_for_update:
+                return
+
+            # Update the last update check date
+            try:
+                if prefs_file.exists():
+                    with open(prefs_file, 'r') as f:
+                        preferences = json.load(f)
+                else:
+                    return
+
+                preferences['last_update_check'] = today
+
+                with open(prefs_file, 'w') as f:
+                    json.dump(preferences, f, indent=2)
+            except Exception as e:
+                logger.error(f"Error updating last update date: {e}")
+
+            # Check for available updates
+            latest_version, download_url, sig_url, version_exists = self.check_for_updates()
+
+            # If new version is available and not already downloaded
+            if latest_version and not version_exists and update_policy == 'Auto':
+                # Silently download update without GUI
+                self.download_update(latest_version, download_url, sig_url)
+
+        except Exception as e:
+            logger.error(f"Error checking for updates: {e}")
+
+    def get_update_preference(self):
+        default = 'Off'
+        try:
+            prefs_file = CONFIG_DIR / 'preferences.json'
+            if prefs_file.exists():
+                with open(prefs_file, 'r') as f:
+                    preferences = json.load(f)
+                return preferences.get('update', default)
+
+            return default  # If file doesn't exist
+        except Exception:
+            return default  # On error
+
+    def check_for_updates(self):
+        # Check GitHub repository for available updates using GitHub's API.
+        try:
+            releases = self._fetch_github_releases()
+            if not releases:
+                return None, None, None, False
+
+            # Check releases in order until we find one with required files
+            for release_idx, release_data in enumerate(releases):
+                logger.info(f"Checking release {release_idx + 1}/{len(releases)}")
+
+                result = self._process_release(release_data)
+                if result:
+                    version, download_url, sig_url = result
+                    version_exists = self._check_if_version_exists_locally(download_url, version)
+                    return version, download_url, sig_url, version_exists
+
+                logger.info(f"Release {release_idx + 1} incomplete, checking next release...")
+
+            # If we get here, no valid release was found
+            logger.error("No valid release found with required module files in any release")
+            return None, None, None, False
+
+        except Exception as e:
+            logger.error(f"Error checking for updates: {e}")
+            traceback.print_exc()
+            return None, None, None, False
+
+    def _fetch_github_releases(self):
+        # Extract owner and repo from GitHub URL
+        parsed_url = urlparse(self.github_repo)
+        path_parts = parsed_url.path.strip('/').split('/')
+        if len(path_parts) != 2:
+            logger.error(f"Invalid GitHub repo URL format: {self.github_repo}")
+            return None
+
+        owner, repo = path_parts
+        logger.info(f"Checking for updates in repository: {owner}/{repo}")
+
+        # Get all releases directly
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/releases"
+        logger.info(f"Getting all releases from: {api_url}")
+        response = requests.get(api_url, timeout=15)
+        logger.info(f"Releases request status code: {response.status_code}")
+
+        if response.status_code != 200:
+            logger.error(f"Failed to get releases (status code: {response.status_code})")
+            return None
+
+        # Parse releases list
+        releases = response.json()
+        if not releases or not isinstance(releases, list) or len(releases) == 0:
+            logger.error("No releases found or invalid response format")
+            return None
+
+        # Sort by created date (newest first)
+        releases.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        logger.info(f"Found {len(releases)} releases")
+
+        return releases
+
+    def _process_release(self, release_data):
+        # Extract version from tag name
+        tag_name = release_data.get("tag_name", "")
+        version = tag_name.lstrip("v")
+        if not version:
+            logger.warning("Skipping release: no version in tag name")
+            return None
+
+        logger.info(f"Checking version: {version}")
+
+        # Look for ZIP and signature assets
+        assets = release_data.get("assets", [])
+        logger.info(f"Found {len(assets)} assets in this release")
+
+        download_url, sig_url = self._find_required_assets(assets)
+
+        if download_url and sig_url:
+            logger.info(f"Found valid release with all required files: v{version}")
+            logger.info(f"Download URL: {download_url}")
+            logger.info(f"Signature URL: {sig_url}")
+            return version, download_url, sig_url
+        else:
+            # Log what was missing
+            if not download_url:
+                logger.warning("Missing ZIP module URL")
+            if not sig_url:
+                logger.warning("Missing signature file URL")
+            return None
+
+    def _find_required_assets(self, assets):
+        download_url = None
+        sig_url = None
+
+        for asset in assets:
+            asset_name = asset.get("name", "")
+            asset_url = asset.get("browser_download_url", "")
+
+            # Look for module ZIP file
+            if asset_name.startswith(f"{self.app_zip_filename}_v") and asset_name.endswith(".zip"):
+                download_url = asset_url
+                logger.info(f"Found ZIP module: {asset_name}")
+
+                # Extract environment string from the filename
+                version_str, env_str = self.loader.extract_version_info_from_filename(asset_name)
+                if env_str:
+                    logger.info(f"Extracted environment: {env_str}")
+
+            # Look for signature file
+            elif asset_name.endswith(".zip.sig"):
+                sig_url = asset_url
+                logger.info(f"Found signature file: {asset_name}")
+
+        return download_url, sig_url
+
+    def _check_if_version_exists_locally(self, download_url, version):
+        if not CONFIG_DIR or not CONFIG_DIR.exists():
+            return False
+
+        # Get folder path using utility function
+        url_path = urlparse(download_url).path
+        filename = Path(url_path).name
+        version_folder = CONFIG_DIR / Path(filename).stem
+
+        # Check for any file matching the pattern
+        zip_files = list(version_folder.glob(f"{self.app_zip_filename}_v{version}_e*.zip"))
+
+        if zip_files:
+            zip_path = zip_files[0]  # Take the first match if multiple exist
+            sig_path = Path(f"{zip_path}.sig")
+            version_exists = zip_path.exists() and sig_path.exists()
+
+            if version_exists:
+                logger.info(f"Version {version} already exists locally at {zip_path}")
+            else:
+                logger.info(f"Version {version} does not exist locally")
+
+            return version_exists
+
+        return False
+
+    def _ensure_directory_exists(self, directory_path):
+        try:
+            directory_path.mkdir(parents=True, exist_ok=True)
+            return True
+        except Exception as e:
+            logger.error(f"Error creating directory {directory_path}: {e}")
+            return False
+
+    def download_update(self, version, download_url, sig_url, signals=None):
+        # Download and verify an update
+        # Headless download if signals is None
+        try:
+            # Ensure the config directory exists
+            self._ensure_directory_exists(CONFIG_DIR)
+
+            # Extract filename from the download URL to preserve the full format
+            url_path = urlparse(download_url).path
+            filename = Path(url_path).name
+            version_folder = CONFIG_DIR / Path(filename).stem
+            self._ensure_directory_exists(version_folder)
+
+            # Prepare file paths
+            zip_path = version_folder / filename
+            sig_path = Path(f"{zip_path}.sig")
+
+            # Download ZIP file
+            if signals:
+                signals.update_progress(MESSAGES["DOWNLOADING_UPDATE"])
+                time.sleep(0.5)
+
+            # Download with progress tracking
+            success = download_file_with_progress(
+                download_url,
+                zip_path,
+                progress_callback=signals.update_progress if signals else None
+            )
+
+            if not success:
+                logger.error("Failed to download ZIP file")
+                if signals:
+                    signals.complete(False, None)
+                return None
+
+            # Download signature file
+            if signals:
+                signals.update_progress(MESSAGES["DOWNLOADING_SIGNATURE"])
+
+            sig_response = requests.get(sig_url)
+            sig_response.raise_for_status()
+
+            with open(sig_path, 'w') as f:
+                f.write(sig_response.text)
+
+            # Verify the download
+            if signals:
+                signals.update_progress(MESSAGES["VERIFYING_DOWNLOAD"])
+                time.sleep(0.5)
+
+            # Verify the signature
+            verification_result, _ = self.verifier.verify_module_integrity(zip_path, version)
+            if not verification_result:
+                # Remove files if verification fails
+                zip_path.unlink(missing_ok=True)
+                sig_path.unlink(missing_ok=True)
+                # Try to remove the folder if it's empty
+                try:
+                    version_folder.rmdir()
+                except:
+                    pass
+
+                if signals:
+                    signals.complete(False, None)
+                return None
+
+            if signals:
+                signals.complete(True, zip_path)
+            return zip_path
+
+        except Exception as e:
+            logger.error(f"Error downloading update: {e}")
+            traceback.print_exc()  # Add traceback for better error diagnosis
+            if signals:
+                signals.complete(False, None)
+            return None
+
+
+class AppLauncher:
+    def __init__(self):
+        self.verifier = ModuleVerifier()
+        self.loader = ModuleLoader()
+        self.gui = GuiInterface()
+
+    def set_app_version(self, version_str):
+        """
+        Update the version in preferences.json and return whether it was an update or downgrade.
+        Returns:
+            - "update" if new version is higher than previous
+            - "downgrade" if new version is lower than previous
+            - None if version is unchanged or error occurred
+        """
+        # Update the version in preferences.json
+        prefs_file = CONFIG_DIR / 'preferences.json'
+        try:
+            preferences = {}
+            current_version = None
+
+            if prefs_file.exists():
+                with open(prefs_file, 'r') as f:
+                    preferences = json.load(f)
+                    current_version = preferences.get('version')
+
+            # If versions are the same, no change needed
+            if current_version == version_str:
+                logger.info(f"Version unchanged in preferences.json: {version_str}")
+                return None
+
+            # Determine if this is an update or downgrade using semantic versioning
+            result = None
+            if current_version:
+                # Convert version strings to lists of integers for comparison
+                try:
+                    current_parts = [int(part) for part in current_version.split('.')]
+                    new_parts = [int(part) for part in version_str.split('.')]
+
+                    # Compare version components from left to right
+                    for i in range(max(len(current_parts), len(new_parts))):
+                        # If we run out of parts in either version, pad with zeros
+                        current_part = current_parts[i] if i < len(current_parts) else 0
+                        new_part = new_parts[i] if i < len(new_parts) else 0
+
+                        if new_part > current_part:
+                            result = "update"
+                            break
+                        elif new_part < current_part:
+                            result = "downgrade"
+                            break
+
+                    # If all components were equal (shouldn't happen since we checked equality above)
+                    if result is None:
+                        return None
+
+                except (ValueError, IndexError) as e:
+                    logger.error(f"Error comparing versions: {e}")
+                    # If there's an error in comparison, still update the version but return None
+            else:
+                # No previous version, so it's an update
+                result = "update"
+
+            # Set the version key to the current version_str
+            preferences['version'] = version_str
+
+            # Ensure the directory exists
+            prefs_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # Write back the updated preferences
+            with open(prefs_file, 'w') as f:
+                json.dump(preferences, f, indent=2)
+
+            logger.info(f"Updated preferences.json with version: {version_str} ({result})")
+            return result
+
+        except Exception as e:
+            logger.error(f"Error updating version in preferences.json: {e}")
+            return None
+
+    def run_application(self, module_path, main_module_name, version_str, env_str=None):
+        # If env_str wasn't provided, try to extract it from the filename
+        if env_str is None:
+            version_str, env_str = self.loader.extract_version_info_from_filename(module_path.name)
+            if env_str is None:
+                env_str = LAUNCHER_ENVIRONMENT.lstrip(".")  # Use default if extraction fails
+
+        # Check if launcher environment matches the module environment
+        if env_str != LAUNCHER_ENVIRONMENT.lstrip("."):
+            logger.error(f"Environment mismatch: Launcher env={LAUNCHER_ENVIRONMENT.lstrip('.')}, Module env={env_str}")
+            error_message = MESSAGES["ENVIRONMENT_MISMATCH"]
+            self.gui.show_error_dialog(error_message)
+            return 2  # Return special code for environment mismatch
+
+        # Verify module integrity
+        verification_result, initial_hash = self.verifier.verify_module_integrity(module_path, version_str)
+        if not verification_result:
+            logger.error(f"Error: Module integrity check failed!")
+            return 1
+
+        # Calculate hash again before loading to detect tampering
+        current_hash = self.verifier.calculate_file_hash(module_path)
+        if current_hash != initial_hash:
+            logger.error(f"SECURITY ERROR: File hash mismatch detected!")
+            logger.error(f"Initial hash: {initial_hash}")
+            logger.error(f"Current hash: {current_hash}")
+            logger.error("File appears to have been modified after verification!")
+            return 1
+
+        logger.info(f"File hash verification successful - no tampering detected")
+
+        # Make version change status available in app.py if no download gui
+        if not self.gui.loop_is_initialized:
+            sys.version_change_status = self.set_app_version(version_str)
+
+        # Load the module
+        self.loader.load_module_from_zip(module_path, main_module_name, version_str, env_str)
+
+        # Close Windows splash screen if present
+        remove_splash_screen()
+
+        if not self.gui.loop_is_initialized:
+            return sys.app.exec()
+        else:
+            return 0
+
+
+def remove_splash_screen():
+    """Close Nuitka splash screen using Windows API"""
+    if platform.system() == 'Windows':
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        WM_CLOSE = 0x0010
+
+        hwnd = user32.FindWindowW("Splash", None)
+        if hwnd:
+            user32.SendMessageW(hwnd, WM_CLOSE, 0, 0)
+            logger.info("Splash screen closed successfully")
+            return True
+
+        return False
+
+def main():
+    # Windows splash screen
+    if platform.system() == 'Windows':  # Check if OS is Windows
+        if "NUITKA_ONEFILE_PARENT" in environ:
+            splash_filename = Path(tempfile.gettempdir()) / f"onefile_{int(environ['NUITKA_ONEFILE_PARENT'])}_splash_feedback.tmp"
+            if splash_filename.exists():
+                splash_filename.unlink()
+            logger.info("Splash Screen has been removed")
+
+    launcher = AppLauncher()  # GUI is initialized inside AppLauncher now
+    loader = ModuleLoader()
+    update_checker = UpdateChecker()
+    gui = launcher.gui  # Get the already initialized GUI
+
+    try:
+        # Find the external module
+        external_file, is_zip, main_module_name, version_str, env_str = loader.find_external_module()
+
+        # If module found, run it
+        if external_file is not None:
+            logger.info(f"Found application at: {external_file.resolve()}")
+            logger.info(f"Version: v{version_str}, Environment: e{env_str}")
+
+            # Run the application first
+            launcher.run_application(external_file, main_module_name, version_str, env_str)
+
+            # Check for updates
+            update_checker.check_for_updates_after_app_termination()
+
             return
 
-        # Create raw df for chart_data
-        self.data_manager.chart_data['column_map'] = {}  # If re-importing
-        self.event_bus.emit('column_mapped_raw_data_import', file_path)
+        # Ask permission to download the latest version
+        logger.info("No module found. Asking for permission to download the latest version...")
+        if not gui.show_download_permission_dialog():
+            logger.info("Download permission declined. Exiting gracefully.")
+            return 0  # Exit with success code since this is a user choice, not an error
 
-        # Will be None if user canceled import
-        if self.data_manager.chart_data['column_map'] is not None:
-            # Make sure the user doesn't end up with a blank chart
-            start_date = self.data_manager.prevent_blank_chart()
+        # User approved, now check for updates
+        logger.info("Checking for updates...")
+        latest_version, download_url, sig_url, version_exists = update_checker.check_for_updates()
 
-            # Get new chart
-            self.event_bus.emit('new_chart', start_date)
+        if latest_version and download_url and sig_url:
+            logger.info(f"Latest version: v{latest_version}")
+            logger.info(f"Download URL: {download_url}")
 
-    def save_image(self):
-        dialog = SaveImageDialog(self.chart_app)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            format_selected, resolution_selected = dialog.get_selected_options()
-            options = f"{format_selected.upper()} files (*.{format_selected});;All files (*.*)"
-            file_path, _ = QFileDialog.getSaveFileName(self.chart_app, 'Save file', self.data_manager.user_preferences['home_folder'], options)
-            if file_path:
-                self.figure_manager.fig_save_image(file_path, format=format_selected, dpi=resolution_selected)
+            # Create download window
+            download_window = gui.create_download_window(latest_version)
+            download_window.show()
 
-    def save_chart(self, file_path=None):
-        if not file_path:
-            file_path, _ = QFileDialog.getSaveFileName(self.chart_app, 'Save file',
-                                                       os.path.join(self.data_manager.user_preferences['home_folder'],
-                                                                    'nameless_chart.json'),
-                                                       'JSON files (*.json);;All files (*.*)')
+            # Create signals for progress updates
+            signals = gui.create_progress_signals()
+            signals.on_progress(download_window.update_status)
 
-        # Make sure file extension is included
-        name, ext = os.path.splitext(file_path)
-        if not ext:
-            file_path = f'{file_path}.json'
+            # Handle download completion
+            def on_download_finished(success, file_path):
+                if success:
+                    logger.info(f"Update downloaded successfully to {file_path}")
+                    # Extract env_str from filename
+                    version_str, env_str = loader.extract_version_info_from_filename(file_path.name)
+                    if env_str is None:
+                        logger.error(f"Could not extract environment string")
+                        env_str = LAUNCHER_ENVIRONMENT.lstrip(".")  # Use default if extraction fails
 
-        # Make sure empty strings are not saved. User will generate empty string if selecting Cancel in file explorer
-        if name:
-            self.data_manager.chart_data['chart_file_path'] = file_path
-            self.data_manager.save_chart(file_path, self.figure_manager.Chart.start_date)
+                    # Launch the application
+                    launcher.run_application(file_path, MAIN_MODULE_NAME, latest_version, env_str)
 
-            # Display name of chart saved
-            file_name = os.path.splitext(os.path.basename(file_path))[0]
-            self.chart_app.setWindowTitle(f'{self.chart_app.window_title_str} – {file_name}')
+                else:
+                    gui.show_error_dialog(MESSAGES["DOWNLOAD_FAILED"])
+                    return 1
 
-            # Save to recents and refresh list
-            self.event_bus.emit('save_chart_as_recent', data={'file_path': file_path, 'recent_type': 'recent_charts'})
-            self.event_bus.emit('refresh_recent_charts_list')
+            signals.on_finished(on_download_finished)
 
-            # Save chart file path
-            self.data_manager.chart_data['chart_file_path'] = file_path
+            # Start download in a separate thread to keep UI responsive
+            download_thread = Thread(
+                target=update_checker.download_update,
+                args=(latest_version, download_url, sig_url, signals)
+            )
+            download_thread.daemon = True
+            download_thread.start()
 
-    def load_chart(self, file_path):
-        # Decide whether to save data
-        self.event_bus.emit('save_decision', data=None)
-
-        if file_path is None:
-            file_path, _ = QFileDialog.getOpenFileName(self.chart_app, 'Select chart file',
-                                                       self.data_manager.user_preferences['home_folder'],
-                                                       'JSON files (*.json);;All files (*.*)')
-        if file_path:
-            self.data_manager.load_chart_file(file_path)
-
-    def update_zero_count_handling(self, bool_type):
-        self.data_manager.chart_data['place_below_floor'] = bool_type
-        self.figure_manager.new_chart(self.data_manager.chart_data['start_date'])
-        self.chart_app.set_interaction_mode()  # Make sure current mode is enabled for key handling
-
-    def update_cel_fan(self, status):
-        self.data_manager.user_preferences['div_deceleration'] = bool(status)
-        self.figure_manager.drag_fan_manager.update_visibility()
-        self.event_bus.emit('refresh_chart')
-
-    def set_data_folder(self):
-        folder_path = QFileDialog.getExistingDirectory(self.chart_app, "Select Folder", QDir.homePath())
-        if folder_path:
-            short_path = Path(*Path(folder_path).parts[-1:])
-            self.chart_app.settings_folder_btn.setText(str(short_path))
-            self.chart_app.settings_folder_btn.setToolTip(folder_path)
-            self.data_manager.user_preferences['home_folder'] = folder_path
-
-    def change_chart_type(self, index):
-        new_type = self.chart_app.chart_type_settings_dropdown.itemData(index)
-        self.data_manager.chart_data['type'] = new_type
-        self.event_bus.emit('new_chart', self.data_manager.chart_data['start_date'])
-        self.event_bus.emit('view_mode_selected')
-
-    def cleanup_after_chart_update(self):
-        # Make sure current mode is enabled for key handling
-        self.chart_app.set_interaction_mode()
-        # Enable or disable timing checkboxes for view mode
-        self.chart_app.view_mode_widget.update_timing_checkboxes()
-
-        # Update the chart type dropdown to reflect the loaded chart type
-        chart_type = self.data_manager.chart_data['type']
-        index = self.chart_app.chart_type_settings_dropdown.findData(chart_type)
-        if index != -1:
-            current_index = self.chart_app.chart_type_settings_dropdown.currentIndex()
-            if current_index != index:
-                self.chart_app.chart_type_settings_dropdown.blockSignals(True)
-                self.chart_app.chart_type_settings_dropdown.setCurrentIndex(index)
-                self.chart_app.chart_type_settings_dropdown.blockSignals(False)
-
-        # Display name of loaded chart file
-        file_path = self.data_manager.chart_data['chart_file_path']
-        unix_id = self.data_manager.user_preferences['unix_id']
-        all_import_paths = self.data_manager.chart_data['import_path']
-        if unix_id in all_import_paths.keys():
-            import_path = all_import_paths[unix_id]
+            # Start the event loop
+            return gui.run_event_loop()
         else:
-            import_path = ''
+            gui.show_error_dialog(MESSAGES["NO_UPDATES"])
+            return 1
 
-        if file_path:
-            file_name = os.path.splitext(os.path.basename(file_path))[0]
-            truncated_import_path = os.path.sep.join(import_path.split(os.path.sep)[-3:])
-            new_window_title = f"{self.chart_app.window_title_str} | {file_name} | {truncated_import_path}"
-            if self.chart_app.windowTitle() != new_window_title:
-                self.chart_app.setWindowTitle(new_window_title)
-
-        self.event_bus.emit('refresh_trend_column_list')
-        self.event_bus.emit('refresh_style_columns')
-
-        # Set trend fit after chart type
-        chart_mapping = {
-            'Daily': 'Weekly',
-            'Weekly': 'Monthly (Weekly x4)',
-            'Monthly': 'Six-monthly (Weekly x26)',
-            'Yearly': 'Five-yearly (Yearly x5)',
-            'DailyMinute': 'Weekly (standard)',
-            'WeeklyMinute': 'Monthly (Weekly x4)',
-            'MonthlyMinute': 'Six-monthly (Weekly x26)',
-            'YearlyMinute': 'Five-yearly (Yearly x5)'
-        }
-        chart_type = self.data_manager.chart_data['type']
-        cel_unit = chart_mapping[chart_type]
-        self.event_bus.emit('set_celeration_unit', data={'cel_unit': cel_unit})
-
-        self.event_bus.emit('refresh_view_dropdown')
-        self.event_bus.emit('view_update_aggregate_dropdown')
-
-    def change_width(self, new_width):
-        self.data_manager.user_preferences['width'] = new_width
-        self.event_bus.emit('new_chart', self.data_manager.chart_data['start_date'])
-
-    def phase_click(self, event):
-        # Update phase line form
-        coordinates = self.figure_manager.phase_line_handle_click(event, self.chart_app.phase_mode_widget.phase_change_input.text())
-        if coordinates:  # In case the user clicked outside the graph
-            x, y = coordinates
-            if x in self.figure_manager.x_to_date.keys():
-                # self.chart_app.phase_mode_widget.phase_y_input.setText(str(y))
-                date = self.figure_manager.x_to_date[x]
-                date_qt = QDate(date.year, date.month, date.day)
-                self.chart_app.phase_mode_widget.phase_date_input.setDate(date_qt)
-
-    def aim_click(self, event):
-        info = self.figure_manager.aim_click_info(event, self.chart_app.aim_mode_widget.aim_text_input.text())
-        click_event = info[0] if info is not None else None
-
-        if click_event:
-            line_type = self.data_manager.user_preferences['aim_line_type']
-
-            if click_event == 'first' and line_type == 'Slope':
-                _, baseline, d1 = info
-                self.chart_app.aim_mode_widget.aim_baseline_input.setText(str(baseline))
-                self.chart_app.aim_mode_widget.aim_target_input.setText('')
-                self.chart_app.aim_mode_widget.aim_start_date_input.setDate(QDate(d1.year, d1.month, d1.day))
-            elif click_event == 'second' and line_type == 'Slope':
-                _, d2, baseline, target = info
-                self.chart_app.aim_mode_widget.aim_target_input.setText(str(target))
-                self.chart_app.aim_mode_widget.aim_end_date_input.setDate(QDate(d2.year, d2.month, d2.day))
-                self.chart_app.aim_mode_widget.aim_text_input.setText(self.figure_manager.aim_manager.slope)
-            elif click_event == 'first' and line_type == 'Flat':
-                _, target, d1 = info
-                self.chart_app.aim_mode_widget.aim_baseline_input.setText('')
-                self.chart_app.aim_mode_widget.aim_target_input.setText(str(target))
-                self.chart_app.aim_mode_widget.aim_start_date_input.setDate(QDate(d1.year, d1.month, d1.day))
-            elif click_event == 'second' and line_type == 'Flat':
-                _, d2, baseline, target = info
-                self.chart_app.aim_mode_widget.aim_end_date_input.setDate(QDate(d2.year, d2.month, d2.day))
-
-    def trend_click(self, event):
-        self.event_bus.emit('trend_on_click', event)
-        self.chart_app.trend_adjust_dates()
-
-    def note_click(self, event):
-        x, y = event.xdata, event.ydata
-        if x and y:  # Check if valid coordinates are passed
-            y = self.data_manager.format_y_value(y)
-            x = int(x)
-            if x in self.figure_manager.x_to_date.keys():
-                x_date = self.figure_manager.x_to_date[x].strftime(self.data_manager.standard_date_string)
-                dialog = NoteDialog(x_date, y, self.chart_app)  # Pass the main window as parent
-                dialog.exec()
-
-    def point_click(self, event):
-        self.figure_manager.point_on_click(event)
-
-    def plot_click(self, event):
-        if event.inaxes and event.xdata is not None:
-            x = self.figure_manager.data_manager.find_closest_x(int(event.xdata), self.figure_manager.Chart.date_to_pos)
-            if x in self.figure_manager.x_to_date:
-                date = self.figure_manager.x_to_date[x]
-                self.event_bus.emit('plot_date_clicked', date)
-
-    def test_angle(self, show):
-        self.figure_manager.settings_test_angle(show)
-
-    def choose_color(self, color_category):
-        # Convert the stored color code to a QColor object
-        initial_color = QColor(self.data_manager.user_preferences[color_category])
-        QColorDialog.setCustomColor(0, QColor('#5ac9e2'))  # Behavior & Research Company hex extracted
-        QColorDialog.setCustomColor(1, QColor('#6ad1e3'))  # Behavior & Research Company hex from website (1)
-        QColorDialog.setCustomColor(2, QColor('#05c3de'))  # Behavior & Research Company hex from website (2)
-        QColorDialog.setCustomColor(3, QColor('#71B8FF'))  # My original choice of font color
-        QColorDialog.setCustomColor(4, QColor('#5a93cc'))  # My original choice of grid color
-        color = QColorDialog.getColor(initial_color)
-        # Carl Binder's grid choice on fluency.org: #55AAFF (font was just black)
-
-        if color.isValid():
-            self.data_manager.user_preferences[color_category] = color.name()
-            self.event_bus.emit('new_chart', self.data_manager.chart_data['start_date'])
-            self.chart_app.set_interaction_mode()
-
-    def trigger_user_prompt(self, data):
-        prompt = UserPrompt(
-            title=data['title'],
-            message=data['message'],
-            choice=data['choice'],
-            ok_text=data.get('ok_text', 'OK'),
-            cancel_text=data.get('cancel_text', 'Cancel')
-        )
-        return prompt.display()
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        gui.show_error_dialog(MESSAGES["ERROR_OCCURRED"].format(str(e)))
+        return 1
 
 
-app = QApplication(sys.argv)
-app.setStyleSheet(styles.general_stylesheet)
-window = ChartApp()
-window.show()
-sys.exit(app.exec())
+if __name__ == "__main__":
+    if DEBUGGING:
+        logger.set_level(logging.DEBUG)
+    sys.exit(main())

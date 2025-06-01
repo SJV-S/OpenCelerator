@@ -1,16 +1,6 @@
-from resources.resources_rc import *
-
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QRadioButton, QDialogButtonBox, QGroupBox, QHBoxLayout, QLineEdit, QLabel, QPushButton, QGridLayout, QSpinBox, QScrollArea, QComboBox, QListWidget,
-                               QColorDialog, QListWidgetItem, QDoubleSpinBox, QApplication, QFrame, QStackedLayout, QTextEdit, QMessageBox, QFormLayout, QWidget, QSizePolicy)
-from PySide6.QtCore import Qt, QUrl, QTimer, QEvent, QObject
-from PySide6.QtGui import QIcon, QDesktopServices, QPixmap
-from EventBus import EventBus
-import pandas as pd
-import re
-import warnings
-
+from app_imports import *
+from EventStateManager import EventBus
 from DataManager import DataManager
-import calendar
 
 
 class InputDialog(QDialog):
@@ -458,7 +448,11 @@ class ConfigureTrendLinesDialog(QDialog):
         self.figure_manager = figure_manager
         self.data_manager = DataManager()
         self.event_bus = EventBus()
-        self.items = self.data_manager.chart_data[trend_style]
+
+        # Get all trend items but filter them to only include ones for the current column
+        all_items = self.data_manager.chart_data[trend_style]
+        self.items = [item for item in all_items if item.get('user_col') == user_col]
+
         self.default_item = self.data_manager.user_preferences[trend_style + "_style"]
         self.line_style_map = {"Solid": "-", "Dashed": "--", "Dotted": ":"}
 
@@ -586,29 +580,65 @@ class ConfigureTrendLinesDialog(QDialog):
             'linestyle': self.line_style_map[self.line_style_combobox.currentText()],
         }
 
-        user_col = self.event_bus.emit('get_current_trend_column')
-        col_instance = self.data_manager.plot_columns[user_col]
+        # Get the plot column instance for this user_col
+        col_instance = self.data_manager.plot_columns[self.user_col]
+
+        # Find the corresponding trend in trend_set by matching with the trend_data
         trend_set = col_instance.get_trend_set()
         if trend_set:
-            trend_elements, trend_data = trend_set[selected_item]
+            # Try to find the matching trend in the trend_set
+            found_index = None
+            for i, (trend_elements, trend_data) in enumerate(trend_set):
+                if trend_data is old_trend or (trend_data and trend_data.get('date1') == old_trend.get('date1') and
+                                               trend_data.get('date2') == old_trend.get('date2')):
+                    found_index = i
+                    break
 
-            # Update trend elements styling
-            trend_elements['trend_line'].set_color(new_trend['line_color'])
-            trend_elements['trend_line'].set_linewidth(new_trend['linewidth'])
-            trend_elements['trend_line'].set_linestyle(new_trend['linestyle'])
-            if trend_elements['upper_line']:
-                trend_elements['upper_line'].set_linestyle(new_trend['linestyle'])
-            if trend_elements['lower_line']:
-                trend_elements['lower_line'].set_linestyle(new_trend['linestyle'])
-            trend_elements['cel_label'].set_color(new_trend['font_color'])
-            trend_elements['cel_label'].set_size(new_trend['font_size'])
-            trend_elements['cel_label'].set_text(new_trend['text'])
+            if found_index is not None:
+                trend_elements, _ = trend_set[found_index]
 
-            # Update trend data dictionary
-            trend_data.update(new_trend)
+                # Update trend elements styling - main trend line
+                if trend_elements.get('trend_line'):
+                    trend_elements['trend_line'].set_color(new_trend['line_color'])
+                    trend_elements['trend_line'].set_linewidth(new_trend['linewidth'])
+                    trend_elements['trend_line'].set_linestyle(new_trend['linestyle'])
 
-            self.figure_manager.refresh()
-            self.refresh_list_box()
+                # Update bounce lines - specifically fixing the issue with bounce lines
+                if trend_elements.get('upper_line'):
+                    trend_elements['upper_line'].set_color(new_trend['line_color'])
+                    trend_elements['upper_line'].set_linestyle(new_trend['linestyle'])
+                    trend_elements['upper_line'].set_linewidth(new_trend['linewidth'])
+
+                if trend_elements.get('lower_line'):
+                    trend_elements['lower_line'].set_color(new_trend['line_color'])
+                    trend_elements['lower_line'].set_linestyle(new_trend['linestyle'])
+                    trend_elements['lower_line'].set_linewidth(new_trend['linewidth'])
+
+                # Update text label
+                if trend_elements.get('cel_label'):
+                    trend_elements['cel_label'].set_color(new_trend['font_color'])
+                    trend_elements['cel_label'].set_fontsize(new_trend['font_size'])
+                    trend_elements['cel_label'].set_text(new_trend['text'])
+
+                # Update the trend_data in both places
+                trend_set[found_index] = (trend_elements, new_trend)
+                self.items[selected_item] = new_trend
+
+                # Also update the original trend list in chart_data
+                trend_type = self.trend_style
+                all_trends = self.data_manager.chart_data[trend_type]
+
+                # Find and update the matching trend in the original list
+                for i, trend in enumerate(all_trends):
+                    if (trend.get('user_col') == self.user_col and
+                            trend.get('date1') == old_trend.get('date1') and
+                            trend.get('date2') == old_trend.get('date2')):
+                        all_trends[i] = new_trend
+                        break
+
+        # Force a refresh of the figure to show all changes including bounce lines
+        self.figure_manager.refresh()
+        self.refresh_list_box()
 
     def refresh_list_box(self):
         self.list_widget.clear()
@@ -646,8 +676,29 @@ class ConfigureTrendLinesDialog(QDialog):
     def delete_selected_item(self, selected_item):
         if selected_item != -1:
             col_instance = self.data_manager.plot_columns[self.user_col]
-            col_instance.remove_trend(selected_item)
+
+            # Get the trend data for the selected item
+            selected_trend = self.items[selected_item]
+
+            # Find the corresponding trend in trend_set by matching date1 and date2
+            trend_set = col_instance.get_trend_set()
+            if trend_set:
+                # Try to find the matching trend in the trend_set
+                found_index = None
+                for i, (_, trend_data) in enumerate(trend_set):
+                    if (trend_data and trend_data.get('date1') == selected_trend.get('date1') and
+                            trend_data.get('date2') == selected_trend.get('date2')):
+                        found_index = i
+                        break
+
+                if found_index is not None:
+                    # Remove from the column instance's trend_set
+                    col_instance.remove_trend(found_index)
+
+            # Also remove from the items list and the list widget
+            self.items.pop(selected_item)
             self.list_widget.takeItem(selected_item)
+
             self.setGeometry(300, 300, 400, 300)
             self.figure_manager.refresh()
 
@@ -1251,6 +1302,14 @@ class DataColumnMappingDialog(QDialog):
         return falls_back_to_dateutil
 
     def confirm_mapping(self):
+        # Only for minute charts, check if the Floor/minute field is selected
+        if self.is_minute_chart and 'Floor' in self.dropdowns_dict:
+            if self.dropdowns_dict['Floor'].currentText() == self.column_placeholder:
+                # Highlight only the Floor field with a red background
+                self.dropdowns_dict['Floor'].setStyleSheet("QComboBox { background-color: #FF9999; }")
+                return  # Don't proceed with confirmation
+
+        # If we get here, proceed with the regular confirmation
         column_map = {'d': self.date_dropdown.currentText()}
 
         field_key_map = {'Dot': 'c', 'X': 'i', 'Floor': 'm'}
@@ -1283,12 +1342,19 @@ class DataColumnMappingDialog(QDialog):
 
 
 class UserPrompt(QDialog):
-    def __init__(self, title="Message", message="", choice=False, ok_text="OK", cancel_text="Cancel", parent=None):
+    def __init__(self, title="Message", message="", options=None, parent=None):
         super().__init__(parent)
+        self.selected_option = -1
+
         self._setup_window(title)
         self._create_layout()
         self._add_message_label(message)
-        self._add_button_box(choice, ok_text, cancel_text)
+
+        if options and isinstance(options, list) and len(options) > 0:
+            self._add_option_buttons(options)
+        else:
+            self._add_button_box(True, "OK", "Cancel")
+
         self._apply_styles()
 
     def _setup_window(self, title):
@@ -1304,7 +1370,28 @@ class UserPrompt(QDialog):
         self.message_label.setWordWrap(True)
         self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.message_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.message_label.setMinimumWidth(200)
         self.layout.addWidget(self.message_label)
+
+    def _add_option_buttons(self, options):
+        self.buttons_layout = QVBoxLayout()
+        self.buttons = []
+
+        for i, option_text in enumerate(options):
+            button = QPushButton(option_text, self)
+            button.clicked.connect(lambda checked, idx=i: self._on_option_selected(idx))
+            button.setStyleSheet("font-size: 14px; padding: 8px 16px; text-align: center;")
+            self.buttons.append(button)
+            self.buttons_layout.addWidget(button)
+
+        self.layout.addLayout(self.buttons_layout)
+
+        # No need for an additional cancel button as the dialog can be closed with X
+        # or ESC key, which will return -1
+
+    def _on_option_selected(self, index):
+        self.selected_option = index
+        self.accept()
 
     def _add_button_box(self, choice, ok_text="OK", cancel_text="Cancel"):
         buttons = (
@@ -1322,12 +1409,6 @@ class UserPrompt(QDialog):
 
     def _apply_styles(self):
         self.message_label.setStyleSheet("font-size: 16px; padding: 10px; font-style: normal;")
-        self.button_box.setStyleSheet("""
-            QPushButton {
-                font-size: 14px;
-                padding: 8px 16px;
-            }
-        """)
         self.setStyleSheet("QDialog { padding: 20px; }")
 
     def display(self):
@@ -1336,10 +1417,14 @@ class UserPrompt(QDialog):
         self.setWindowFlags(
             Qt.WindowType.Dialog |
             Qt.WindowType.CustomizeWindowHint |
-            Qt.WindowType.WindowTitleHint
+            Qt.WindowType.WindowTitleHint |
+            Qt.WindowType.WindowCloseButtonHint  # Add close button to allow cancel
         )
 
-        return self.exec() == QDialog.DialogCode.Accepted
+        result = self.exec() == QDialog.DialogCode.Accepted
+        if result and hasattr(self, 'selected_option'):
+            return self.selected_option
+        return -1 if not result else 0
 
 
 class ModifyColumns(QDialog):
@@ -1434,7 +1519,7 @@ class ModifyColumns(QDialog):
 
         # Add plus button inside scroll area
         self.add_column_button = QPushButton()
-        self.add_column_button.setToolTip('Add column')
+        self.add_column_button.setToolTip(f'Add {self.data_manager.ui_column_label.lower()}')
         self.add_column_button.setIcon(QIcon(':/images/plus-solid.svg'))
         self.add_column_button.setStyleSheet(self.button_styles['large'])
         self.add_column_button.clicked.connect(lambda: self.add_column_input())
@@ -1698,8 +1783,974 @@ class ModifyColumns(QDialog):
         # Apply updates
         self.data_manager.plot_columns = new_plot_columns
         self.data_manager.chart_data['column_map'] = new_column_map
-        self.event_bus.emit('refresh_plot_mode_widget')
+        self.event_bus.emit("reload_current_mode")
         self.event_bus.emit('update_legend')
         self.data_manager.handle_data_saving()
 
         self.accept()
+
+
+class SpreadsheetDialog(QDialog):
+    """
+    A dialog that provides a spreadsheet-like interface for viewing and editing chart data.
+    Allows users to navigate through data by calendar unit, edit cells, and delete rows.
+    """
+    dataChanged = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Data Editor")
+        self.setMinimumSize(800, 600)
+
+        # Initialize managers
+        self.data_manager = DataManager()
+        self.event_bus = EventBus()
+
+        # Get chart type and calendar unit
+        self.chart_type = self.data_manager.chart_data['type']
+        self.calendar_unit = self.chart_type[0]  # D, W, M, Y
+        self.is_minute_chart = 'Minute' in self.chart_type
+
+        # Current view date and data
+        self.current_view_date = pd.Timestamp.now()
+        self.df_view = None
+        self.original_df = None
+        self.start_date = None
+        self.end_date = None
+
+        self.setup_ui()
+        self.refresh_data()
+
+    def setup_ui(self):
+        main_layout = QVBoxLayout(self)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # === LEFT SIDEBAR ===
+        sidebar = QFrame()
+        sidebar.setFrameShape(QFrame.Shape.StyledPanel)
+        sidebar_layout = QVBoxLayout(sidebar)
+
+        # Calendar unit mapping
+        calendar_unit_map = {'D': 'Day', 'W': 'Week', 'M': 'Month', 'Y': 'Year'}
+        calendar_unit_text = calendar_unit_map.get(self.calendar_unit, 'Dates')
+
+        dates_group = QGroupBox(calendar_unit_text)
+        dates_group.setStyleSheet("QGroupBox { border: none; }")
+        dates_layout = QVBoxLayout(dates_group)
+
+        self.dates_list = QListWidget()
+        self.dates_list.itemClicked.connect(self.on_date_list_item_clicked)
+        dates_layout.addWidget(self.dates_list)
+        sidebar_layout.addWidget(dates_group)
+
+        # === MAIN CONTENT ===
+        main_content = QFrame()
+        main_content_layout = QVBoxLayout(main_content)
+
+        self.table = QTableWidget()
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_context_menu)
+        self.table.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed)
+        main_content_layout.addWidget(self.table)
+
+        # Button bar
+        button_layout = QHBoxLayout()
+
+        add_row_btn = QPushButton("Add Row")
+        add_row_btn.clicked.connect(self.add_row)
+
+        delete_row_btn = QPushButton("Delete Selected")
+        delete_row_btn.clicked.connect(self.delete_selected_rows)
+
+        export_csv_btn = QPushButton("Export CSV")
+        export_csv_btn.clicked.connect(self.export_to_csv)
+
+        apply_btn = QPushButton("Apply")
+        apply_btn.clicked.connect(self.apply_changes)
+        apply_btn.setStyleSheet("background-color: #96deeb;")
+
+        button_layout.addWidget(add_row_btn)
+        button_layout.addWidget(delete_row_btn)
+        button_layout.addWidget(export_csv_btn)
+        button_layout.addStretch()
+        button_layout.addWidget(apply_btn)
+        main_content_layout.addLayout(button_layout)
+
+        # Add to splitter and layout
+        splitter.addWidget(sidebar)
+        splitter.addWidget(main_content)
+        splitter.setSizes([200, 600])
+        main_layout.addWidget(splitter)
+
+    def refresh_data(self):
+        """Refresh the dialog with current data"""
+        self.original_df = self.data_manager.df_raw.copy()
+
+        # Set initial view date
+        if self.original_df is not None and not self.original_df.empty and 'd' in self.original_df.columns:
+            self.current_view_date = pd.to_datetime(self.original_df['d']).min()
+        else:
+            self.current_view_date = pd.Timestamp.now()
+
+        self.populate_dates_list()
+        self.calculate_view_dates()
+        self.update_view_data()
+        self.populate_table()
+
+    def calculate_view_dates(self):
+        """Calculate start and end dates for the current view based on calendar unit"""
+        current_date = self.current_view_date
+
+        if self.calendar_unit == 'D':
+            self.start_date = pd.Timestamp(current_date.year, current_date.month, current_date.day)
+            self.end_date = self.start_date + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        elif self.calendar_unit == 'W':
+            weekday = current_date.weekday()
+            sunday_offset = weekday + 1 if weekday < 6 else 0
+            self.start_date = current_date - pd.Timedelta(days=sunday_offset)
+            self.start_date = pd.Timestamp(self.start_date.year, self.start_date.month, self.start_date.day)
+            self.end_date = self.start_date + pd.Timedelta(days=7) - pd.Timedelta(seconds=1)
+        elif self.calendar_unit == 'M':
+            self.start_date = pd.Timestamp(current_date.year, current_date.month, 1)
+            if current_date.month == 12:
+                self.end_date = pd.Timestamp(current_date.year + 1, 1, 1) - pd.Timedelta(seconds=1)
+            else:
+                self.end_date = pd.Timestamp(current_date.year, current_date.month + 1, 1) - pd.Timedelta(seconds=1)
+        elif self.calendar_unit == 'Y':
+            self.start_date = pd.Timestamp(current_date.year, 1, 1)
+            self.end_date = pd.Timestamp(current_date.year, 12, 31, 23, 59, 59)
+
+    def update_view_data(self):
+        """Update the data view based on the current date range"""
+        if self.original_df is not None and not self.original_df.empty:
+            df = self.original_df.copy()
+            df['d'] = pd.to_datetime(df['d'])
+            self.df_view = df[(df['d'] >= self.start_date) & (df['d'] <= self.end_date)].copy()
+            self.df_view = self.df_view.sort_values('d')
+
+    def populate_table(self):
+        """Populate the table with data from the current view"""
+        self.table.clear()
+
+        if self.df_view is None or self.df_view.empty:
+            # Set up empty table with headers
+            column_map = self.data_manager.chart_data['column_map']
+            headers = ['Date']
+            if self.is_minute_chart:
+                headers.append('Minutes')
+            for col_key, col_name in column_map.items():
+                if col_key not in ['d', 'm']:
+                    headers.append(col_name)
+
+            self.table.setColumnCount(len(headers))
+            self.table.setHorizontalHeaderLabels(headers)
+            self.table.setRowCount(0)
+            return
+
+        # Get column map and setup columns
+        column_map = self.data_manager.chart_data['column_map']
+        sys_cols = ['d'] + (['m'] if self.is_minute_chart else [])
+        data_cols = sorted([col for col in self.df_view.columns if col not in ['d', 'm']],
+                           key=lambda x: ('z' + x if not x.startswith('o') else x))
+        all_cols = sys_cols + data_cols
+
+        # Create headers
+        headers = []
+        for col in all_cols:
+            if col == 'd':
+                headers.append('Date')
+            elif col == 'm':
+                headers.append('Minutes')
+            else:
+                # Find user column name
+                headers.append(next((user_col for sys_col, user_col in column_map.items() if sys_col == col), col))
+
+        # Set table dimensions and headers
+        self.table.setColumnCount(len(headers))
+        self.table.setRowCount(len(self.df_view))
+        self.table.setHorizontalHeaderLabels(headers)
+
+        # Populate data
+        for row_idx, (_, row_data) in enumerate(self.df_view.iterrows()):
+            for col_idx, col_name in enumerate(all_cols):
+                cell_value = row_data.get(col_name, '')
+
+                if col_name == 'd':
+                    date_str = pd.to_datetime(cell_value).strftime('%Y-%m-%d')
+                    item = QTableWidgetItem(date_str)
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                else:
+                    if pd.isna(cell_value):
+                        item = QTableWidgetItem("")  # Show empty string for NaN
+                    elif isinstance(cell_value, (float, int)):
+                        formatted_value = self.data_manager.format_y_value(cell_value)
+                        item = QTableWidgetItem(str(formatted_value))
+                    else:
+                        item = QTableWidgetItem(str(cell_value))
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+                item.setData(Qt.ItemDataRole.UserRole, col_name)
+                self.table.setItem(row_idx, col_idx, item)
+
+        # Set column resize modes
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+
+        # Set numeric delegates for editing
+        for col_idx in range(1, len(headers)):
+            self.table.setItemDelegateForColumn(col_idx, self.create_numeric_delegate())
+
+    def populate_dates_list(self):
+        """Populate the dates list with all unique dates in the data"""
+        self.dates_list.clear()
+
+        if self.original_df is None or self.original_df.empty:
+            return
+
+        df = self.original_df.copy()
+        df['d'] = pd.to_datetime(df['d'])
+        grouped_dates = []
+
+        # Group dates by calendar unit - handle each case separately due to pandas limitations
+        if self.calendar_unit == 'D':
+            unique_dates = df['d'].dt.floor('D').unique()
+            for date in sorted(unique_dates):
+                formatted_date = date.strftime('%Y-%m-%d')
+                grouped_dates.append((date, formatted_date))
+        elif self.calendar_unit == 'W':
+            df['week_start'] = df['d'].dt.floor('D') - pd.to_timedelta(df['d'].dt.dayofweek, unit='D')
+            unique_dates = df['week_start'].unique()
+            for date in sorted(unique_dates):
+                week_end = date + pd.Timedelta(days=6)
+                formatted_date = f"{date.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}"
+                grouped_dates.append((date, formatted_date))
+        elif self.calendar_unit == 'M':
+            # Create month start dates manually to avoid pandas floor('M') issue
+            df['month_start'] = pd.to_datetime(df['d'].dt.to_period('M').dt.start_time)
+            unique_dates = df['month_start'].unique()
+            for date in sorted(unique_dates):
+                formatted_date = date.strftime('%B %Y')
+                grouped_dates.append((date, formatted_date))
+        elif self.calendar_unit == 'Y':
+            df['year_start'] = pd.to_datetime(df['d'].dt.year, format='%Y')
+            unique_dates = df['year_start'].unique()
+            for date in sorted(unique_dates):
+                formatted_date = date.strftime('%Y')
+                grouped_dates.append((date, formatted_date))
+
+        # Add items to list and calculate optimal width
+        max_text_width = 0
+        font_metrics = QFontMetrics(self.dates_list.font())
+
+        for date_value, date_text in grouped_dates:
+            item = QListWidgetItem(date_text)
+            item.setData(Qt.ItemDataRole.UserRole, date_value)
+            self.dates_list.addItem(item)
+            max_text_width = max(max_text_width, font_metrics.horizontalAdvance(date_text))
+
+        # Set optimal list width
+        optimal_width = max_text_width + 39  # 16 scrollbar + 8 padding + 15 extra
+        self.dates_list.setFixedWidth(optimal_width)
+
+        # Find and set sidebar width
+        sidebar = self.dates_list.parent().parent()
+        if sidebar:
+            sidebar.setFixedWidth(optimal_width + 4)
+
+        # Update splitter sizes
+        splitter = self.findChild(QSplitter)
+        if splitter:
+            total_width = sum(splitter.sizes())
+            splitter.setSizes([optimal_width + 4, total_width - optimal_width - 4])
+
+        self.highlight_current_date_in_list()
+
+    def highlight_current_date_in_list(self):
+        """Highlight the current date/period in the dates list"""
+        for i in range(self.dates_list.count()):
+            item = self.dates_list.item(i)
+            date_value = item.data(Qt.ItemDataRole.UserRole)
+
+            # Check if current date falls within this period
+            match_conditions = {
+                'D': date_value.date() == self.current_view_date.date(),
+                'W': date_value <= self.current_view_date <= date_value + pd.Timedelta(days=6),
+                'M': (date_value.month == self.current_view_date.month and
+                      date_value.year == self.current_view_date.year),
+                'Y': date_value.year == self.current_view_date.year
+            }
+
+            if match_conditions.get(self.calendar_unit, False):
+                self.dates_list.setCurrentItem(item)
+                break
+
+    def on_date_list_item_clicked(self, item):
+        """Handle click on a date in the dates list"""
+        date_value = item.data(Qt.ItemDataRole.UserRole)
+        self.current_view_date = date_value
+        self.calculate_view_dates()
+        self.update_view_data()
+        self.populate_table()
+
+    def show_context_menu(self, position):
+        """Show context menu for table"""
+        context_menu = QMenu(self)
+
+        add_action = QAction("Add Row", self)
+        add_action.triggered.connect(self.add_row)
+
+        delete_action = QAction("Delete Row", self)
+        delete_action.triggered.connect(self.delete_selected_rows)
+        delete_action.setEnabled(len(self.table.selectedItems()) > 0)
+
+        context_menu.addAction(add_action)
+        context_menu.addAction(delete_action)
+        context_menu.exec(self.table.mapToGlobal(position))
+
+    def add_row(self):
+        """Add a new row to the table"""
+        current_rows = self.table.rowCount()
+        self.table.insertRow(current_rows)
+
+        column_map = self.data_manager.chart_data['column_map']
+
+        # Set date (non-editable)
+        date_str = self.current_view_date.strftime('%Y-%m-%d')
+        date_item = QTableWidgetItem(date_str)
+        date_item.setData(Qt.ItemDataRole.UserRole, 'd')
+        date_item.setFlags(date_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.table.setItem(current_rows, 0, date_item)
+
+        # Set default values for other columns
+        for col_idx in range(1, self.table.columnCount()):
+            header_text = self.table.horizontalHeaderItem(col_idx).text()
+
+            # Find system column key
+            sys_col = next((key for key, value in column_map.items() if value == header_text), None)
+
+            if sys_col:
+                default_value = "1" if sys_col == 'm' else "0"
+                item = QTableWidgetItem(default_value)
+                item.setData(Qt.ItemDataRole.UserRole, sys_col)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(current_rows, col_idx, item)
+
+    def delete_selected_rows(self):
+        """Delete selected rows from the table"""
+        selected_rows = {item.row() for item in self.table.selectedItems()}
+        for row in sorted(selected_rows, reverse=True):
+            self.table.removeRow(row)
+
+    def _collect_table_data(self):
+        """Helper method to collect data from table and return processed DataFrame"""
+        new_data_rows = []
+        column_map = self.data_manager.chart_data['column_map']
+
+        # Process each row in the table
+        for row_idx in range(self.table.rowCount()):
+            row_data = {}
+
+            # Process each column in the row
+            for col_idx in range(self.table.columnCount()):
+                item = self.table.item(row_idx, col_idx)
+                if not item:
+                    continue
+
+                sys_col = item.data(Qt.ItemDataRole.UserRole)
+                if not sys_col:
+                    continue
+
+                cell_value = item.text().strip()
+
+                if sys_col == 'd':
+                    row_data['d'] = pd.to_datetime(cell_value)
+                elif sys_col == 'm':
+                    minutes_val = float(cell_value) if cell_value else 1.0
+                    row_data['m'] = max(1.0, minutes_val)
+                else:
+                    if not cell_value:
+                        row_data[sys_col] = np.nan
+                    else:
+                        # Use pd.to_numeric which handles invalid values gracefully
+                        numeric_val = pd.to_numeric(cell_value, errors='coerce')
+                        if pd.isna(numeric_val):
+                            row_data[sys_col] = np.nan
+                        else:
+                            row_data[sys_col] = max(0, numeric_val)
+
+            if 'd' in row_data:
+                new_data_rows.append(row_data)
+
+        if not new_data_rows:
+            return pd.DataFrame()
+
+        # Convert to DataFrame
+        new_df = pd.DataFrame(new_data_rows)
+
+        # Ensure all required columns exist
+        all_sys_cols = set(column_map.keys())
+        for sys_col in all_sys_cols:
+            if sys_col not in new_df.columns:
+                if sys_col == 'm':
+                    new_df[sys_col] = 1.0
+                elif sys_col != 'd':
+                    new_df[sys_col] = np.nan
+
+        # Sort by date
+        return new_df.sort_values('d').reset_index(drop=True)
+
+    def export_to_csv(self):
+        """Export current data to CSV file"""
+        # Get current table data
+        export_df = self._collect_table_data()
+
+        if export_df.empty:
+            QMessageBox.warning(self, "Export Error", "No data to export.")
+            return
+
+        export_folder = self.event_bus.emit("get_user_preference", ['export_csv_folder', ''])
+        if not export_folder:
+            export_folder = self.event_bus.emit("get_user_preference", ['home_folder', ''])
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save CSV File", export_folder, "CSV Files (*.csv);;All Files (*)"
+        )
+
+        if not file_path:
+            return
+
+        if not file_path.endswith('.csv'):
+            file_path += '.csv'
+
+        # Save export directory preference
+        export_dir = str(Path(file_path).parent)
+        self.event_bus.emit("update_user_preference", ['export_csv_folder', export_dir])
+
+        # Prepare export dataframe
+        export_df['d'] = pd.to_datetime(export_df['d']).dt.strftime('%Y-%m-%d')
+
+        if not self.is_minute_chart and 'm' in export_df.columns:
+            export_df = export_df.drop(columns=['m'])
+
+        # Rename columns using column map
+        column_map = self.data_manager.chart_data['column_map']
+        rename_dict = {col: column_map[col] for col in export_df.columns if col in column_map}
+
+        if rename_dict:
+            export_df = export_df.rename(columns=rename_dict)
+
+        export_df.to_csv(file_path, index=False)
+        QMessageBox.information(self, "Export Successful", f"Data exported to {file_path}")
+
+    def apply_changes(self):
+        """Apply changes to the dataframe and close the dialog"""
+        new_df = self._collect_table_data()
+        if new_df.empty:
+            return
+
+        # Update data manager
+        self.data_manager.df_raw = new_df
+        column_map = self.data_manager.chart_data['column_map']
+
+        # Update plot columns
+        plot_column_keys_except_floor = [v for k, v in column_map.items() if k not in ['d', 'm']]
+
+        for user_col in plot_column_keys_except_floor:
+            if user_col not in self.data_manager.plot_columns:
+                sys_col = next((k for k, v in column_map.items() if v == user_col), None)
+                if sys_col:
+                    self.data_manager.plot_columns[user_col] = self.event_bus.emit(
+                        'get_data_point_column', {'sys_col': sys_col, 'user_col': user_col})
+
+        # Refresh all plot columns
+        for user_col in self.data_manager.plot_columns.keys():
+            self.data_manager.plot_columns[user_col].refresh_view()
+
+        # Handle minute column for minute charts
+        if self.is_minute_chart:
+            minute_col_name = column_map.get('m', 'minutes')
+            if minute_col_name not in self.data_manager.plot_columns:
+                self.data_manager.plot_columns[minute_col_name] = self.event_bus.emit(
+                    'get_data_point_column', {'sys_col': 'm', 'user_col': minute_col_name})
+            self.data_manager.plot_columns[minute_col_name].refresh_view()
+
+        # Refresh chart and save
+        self.event_bus.emit('update_legend')
+        self.event_bus.emit('refresh_chart')
+        self.data_manager.handle_data_saving()
+        self.dataChanged.emit()
+        self.accept()
+
+    def create_numeric_delegate(self):
+        """Create a numeric delegate for table cells"""
+
+        class NumericDelegate(QItemDelegate):
+            def createEditor(self, parent, option, index):
+                editor = QLineEdit(parent)
+                header_text = index.model().headerData(index.column(), Qt.Orientation.Horizontal)
+
+                if header_text == "Minutes":
+                    # Minutes column uses standard validator (no empty allowed)
+                    validator = QDoubleValidator(0, 1440, 2, editor)
+                    validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+                else:
+                    # Other numeric columns allow empty strings
+                    class IntValidator(QIntValidator):
+                        def validate(self, input_str, pos):
+                            if input_str == "":
+                                return (QValidator.State.Acceptable, input_str, pos)
+                            return super().validate(input_str, pos)
+
+                    validator = IntValidator(0, 999999, editor)
+
+                editor.setValidator(validator)
+                return editor
+
+        return NumericDelegate(self)
+
+
+class ChartBrowserDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.data_manager = DataManager()
+        self.event_bus = EventBus()
+        self.selected_chart_id = None
+        self.selected_file_path = None
+        self.chart_metadata_cache = {}  # Cache for chart metadata
+        self.current_location = self.data_manager.event_bus.emit("get_user_preference", ['last_open_tab', 'local'])
+
+        self.setWindowTitle("Chart Browser")
+        self.setMinimumSize(800, 600)
+
+        self.setup_ui()
+        self.load_charts()
+
+    def setup_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(8)
+
+        # Search bar with label
+        search_layout = QHBoxLayout()
+        search_layout.setSpacing(6)
+        search_label = QLabel("Search:")
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Filter by name, type, or credit lines")
+        self.search_input.textChanged.connect(self.filter_charts)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.search_input)
+        main_layout.addLayout(search_layout)
+
+        # Stacked widget for location views
+        self.stacked_widget = QStackedWidget()
+
+        # Create grids for each location
+        self.grid_local = self.create_charts_grid()
+        self.grid_cloud = self.create_charts_grid()
+        self.grid_other = self.create_charts_grid()
+
+        # Add message labels for cloud and other
+        self.cloud_label = QLabel("Coming in a future version")
+        self.cloud_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cloud_label.setStyleSheet("color: #888; font-size: 14px; padding: 20px;")
+
+        self.other_label = QLabel("Coming in a future version")
+        self.other_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.other_label.setStyleSheet("color: #888; font-size: 14px; padding: 20px;")
+
+        # Create container widgets for each grid
+        local_widget = QWidget()
+        local_layout = QVBoxLayout(local_widget)
+        local_layout.setContentsMargins(0, 0, 0, 0)
+        local_layout.addWidget(self.grid_local)
+
+        cloud_widget = QWidget()
+        cloud_layout = QVBoxLayout(cloud_widget)
+        cloud_layout.setContentsMargins(0, 0, 0, 0)
+        cloud_layout.addWidget(self.grid_cloud)
+        self.cloud_label.setParent(self.grid_cloud)
+
+        other_widget = QWidget()
+        other_layout = QVBoxLayout(other_widget)
+        other_layout.setContentsMargins(0, 0, 0, 0)
+        other_layout.addWidget(self.grid_other)
+        self.other_label.setParent(self.grid_other)
+
+        # Add widgets to stacked widget
+        self.stacked_widget.addWidget(local_widget)
+        self.stacked_widget.addWidget(cloud_widget)
+        self.stacked_widget.addWidget(other_widget)
+
+        # Add stacked widget to main layout
+        main_layout.addWidget(self.stacked_widget)
+
+        # Bottom bar layout with location buttons on left, control buttons on right
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setSpacing(8)
+
+        # Create location selector buttons with custom styling
+        self.location_buttons = []
+
+        # Location buttons - left side
+        location_layout = QHBoxLayout()
+        location_layout.setSpacing(0)  # Tighter spacing between buttons
+
+        for loc in ['local', 'cloud', 'other']:
+            button = QPushButton(loc.capitalize())
+            button.setCheckable(True)
+            button.setProperty("location", loc)
+            button.clicked.connect(self.on_location_button_clicked)
+
+            # Apply custom styling for tab-like buttons
+            button.setStyleSheet("""
+                QPushButton {
+                    border: 1px solid #c0c0c0;
+                    border-radius: 0;
+                    padding: 6px 12px;
+                    background-color: #f0f0f0;
+                    min-width: 80px;
+                }
+                QPushButton:checked {
+                    background-color: #e0e0e0;
+                    border-bottom: 3px solid #4080c0;
+                    font-weight: bold;
+                }
+                QPushButton:hover:!checked {
+                    background-color: #e8e8e8;
+                }
+            """)
+
+            location_layout.addWidget(button)
+            self.location_buttons.append(button)
+
+        # Add location buttons to left side of bottom bar
+        bottom_layout.addLayout(location_layout)
+
+        # Add a small spacer instead of a vertical line
+        spacer = QSpacerItem(20, 1, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
+        bottom_layout.addSpacerItem(spacer)
+
+        # Add a stretch to push the action buttons to the right
+        bottom_layout.addStretch(1)
+
+        # File operations
+        self.browse_button = QPushButton("Browse")
+        self.browse_button.clicked.connect(self.browse_for_json)
+        bottom_layout.addWidget(self.browse_button)
+
+        # Add delete button
+        self.delete_button = QPushButton("Delete")
+        self.delete_button.setEnabled(False)
+        self.delete_button.setStyleSheet("QPushButton { color: #a0a0a0; }")
+        self.delete_button.clicked.connect(self.delete_selected_chart)
+        bottom_layout.addWidget(self.delete_button)
+
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
+        bottom_layout.addWidget(self.cancel_button)
+
+        # Add the bottom bar to the main layout
+        main_layout.addLayout(bottom_layout)
+
+        # Now that all UI elements are created, set the active location
+        self.set_active_location(self.current_location)
+
+        # Set positions of message labels
+        self.resizeEvent(None)
+
+    def set_active_location(self, location):
+        """Set the active location and update UI"""
+        self.current_location = location
+        index = ['local', 'cloud', 'other'].index(location)
+
+        # Update stacked widget
+        self.stacked_widget.setCurrentIndex(index)
+
+        # Update button states
+        for button in self.location_buttons:
+            btn_loc = button.property("location")
+            button.setChecked(btn_loc == location)
+
+        # Save preference
+        self.data_manager.event_bus.emit("update_user_preference", ['last_open_tab', location])
+
+        # Update selection state
+        self.on_selection_changed()
+
+    def on_location_button_clicked(self):
+        """Handle location button clicks"""
+        button = self.sender()
+        location = button.property("location")
+        self.set_active_location(location)
+
+    def resizeEvent(self, event):
+        # Position message labels in center of their grids
+        if hasattr(self, 'cloud_label'):
+            self.cloud_label.setGeometry(0, 0, self.grid_cloud.width(), self.grid_cloud.height())
+
+        if hasattr(self, 'other_label'):
+            self.other_label.setGeometry(0, 0, self.grid_other.width(), self.grid_other.height())
+
+        super().resizeEvent(event) if event else None
+
+    def create_charts_grid(self):
+        """Create a list widget for displaying chart thumbnails with consistent styling"""
+        grid = QListWidget()
+        grid.setViewMode(QListWidget.ViewMode.IconMode)
+        grid.setIconSize(QSize(120, 100))
+        grid.setResizeMode(QListWidget.ResizeMode.Adjust)
+        grid.setMovement(QListWidget.Movement.Static)
+        grid.setGridSize(QSize(160, 160))
+        grid.setSpacing(6)
+        grid.setWordWrap(True)
+        grid.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+
+        # Set stylesheet for grid items
+        grid.setStyleSheet("""
+            QListWidget::item {
+                border: 1px solid transparent;
+                padding: 2px;
+                background-color: #f5f5f5;
+            }
+            QListWidget::item:selected {
+                background: #d0e7f7;
+                border: 1px solid #99c9ef;
+            }
+            QListWidget::item:hover {
+                background: #e8f0f8;
+                border: 1px solid #c0d0e0;
+            }
+            QListWidget {
+                padding: 4px;
+                background-color: #f3f3f3;
+            }
+        """)
+
+        grid.itemDoubleClicked.connect(self.chart_double_clicked)
+        grid.itemSelectionChanged.connect(self.on_selection_changed)
+        return grid
+
+    def delete_selected_chart(self):
+        # Get the active grid based on current location
+        active_grid = getattr(self, f"grid_{self.current_location}")
+
+        # Get the currently selected chart
+        selected_items = active_grid.selectedItems()
+        if not selected_items:
+            return
+
+        # Get the chart_id from the selected item
+        chart_id = selected_items[0].data(Qt.ItemDataRole.UserRole)
+
+        # Use the user prompt system to confirm deletion
+        data = {
+            'title': "Delete Chart",
+            'message': f"Delete {chart_id}?",
+            'options': ['Yes', 'No']
+        }
+        result = self.event_bus.emit('trigger_user_prompt', data)
+
+        # Delete if user confirmed (selected "Yes")
+        if result == 0:  # "Yes" is index 0
+            # Delete the chart using event bus
+            self.event_bus.emit('delete_chart', chart_id)
+
+            # Refresh the chart grid
+            self.load_charts()
+
+    def on_selection_changed(self):
+        """Enable the Open and Delete buttons if a chart is selected"""
+        # Get active grid based on current location
+        active_grid = getattr(self, f"grid_{self.current_location}")
+
+        # Only enable buttons for Local tab for now
+        if self.current_location != 'local':
+            self.delete_button.setEnabled(False)
+            self.delete_button.setStyleSheet("QPushButton { color: #a0a0a0; }")
+            return
+
+        selected_items = active_grid.selectedItems()
+        is_selected = len(selected_items) > 0
+
+        # Enable/disable buttons
+        self.delete_button.setEnabled(is_selected)
+
+        # Visual indication for delete button
+        if is_selected:
+            self.delete_button.setStyleSheet("")
+        else:
+            self.delete_button.setStyleSheet("QPushButton { color: #a0a0a0; }")
+
+    def add_frame_to_pixmap(self, pixmap):
+        """Add a black frame around a pixmap"""
+        if pixmap.isNull():
+            return pixmap
+
+        # Create a slightly larger pixmap to accommodate the frame
+        frame_width = 2  # 2px border
+        width = pixmap.width() + (frame_width * 2)
+        height = pixmap.height() + (frame_width * 2)
+
+        framed_pixmap = QPixmap(width, height)
+        framed_pixmap.fill(Qt.GlobalColor.transparent)  # Start with transparent background
+
+        # Create painter for drawing
+        painter = QPainter(framed_pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Draw the original pixmap in the center
+        painter.drawPixmap(frame_width, frame_width, pixmap)
+
+        # Draw the black frame
+        painter.setPen(QPen(QColor(0, 0, 0), frame_width))
+        painter.drawRect(frame_width // 2, frame_width // 2,
+                         width - frame_width, height - frame_width)
+
+        painter.end()
+        return framed_pixmap
+
+    def load_charts(self):
+        # Clear all grids
+        self.grid_local.clear()
+        self.grid_cloud.clear()
+        self.grid_other.clear()
+
+        # Only load data for local tab for now
+        active_grid = self.grid_local
+
+        # Get chart IDs from SQLite database
+        chart_ids = self.data_manager.sqlite_manager.get_all_chart_ids()
+
+        # Clear metadata cache
+        self.chart_metadata_cache.clear()
+
+        for chart_id in chart_ids:
+            # Get metadata and thumbnail for the chart
+            metadata = self._get_chart_metadata(chart_id)
+            thumbnail_data = self.data_manager.sqlite_manager.get_chart_thumbnail(chart_id)
+
+            if metadata:
+                # Store metadata in cache for search filtering
+                self.chart_metadata_cache[chart_id] = metadata
+
+                # Create list item for the grid
+                item = QListWidgetItem()
+
+                # Set chart name
+                chart_name = Path(chart_id).stem
+
+                # Get chart type
+                chart_type = metadata.get('type', 'Unknown')
+
+                # Set display text - keep it shorter to ensure tight layout
+                item.setText(f"{chart_name}\n{chart_type}")
+
+                # Store metadata for search filtering
+                item.setData(Qt.ItemDataRole.UserRole, chart_id)
+
+                # Add credit lines as additional search data
+                credit_lines = metadata.get('credit', [])
+                if credit_lines and isinstance(credit_lines, (list, tuple)):
+                    credit_text = " ".join(str(line) for line in credit_lines)
+                    item.setData(Qt.ItemDataRole.UserRole + 1, credit_text)
+
+                # Set icon with black frame by creating a framed pixmap
+                if thumbnail_data:
+                    original_pixmap = QPixmap()
+                    original_pixmap.loadFromData(thumbnail_data)
+
+                    # Create a new pixmap with a border
+                    framed_pixmap = self.add_frame_to_pixmap(original_pixmap)
+                    item.setIcon(QIcon(framed_pixmap))
+                else:
+                    # Use a default icon if no thumbnail
+                    item.setIcon(QIcon.fromTheme("image-missing"))
+
+                # Set alignment
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+                # Add to grid view
+                active_grid.addItem(item)
+
+    def _get_chart_metadata(self, chart_id):
+        """Get metadata for a chart from the database"""
+        try:
+            # Query the database
+            conn = self.data_manager.sqlite_manager.connection
+            if not conn:
+                self.data_manager.sqlite_manager.connect()
+                conn = self.data_manager.sqlite_manager.connection
+
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"SELECT metadata FROM {self.data_manager.sqlite_manager.TABLE_CHART_METADATA} WHERE chart_id = ?",
+                    (chart_id,)
+                )
+                result = cursor.fetchone()
+
+                if result and result[0]:
+                    # Parse the JSON metadata
+                    return json.loads(result[0])
+
+            return None
+        except Exception as e:
+            print(f"Error retrieving chart metadata: {e}")
+            return None
+
+    def filter_charts(self):
+        """Filter charts based on search input - includes credit lines"""
+        search_text = self.search_input.text().lower()
+
+        # Only filter the current active grid
+        active_grid = getattr(self, f"grid_{self.current_location}")
+
+        if self.current_location == 'local':  # Only filter local tab (has actual data)
+            for i in range(active_grid.count()):
+                item = active_grid.item(i)
+                if item:
+                    # Get item text (name and type)
+                    item_text = item.text().lower()
+
+                    # Get credit lines from cached metadata
+                    chart_id = item.data(Qt.ItemDataRole.UserRole)
+                    credit_text = item.data(Qt.ItemDataRole.UserRole + 1) or ""
+                    credit_text = credit_text.lower()
+
+                    # Show item if search text is in either name, type, or credit lines
+                    # Only hide if: there is a search text AND it's not found in either place
+                    should_hide = bool(search_text) and (search_text not in item_text) and (
+                                search_text not in credit_text)
+                    item.setHidden(should_hide)
+
+    def chart_double_clicked(self, item):
+        """Handle double-click on a chart item"""
+        self.selected_chart_id = item.data(Qt.ItemDataRole.UserRole)
+        self.accept()
+
+    def browse_for_json(self):
+        """Open file dialog to browse for JSON file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            'Select chart file',
+            self.data_manager.user_preferences['home_folder'],
+            'JSON files (*.json);;All files (*.*)'
+        )
+
+        if file_path:
+            # Store both the chart_id (for database lookup) and the full file path
+            self.selected_chart_id = Path(file_path).stem
+            self.selected_file_path = file_path  # Store the full path
+            self.accept()
+
+    def get_selected_chart_path(self):
+        """Return the full path or ID of the selected chart"""
+        if self.selected_file_path:
+            return self.selected_file_path
+        elif self.selected_chart_id:
+            return self.selected_chart_id
+        return None
+

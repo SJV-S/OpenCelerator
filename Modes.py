@@ -1,16 +1,8 @@
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QTabWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-                               QGroupBox, QRadioButton, QLineEdit, QLabel, QDateEdit, QListWidget, QFileDialog, QCheckBox,
-                               QButtonGroup, QDialog, QComboBox, QMessageBox, QGridLayout, QStackedWidget, QSpinBox,
-                               QSpacerItem, QSizePolicy, QDoubleSpinBox, QColorDialog, QListWidgetItem, QFrame,
-                               QCalendarWidget, QDialogButtonBox, QScrollArea)
-from PySide6.QtGui import QDoubleValidator, QFont, QIcon, QIntValidator, QDesktopServices
-from PySide6.QtCore import Qt, QDate, QUrl, QEvent, QObject
-
-from Popups import InputDialog, ConfigurePhaseLinesDialog, ConfigureAimLinesDialog, ConfigureTrendLinesDialog, NoteDialog, ModifyColumns
+from app_imports import *
 from DataManager import DataManager
-from EventBus import EventBus
-from pathlib import Path
-import pandas as pd
+from EventStateManager import EventBus
+from Popups import InputDialog, ConfigurePhaseLinesDialog, ConfigureAimLinesDialog
+from Popups import ConfigureTrendLinesDialog, NoteDialog, ModifyColumns, SpreadsheetDialog
 
 
 class ModeWidget(QWidget):
@@ -65,7 +57,7 @@ class ModeWidget(QWidget):
         return super().eventFilter(obj, event)
 
 
-class DataModeWidget(ModeWidget):
+class StyleModeWidget(ModeWidget):
     def __init__(self, figure_manager):
         self.marker_style_map = {
             "Circle": "o", "Square": "s", "Triangle Up": "^", "Triangle Down": "v",
@@ -93,12 +85,17 @@ class DataModeWidget(ModeWidget):
     def init_ui(self):
         main_layout = QVBoxLayout()
 
-        # Add Column label directly to the layout (like in TrendModeWidget)
+        # Add Column label directly to the layout
         column_label = QLabel(self.data_manager.ui_column_label)
         main_layout.addWidget(column_label)
 
+        # Create the column selector dropdown
         self.column_selector = QComboBox()
         self.column_selector.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        # Add "All" option
+        self.column_selector.addItem("All")
+
         self.column_selector.currentTextChanged.connect(self.update_style_widgets)
         self.column_selector.activated.connect(self.highlight_style_user_col)
         main_layout.addWidget(self.column_selector)
@@ -106,35 +103,9 @@ class DataModeWidget(ModeWidget):
         spacer_item = QSpacerItem(10, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         main_layout.addItem(spacer_item)
 
-        # Create all widgets
+        # Create all style control widgets
         content_layout = QVBoxLayout()
-
-        # First color buttons
-        for style_key in ['face_colors', 'edge_colors', 'line_colors']:
-            widget_name, label = self.ui_element_map[style_key]
-            widget = self.create_widget(style_key)
-            self.widgets[widget_name] = widget
-            content_layout.addWidget(widget)
-
-        spacer = QSpacerItem(10, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        content_layout.addItem(spacer)
-
-        # Then dropdowns with labels
-        for style_key in ['markers', 'line_styles']:
-            widget_name, label = self.ui_element_map[style_key]
-            widget = self.create_widget(style_key)
-            self.widgets[widget_name] = widget
-            content_layout.addWidget(QLabel(label))
-            content_layout.addWidget(widget)
-            widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-        # Finally spinboxes with labels
-        for style_key in ['marker_sizes', 'line_width']:
-            widget_name, label = self.ui_element_map[style_key]
-            widget = self.create_widget(style_key)
-            self.widgets[widget_name] = widget
-            content_layout.addWidget(QLabel(label))
-            content_layout.addWidget(widget)
+        self._setup_style_controls(content_layout)
 
         spacer = QSpacerItem(10, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         content_layout.addItem(spacer)
@@ -143,12 +114,102 @@ class DataModeWidget(ModeWidget):
         main_layout.addLayout(content_layout)
         self.layout.addLayout(main_layout)
 
+    def _setup_style_controls(self, parent_layout):
+        """Set up all style control widgets in the proper order"""
+        # First color buttons
+        for style_key in ['face_colors', 'edge_colors', 'line_colors']:
+            widget_name, label = self.ui_element_map[style_key]
+            widget = self.create_widget(style_key)
+            self.widgets[widget_name] = widget
+            parent_layout.addWidget(widget)
+
+        spacer = QSpacerItem(10, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        parent_layout.addItem(spacer)
+
+        # Then dropdowns with labels
+        for style_key in ['markers', 'line_styles']:
+            widget_name, label = self.ui_element_map[style_key]
+            widget = self.create_widget(style_key)
+            self.widgets[widget_name] = widget
+            parent_layout.addWidget(QLabel(label))
+            parent_layout.addWidget(widget)
+            widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        # Finally spinboxes with labels
+        for style_key in ['marker_sizes', 'line_width']:
+            widget_name, label = self.ui_element_map[style_key]
+            widget = self.create_widget(style_key)
+            self.widgets[widget_name] = widget
+            parent_layout.addWidget(QLabel(label))
+            parent_layout.addWidget(widget)
+
     def highlight_style_user_col(self):
         user_col = self.column_selector.currentText()
-        if user_col:
-            plot_columns = self.data_manager.plot_columns
-            col_instance = plot_columns[user_col]
+        if user_col == "All":
+            # When "All" is selected, don't highlight any specific column
+            return
+        elif user_col and user_col in self.data_manager.plot_columns:
+            # For a specific column, highlight it
+            col_instance = self.data_manager.plot_columns[user_col]
             col_instance.highlight()
+
+    def _get_mode_styles_from_all_columns(self):
+        """Get the most common style values across all columns"""
+        if not self.data_manager.plot_columns:
+            return None
+
+        # Collect all values used across all columns/points
+        all_values = {
+            'marker_sizes': [],
+            'marker': [],
+            'face_color': [],
+            'edge_color': [],
+            'line_color': [],
+            'line_width': [],
+            'line_style': []
+        }
+
+        # Go through all plot columns and collect their actual values
+        for column in self.data_manager.plot_columns.values():
+            df = column.get_df()
+            if not df.empty:
+                all_values['marker_sizes'].extend(df['marker_sizes'].tolist())
+                all_values['marker'].extend(df['markers'].tolist())
+                all_values['face_color'].extend(df['face_colors'].tolist())
+                all_values['edge_color'].extend(df['edge_colors'].tolist())
+                all_values['line_color'].extend(df['line_colors'].tolist())
+                all_values['line_width'].extend(df['line_width'].tolist())
+                all_values['line_style'].extend(df['line_styles'].tolist())
+
+        # Calculate mode (most common value) for each style property
+        style = {}
+
+        # For each property, find the most common value
+        for key, values in all_values.items():
+            if values:
+                # Get the most frequent value
+                value_counts = {}
+                for value in values:
+                    value_counts[value] = value_counts.get(value, 0) + 1
+
+                # Find the value with the highest count
+                mode_value = max(value_counts.items(), key=lambda x: x[1])[0]
+
+                # Map the key back to the default style key format
+                if key == 'face_color':
+                    style['marker_face_color'] = mode_value
+                elif key == 'edge_color':
+                    style['marker_edge_color'] = mode_value
+                elif key == 'line_style':
+                    style['linestyle'] = mode_value
+                elif key == 'line_width':
+                    style['linewidth'] = mode_value
+                elif key == 'marker_sizes':
+                    style['markersize'] = mode_value
+                else:
+                    style[key] = mode_value
+
+        return style
 
     def create_widget(self, style_key):
         if style_key == 'marker_sizes':
@@ -188,6 +249,9 @@ class DataModeWidget(ModeWidget):
         current_text = self.column_selector.currentText()
         self.column_selector.clear()
 
+        # Always add "All" as the first option
+        self.column_selector.addItem("All")
+
         column_map = self.data_manager.chart_data['column_map']
         is_minute_chart = 'Minute' in self.data_manager.chart_data['type']
 
@@ -207,68 +271,96 @@ class DataModeWidget(ModeWidget):
                 # Populate dropdown and try to restore previous selection
                 self.column_selector.addItems(data_columns)
 
-                # Try to restore previous selection
+                # Try to restore previous selection, default to "All" if not found
                 index = self.column_selector.findText(current_text)
                 if index >= 0:
                     self.column_selector.setCurrentIndex(index)
                 else:
-                    self.column_selector.setCurrentIndex(0)
+                    self.column_selector.setCurrentIndex(0)  # Default to "All"
 
         self.update_style_widgets()
 
     def update_style_widgets(self):
         user_col = self.column_selector.currentText()
-        if not user_col:
-            return
 
-        column_instance = self.data_manager.plot_columns[user_col]
-        default_style = column_instance.column_default_style
-        self.populate_fields(default_style)
+        if user_col == "All":
+            # For "All", use the mode (most common value) across all columns
+            mode_style = self._get_mode_styles_from_all_columns()
+            if mode_style:
+                self.populate_fields(mode_style)
+        elif user_col in self.data_manager.plot_columns:
+            # For a specific column, use its applied styles
+            column_instance = self.data_manager.plot_columns[user_col]
+            df = column_instance.get_df()
+
+            if not df.empty:
+                # Get the most common values from the dataframe for this column
+                style = {}
+                style['markersize'] = df['marker_sizes'].mode()[0]
+                style['marker'] = df['markers'].mode()[0]
+                style['marker_face_color'] = df['face_colors'].mode()[0]
+                style['marker_edge_color'] = df['edge_colors'].mode()[0]
+                style['line_color'] = df['line_colors'].mode()[0]
+                style['linewidth'] = df['line_width'].mode()[0]
+                style['linestyle'] = df['line_styles'].mode()[0]
+
+                self.populate_fields(style)
+            else:
+                # Fallback to default if no data
+                self.populate_fields(column_instance.column_default_style)
 
     def populate_fields_with_defaults(self):
-        user_col = self.column_selector.currentText()
-        if user_col:
-            column_instance = self.data_manager.plot_columns[user_col]
-            default_style = column_instance.column_default_style
-            self.populate_fields(default_style)
+        self.update_style_widgets()
 
     def block_signals(self, block):
         for widget in self.widgets.values():
             widget.blockSignals(block)
 
-    def populate_fields(self, default_values):
-        key_mapping = {
-            'markersize': 'marker_sizes',
-            'marker': 'markers',
-            'marker_face_color': 'face_colors',
-            'marker_edge_color': 'edge_colors',
-            'line_color': 'line_colors',
-            'linewidth': 'line_width',
-            'linestyle': 'line_styles'
-        }
-
-        converted_values = {
-            new_key: default_values[old_key]
-            for old_key, new_key in key_mapping.items()
-        }
-
+    def populate_fields(self, style_values):
+        """Set the UI widgets to display the current style values"""
+        # Block signals to prevent triggering updates while setting values
         self.block_signals(True)
 
-        self.widgets['marker_size_spinbox'].setValue(converted_values['marker_sizes'])
-        self.widgets['line_width_spinbox'].setValue(converted_values['line_width'])
+        # Set numeric spinbox values if present
+        if 'markersize' in style_values:
+            self.widgets['marker_size_spinbox'].setValue(style_values['markersize'])
+        if 'linewidth' in style_values:
+            self.widgets['line_width_spinbox'].setValue(style_values['linewidth'])
 
-        marker_key = next(k for k, v in self.marker_style_map.items() if v == converted_values['markers'])
-        line_key = next(k for k, v in self.line_style_map.items() if v == converted_values['line_styles'])
+        # Set marker style dropdown
+        if 'marker' in style_values:
+            marker_value = style_values['marker']
+            for key, value in self.marker_style_map.items():
+                if value == marker_value:
+                    self.widgets['marker_style_combobox'].setCurrentText(key)
+                    break
 
-        self.widgets['marker_style_combobox'].setCurrentText(marker_key)
-        self.widgets['line_style_combobox'].setCurrentText(line_key)
+        # Set line style dropdown
+        if 'linestyle' in style_values:
+            line_style = style_values['linestyle']
+            for key, value in self.line_style_map.items():
+                if value == line_style:
+                    self.widgets['line_style_combobox'].setCurrentText(key)
+                    break
 
-        for color_key in ['face_colors', 'edge_colors', 'line_colors']:
+        # Set color button borders
+        if 'marker_face_color' in style_values:
             self.set_button_border_style(
-                self.widgets[self.ui_element_map[color_key][0]],
-                converted_values[color_key]
+                self.widgets['marker_face_color_button'],
+                style_values['marker_face_color']
+            )
+        if 'marker_edge_color' in style_values:
+            self.set_button_border_style(
+                self.widgets['marker_edge_color_button'],
+                style_values['marker_edge_color']
+            )
+        if 'line_color' in style_values:
+            self.set_button_border_style(
+                self.widgets['line_color_button'],
+                style_values['line_color']
             )
 
+        # Re-enable signals
         self.block_signals(False)
 
     def set_button_border_style(self, button, color):
@@ -283,10 +375,18 @@ class DataModeWidget(ModeWidget):
 
     def update_data_point_styles(self, style_category, style_value):
         user_col = self.column_selector.currentText()
-        if user_col:
+
+        if user_col == "All":
+            # Apply to all columns if "All" is selected
+            for col_name in self.data_manager.plot_columns.keys():
+                data = {'user_col': col_name, 'style_cat': style_category, 'style_val': style_value}
+                self.event_bus.emit('update_point_styles', data)
+        elif user_col:
+            # Apply to selected column
             data = {'user_col': user_col, 'style_cat': style_category, 'style_val': style_value}
             self.event_bus.emit('update_point_styles', data)
-            self.event_bus.emit('update_legend')
+
+        self.event_bus.emit('update_legend')
 
 
 class ViewModeWidget(ModeWidget):
@@ -309,8 +409,45 @@ class ViewModeWidget(ModeWidget):
         dropdown_layout = QGridLayout()
         dropdown_layout.setSpacing(10)
 
+        self._setup_dropdown_section(dropdown_layout)
+
+        dropdown_widget = QWidget()
+        dropdown_widget.setLayout(dropdown_layout)
+        main_layout.addWidget(dropdown_widget)
+
+        # Add spacing between dropdown and checkbox sections
+        main_layout.addItem(spacer1)
+
+        # Checkbox sections with their own grid
+        checkbox_layout = QGridLayout()
+        checkbox_layout.setSpacing(10)
+
+        self._setup_checkbox_section(checkbox_layout)
+
+        checkbox_widget = QWidget()
+        checkbox_widget.setLayout(checkbox_layout)
+        main_layout.addWidget(checkbox_widget)
+
+        # Add spacing between checkbox section and credit button
+        main_layout.addItem(spacer2)
+
+        self.layout.addLayout(main_layout)
+
+        # Connect event bus subscriptions
+        self._setup_event_subscriptions()
+
+        # Initialize state for checkboxes
+        self.sync_grid_checkboxes()
+        self.sync_data_checkboxes()
+
+    def _setup_dropdown_section(self, parent_layout):
+        """Setup the dropdown section with column, group, and aggregate controls"""
         self.column_label = QLabel(self.data_manager.ui_column_label)
         self.column_dropdown = QComboBox()
+
+        # Add "All" as the first option
+        self.column_dropdown.addItem("All")
+
         group_label = QLabel("Group")
         self.group_dropdown = QComboBox()
         aggregate_label = QLabel("Aggregate")
@@ -325,25 +462,23 @@ class ViewModeWidget(ModeWidget):
         column_wrapper.addWidget(self.column_label)
         column_wrapper.addWidget(self.column_dropdown)
 
-        dropdown_layout.addLayout(column_wrapper, 0, 0, 1, 2)
-        dropdown_layout.addWidget(group_label, 1, 0)
-        dropdown_layout.addWidget(self.group_dropdown, 1, 1)
-        dropdown_layout.addWidget(aggregate_label, 2, 0)
-        dropdown_layout.addWidget(self.aggregate_dropdown, 2, 1)
+        parent_layout.addLayout(column_wrapper, 0, 0, 1, 2)
+        parent_layout.addWidget(group_label, 1, 0)
+        parent_layout.addWidget(self.group_dropdown, 1, 1)
+        parent_layout.addWidget(aggregate_label, 2, 0)
+        parent_layout.addWidget(self.aggregate_dropdown, 2, 1)
 
-        dropdown_widget = QWidget()
-        dropdown_widget.setLayout(dropdown_layout)
-        main_layout.addWidget(dropdown_widget)
+        # Connect signals for dropdowns
+        self.column_dropdown.activated.connect(self.handle_column_dropdown_changed)
+        self.group_dropdown.activated.connect(self.group_column_update)
+        self.aggregate_dropdown.activated.connect(self.agg_column_update)
 
-        # Add spacing between dropdown and checkbox sections
-        main_layout.addItem(spacer1)
-
-        # Checkbox sections with their own grid
-        checkbox_layout = QGridLayout()
-        checkbox_layout.setSpacing(10)
-
-        # Section headings
+    def _setup_checkbox_section(self, parent_layout):
+        """Setup the checkbox sections for visualization controls"""
+        # Configure font for section headings
         font = QFont()
+
+        # Create section headings
         grid_heading = QLabel("Grid")
         self.column_heading = QLabel(self.data_manager.ui_column_label)
         other_heading = QLabel("Other")
@@ -351,81 +486,81 @@ class ViewModeWidget(ModeWidget):
             heading.setFont(font)
 
         # Column section
-        checkbox_layout.addWidget(self.column_heading, 0, 0)
+        parent_layout.addWidget(self.column_heading, 0, 0)
         self.data_check = QCheckBox('Data')
-        self.trend_check = QCheckBox('Trend')
+        self.trend_check = QCheckBox('Change')
         self.bounce_check = QCheckBox('Bounce')
-        self.celtext_check = QCheckBox('CelText')
+        self.celtext_check = QCheckBox('Label')
 
-        checkbox_layout.addWidget(self.data_check, 1, 0)
-        checkbox_layout.addWidget(self.trend_check, 2, 0)
-        checkbox_layout.addWidget(self.bounce_check, 3, 0)
-        checkbox_layout.addWidget(self.celtext_check, 4, 0)
+        parent_layout.addWidget(self.data_check, 1, 0)
+        parent_layout.addWidget(self.trend_check, 2, 0)
+        parent_layout.addWidget(self.bounce_check, 3, 0)
+        parent_layout.addWidget(self.celtext_check, 4, 0)
 
         # Grid section
-        checkbox_layout.addWidget(grid_heading, 0, 1)
+        parent_layout.addWidget(grid_heading, 0, 1)
         self.major_vertical_check = QCheckBox('Dates')
         self.major_horizontal_check = QCheckBox('Counts')
         self.minor_grid_check = QCheckBox('Minor')
-        self.time_grid_check = QCheckBox('Timing')
+        self.all_grid_check = QCheckBox('All')
 
-        checkbox_layout.addWidget(self.major_vertical_check, 1, 1)
-        checkbox_layout.addWidget(self.major_horizontal_check, 2, 1)
-        checkbox_layout.addWidget(self.minor_grid_check, 3, 1)
-        checkbox_layout.addWidget(self.time_grid_check, 4, 1)
+        parent_layout.addWidget(self.all_grid_check, 1, 1)
+        parent_layout.addWidget(self.major_vertical_check, 2, 1)
+        parent_layout.addWidget(self.major_horizontal_check, 3, 1)
+        parent_layout.addWidget(self.minor_grid_check, 4, 1)
 
         # Other section
-        checkbox_layout.addWidget(other_heading, 5, 0, 1, 2)
+        parent_layout.addWidget(other_heading, 5, 0, 1, 2)
         self.phase_check = QCheckBox('Phase')
         self.aim_check = QCheckBox('Aim')
         self.celfan_check = QCheckBox('Fan')
         self.credit_check = QCheckBox('Credit')
         self.legend_check = QCheckBox('Legend')
 
-        checkbox_layout.addWidget(self.phase_check, 6, 0)
-        checkbox_layout.addWidget(self.aim_check, 6, 1)
-        checkbox_layout.addWidget(self.celfan_check, 7, 0)
-        checkbox_layout.addWidget(self.credit_check, 7, 1)
-        checkbox_layout.addWidget(self.legend_check, 8, 0)
+        parent_layout.addWidget(self.phase_check, 6, 0)
+        parent_layout.addWidget(self.aim_check, 6, 1)
+        parent_layout.addWidget(self.celfan_check, 7, 0)
+        parent_layout.addWidget(self.credit_check, 7, 1)
+        parent_layout.addWidget(self.legend_check, 8, 0)
 
-        checkbox_widget = QWidget()
-        checkbox_widget.setLayout(checkbox_layout)
-        main_layout.addWidget(checkbox_widget)
-
-        # Add spacing between checkbox section and credit button
-        main_layout.addItem(spacer2)
-
-        self.layout.addLayout(main_layout)
-
+        # Initially set all checkboxes to checked except all_grid_check
         for checkbox in [self.major_vertical_check, self.major_horizontal_check,
-                        self.minor_grid_check, self.data_check, self.trend_check,
-                        self.bounce_check, self.celtext_check, self.phase_check,
-                        self.aim_check, self.celfan_check, self.credit_check, self.legend_check]:
+                         self.minor_grid_check, self.data_check, self.trend_check,
+                         self.bounce_check, self.celtext_check, self.phase_check,
+                         self.aim_check, self.celfan_check, self.credit_check, self.legend_check]:
             checkbox.setChecked(True)
-        self.time_grid_check.setChecked(False)
 
-        # Connect signals
-        self.column_dropdown.activated.connect(self.handle_column_dropdown_changed)
-        self.group_dropdown.activated.connect(self.group_column_update)
-        self.aggregate_dropdown.activated.connect(self.agg_column_update)
+        self.all_grid_check.setChecked(True)
 
+        # Connect checkbox signals
+        self._connect_checkbox_signals()
+
+    def _connect_checkbox_signals(self):
+        """Connect checkbox signals to their respective handlers"""
+        # Data visibility checkboxes
         self.data_check.stateChanged.connect(lambda state: self.set_data_visibility('data', state))
         self.trend_check.stateChanged.connect(lambda state: self.set_data_visibility('trend_line', state))
         self.bounce_check.stateChanged.connect(lambda state: self.set_data_visibility('bounce', state))
         self.celtext_check.stateChanged.connect(lambda state: self.set_data_visibility('cel_label', state))
 
-        self.major_vertical_check.stateChanged.connect(lambda state: self.event_bus.emit('view_major_date_gridlines', state))
-        self.major_horizontal_check.stateChanged.connect(lambda state: self.event_bus.emit('view_major_count_gridlines', state))
-        self.minor_grid_check.stateChanged.connect(lambda state: self.event_bus.emit('view_minor_gridlines', state))
-        self.time_grid_check.stateChanged.connect(lambda state: self.event_bus.emit('view_floor_grid', state))
+        # Grid checkboxes
+        self.major_vertical_check.stateChanged.connect(
+            lambda state: self.handle_individual_grid_toggle('view_major_date_gridlines', state))
+        self.major_horizontal_check.stateChanged.connect(
+            lambda state: self.handle_individual_grid_toggle('view_major_count_gridlines', state))
+        self.minor_grid_check.stateChanged.connect(
+            lambda state: self.handle_individual_grid_toggle('view_minor_gridlines', state))
+        self.all_grid_check.stateChanged.connect(self.handle_all_grid_toggle)
 
+        # Other checkboxes
         self.phase_check.stateChanged.connect(lambda state: self.event_bus.emit('view_phase_lines_toggle', state))
         self.aim_check.stateChanged.connect(lambda state: self.event_bus.emit('view_aims_toggle', state))
         self.celfan_check.stateChanged.connect(lambda state: self.event_bus.emit('view_cel_fan_toggle', state))
         self.legend_check.stateChanged.connect(lambda state: self.event_bus.emit('view_legend_toggle', state))
         self.credit_check.stateChanged.connect(lambda state: self.handle_credit_toggle(state))
 
-        # Event bus subscriptions
+    def _setup_event_subscriptions(self):
+        """Set up all event bus subscriptions"""
         self.event_bus.subscribe('refresh_view_dropdown', self.refresh_view_dropdown)
         self.event_bus.subscribe('view_column_dropdown_update_label', self.view_column_dropdown_update_label)
         self.event_bus.subscribe('sync_grid_checkboxes', self.sync_grid_checkboxes)
@@ -434,22 +569,99 @@ class ViewModeWidget(ModeWidget):
         self.event_bus.subscribe('view_update_aggregate_dropdown', self.update_aggregate_dropdown)
         self.event_bus.subscribe('view_credit_lines_popup', self.credit_lines_popup)
 
-        self.update_timing_checkboxes()
+    def _get_mode_settings_from_all_columns(self):
+        """Get the most common settings from all columns"""
+        if not self.data_manager.plot_columns:
+            # Default settings if no columns exist
+            return {
+                'calendar_group': self.data_manager.chart_data['type'][0],
+                'agg_type': 'median',
+                'data': True,
+                'trend_line': True,
+                'bounce': True,
+                'cel_label': True
+            }
+
+        # Collect settings from all columns
+        settings_values = {
+            'calendar_group': [],
+            'agg_type': [],
+            'data': [],
+            'trend_line': [],
+            'bounce': [],
+            'cel_label': []
+        }
+
+        for column in self.data_manager.plot_columns.values():
+            for key in settings_values:
+                if key in column.view_settings:
+                    settings_values[key].append(column.view_settings[key])
+
+        # Determine most common value for each setting
+        mode_settings = {}
+        for key, values in settings_values.items():
+            if not values:
+                # Default if no values found
+                if key == 'calendar_group':
+                    mode_settings[key] = self.data_manager.chart_data['type'][0]
+                elif key == 'agg_type':
+                    mode_settings[key] = 'median'
+                else:
+                    mode_settings[key] = True
+            else:
+                # Find the most common value (mode)
+                value_counts = {}
+                for value in values:
+                    if value in value_counts:
+                        value_counts[value] += 1
+                    else:
+                        value_counts[value] = 1
+
+                mode_settings[key] = max(value_counts.items(), key=lambda x: x[1])[0]
+
+        return mode_settings
+
+    def handle_individual_grid_toggle(self, event_name, state):
+        # Emit the event for the specific checkbox
+        self.event_bus.emit(event_name, state)
+        # Check and update the 'All' checkbox state
+        self.check_grid_state()
+
+    def check_grid_state(self):
+        check_states = [
+            self.major_vertical_check.isChecked(),
+            self.major_horizontal_check.isChecked(),
+            self.minor_grid_check.isChecked()
+        ]
+
+        self.all_grid_check.blockSignals(True)
+        if all(check_states):
+            self.all_grid_check.setChecked(True)
+        elif not any(check_states):
+            self.all_grid_check.setChecked(False)
+        self.all_grid_check.blockSignals(False)
 
     def update_aggregate_dropdown(self):
         self.aggregate_dropdown.clear()
 
         # Check if minute chart
-        if 'Minute' in self.data_manager.chart_data['type']:
+        chart_type = self.event_bus.emit("get_chart_data", ['type', 'Daily'])
+        is_minute_chart = 'Minute' in chart_type
+        if is_minute_chart:
             options = ['raw', 'mean', 'median', 'min', 'max']
         else:
             options = ['raw', 'sum', 'mean', 'median', 'min', 'max']
 
         self.aggregate_dropdown.addItems(options)
 
-        # Get aggregation from current column's view settings
+        # Get aggregation based on current selection
         user_col = self.column_dropdown.currentText()
-        if user_col and user_col in self.data_manager.plot_columns.keys():
+        if user_col == "All":
+            # For "All" selection, use the most common agg_type across all columns
+            mode_settings = self._get_mode_settings_from_all_columns()
+            agg_type = mode_settings.get('agg_type', self.default_agg)
+            self.aggregate_dropdown.setCurrentText(agg_type)
+        elif user_col and user_col in self.data_manager.plot_columns.keys():
             column_instance = self.data_manager.plot_columns[user_col]
             agg_type = column_instance.view_settings['agg_type']
             self.aggregate_dropdown.setCurrentText(agg_type)
@@ -464,19 +676,24 @@ class ViewModeWidget(ModeWidget):
         self.sync_data_checkboxes()
 
         user_col = self.column_dropdown.currentText()
-        if not user_col:
-            return
-        column_instance = self.data_manager.plot_columns[user_col]
-        column_instance.highlight()
+        if user_col != "All" and user_col in self.data_manager.plot_columns.keys():
+            self.data_manager.plot_columns[user_col].highlight()
 
     def set_data_visibility(self, element_type, show):
         user_col = self.column_dropdown.currentText()
-        if not user_col:
-            return
 
-        self.sync_current_column_view_settings()
-        column_instance = self.data_manager.plot_columns[user_col]
-        column_instance.set_visibility(element_type, show)
+        # If "All" is selected, apply to all columns
+        if user_col == "All":
+            for col_name, column_instance in self.data_manager.plot_columns.items():
+                column_instance.set_visibility(element_type, show)
+                column_instance.view_settings[element_type] = show
+                self.event_bus.emit('sync_column_view_settings', col_name)
+        elif user_col in self.data_manager.plot_columns.keys():
+            # Apply to just the selected column
+            column_instance = self.data_manager.plot_columns[user_col]
+            column_instance.set_visibility(element_type, show)
+            self.sync_current_column_view_settings()
+
         self.event_bus.emit('refresh_chart')
 
     def sync_misc_checkboxes(self):
@@ -497,7 +714,7 @@ class ViewModeWidget(ModeWidget):
     def sync_grid_checkboxes(self):
         view_settings = self.data_manager.chart_data['view']['chart']
         checkboxes = [self.major_vertical_check, self.major_horizontal_check,
-                      self.minor_grid_check, self.time_grid_check]
+                      self.minor_grid_check, self.all_grid_check]
 
         for checkbox in checkboxes:
             checkbox.blockSignals(True)
@@ -505,10 +722,36 @@ class ViewModeWidget(ModeWidget):
         self.major_vertical_check.setChecked(view_settings['major_grid_dates'])
         self.major_horizontal_check.setChecked(view_settings['major_grid_counts'])
         self.minor_grid_check.setChecked(view_settings['minor_grid'])
-        self.time_grid_check.setChecked(view_settings['floor_grid'])
+
+        # Set the All checkbox based on whether all grid checkboxes are checked
+        all_checked = (view_settings['major_grid_dates'] and
+                       view_settings['major_grid_counts'] and
+                       view_settings['minor_grid'])
+        self.all_grid_check.setChecked(all_checked)
 
         for checkbox in checkboxes:
             checkbox.blockSignals(False)
+
+    def handle_all_grid_toggle(self, state):
+        # Block signals to prevent recursive calls
+        self.major_vertical_check.blockSignals(True)
+        self.major_horizontal_check.blockSignals(True)
+        self.minor_grid_check.blockSignals(True)
+
+        # Set all grid checkboxes to the same state
+        self.major_vertical_check.setChecked(state)
+        self.major_horizontal_check.setChecked(state)
+        self.minor_grid_check.setChecked(state)
+
+        # Unblock signals
+        self.major_vertical_check.blockSignals(False)
+        self.major_horizontal_check.blockSignals(False)
+        self.minor_grid_check.blockSignals(False)
+
+        # Emit events exactly like the individual checkboxes do
+        self.event_bus.emit('view_major_date_gridlines', state)
+        self.event_bus.emit('view_major_count_gridlines', state)
+        self.event_bus.emit('view_minor_gridlines', state)
 
     def map_calendar_code_to_text(self, code):
         # Maps internal calendar code to dropdown text
@@ -530,10 +773,13 @@ class ViewModeWidget(ModeWidget):
         }
         return mapping.get(text, text)
 
-    # Update the sync_data_checkboxes method
     def sync_data_checkboxes(self):
         user_col = self.column_dropdown.currentText()
-        if not user_col:
+
+        if user_col == "All":
+            # For "All" selection, use the most common settings across all columns
+            view_settings = self._get_mode_settings_from_all_columns()
+        elif not user_col:
             # Use default view settings if no column is selected
             default_view_settings = {
                 'calendar_group': self.data_manager.chart_data['type'][0],
@@ -545,6 +791,7 @@ class ViewModeWidget(ModeWidget):
             }
             view_settings = default_view_settings
         else:
+            # Use the specific column's settings
             column_instance = self.data_manager.plot_columns[user_col]
             view_settings = column_instance.view_settings
 
@@ -585,21 +832,26 @@ class ViewModeWidget(ModeWidget):
 
     def _update_column_settings(self, setting_key, setting_value):
         user_col = self.column_dropdown.currentText()
-        if not user_col or user_col not in self.data_manager.plot_columns.keys():
-            return
 
-        column_instance = self.data_manager.plot_columns[user_col]
-        column_instance.view_settings[setting_key] = setting_value
+        # If "All" is selected, apply to all columns
+        if user_col == "All":
+            for col_name, column_instance in self.data_manager.plot_columns.items():
+                column_instance.view_settings[setting_key] = setting_value
+                column_instance.refresh_view()
+                self.event_bus.emit('sync_column_view_settings', col_name)
+        elif user_col in self.data_manager.plot_columns.keys():
+            # Apply to just the selected column
+            column_instance = self.data_manager.plot_columns[user_col]
+            column_instance.view_settings[setting_key] = setting_value
+            column_instance.refresh_view()
+            self.sync_current_column_view_settings()
 
-        column_instance.refresh_view()
         self.event_bus.emit('refresh_chart')
 
     def sync_current_column_view_settings(self):
         user_col = self.column_dropdown.currentText()
-        if user_col:
+        if user_col and user_col != "All":
             self.event_bus.emit('sync_column_view_settings', user_col)
-        else:
-            self.event_bus.emit('sync_column_view_settings')
 
     def group_column_update(self):
         calendar_group_text = self.group_dropdown.currentText()
@@ -622,7 +874,16 @@ class ViewModeWidget(ModeWidget):
             self.column_heading.setText(new_column_heading)
 
     def refresh_view_dropdown(self):
+        # Store current selection
+        current_selection = self.column_dropdown.currentText()
+
+        # Clear the dropdown
         self.column_dropdown.clear()
+
+        # Always add "All" as the first option
+        self.column_dropdown.addItem("All")
+
+        # Get columns from column map
         column_map = self.data_manager.chart_data['column_map']
         is_minute_chart = 'Minute' in self.data_manager.chart_data['type']
 
@@ -639,6 +900,16 @@ class ViewModeWidget(ModeWidget):
 
             self.column_dropdown.addItems(filtered_columns)
 
+        # Try to restore previous selection or default to "All"
+        index = self.column_dropdown.findText(current_selection)
+        if index >= 0:
+            self.column_dropdown.setCurrentIndex(index)
+        else:
+            self.column_dropdown.setCurrentIndex(0)  # Default to "All"
+
+        # Make sure we update the view settings based on the current selection
+        self.handle_column_dropdown_changed(self.column_dropdown.currentIndex())
+
     def credit_lines_popup(self):
         if self.dialog.exec() == QDialog.DialogCode.Accepted:
             r1, r2 = self.dialog.get_inputs()
@@ -647,10 +918,6 @@ class ViewModeWidget(ModeWidget):
             self.figure_manager.data_manager.chart_data['credit'] = (r1, r2)
             self.event_bus.emit('view_update_credit_lines')
         self.event_bus.emit('refresh_chart')
-
-    def update_timing_checkboxes(self):
-        condition = 'Minute' in self.data_manager.chart_data['type']
-        self.time_grid_check.setEnabled(condition)
 
 
 class PhaseModeWidget(ModeWidget):
@@ -690,10 +957,13 @@ class PhaseModeWidget(ModeWidget):
         self.layout.addLayout(phase_line_button_layout)
 
         # Connect buttons to figure manager methods
-        add_phase_line_btn.clicked.connect(lambda: self.figure_manager.phase_line_from_form(
-            self.phase_change_input.text(),
-            self.phase_date_input.text()
-        ))
+        add_phase_line_btn.clicked.connect(
+            lambda: self.event_bus.emit('phase_line_from_form', data={
+                'text': self.phase_change_input.text(),
+                'date': self.phase_date_input.text()
+            })
+        )
+
         self.register_double_click_button(undo_phase_line_btn, self.figure_manager.phase_undo_line)
         config_btn.clicked.connect(self.configure_phase_lines)
 
@@ -711,7 +981,7 @@ class PhaseModeWidget(ModeWidget):
         self.phase_type_banner = QRadioButton('Banner')
 
         # Set the phase type based on user preferences
-        phase_text_type = self.data_manager.user_preferences.get('phase_text_type', 'Flag')
+        phase_text_type = self.event_bus.emit("get_user_preference", ['phase_text_type', 'Flag'])
         self.phase_type_flag.setChecked(phase_text_type == 'Flag')
         self.phase_type_banner.setChecked(phase_text_type == 'Banner')
 
@@ -726,7 +996,7 @@ class PhaseModeWidget(ModeWidget):
         self.position_bottom = QRadioButton('Bottom')
 
         # Set the position based on user preferences
-        phase_text_position = self.data_manager.user_preferences.get('phase_text_position', 'Top')
+        phase_text_position = self.event_bus.emit("get_user_preference", ['phase_text_position', 'Top'])
         self.position_top.setChecked(phase_text_position == 'Top')
         self.position_center.setChecked(phase_text_position == 'Center')
         self.position_bottom.setChecked(phase_text_position == 'Bottom')
@@ -772,17 +1042,16 @@ class PhaseModeWidget(ModeWidget):
 
     def toggle_radio_buttons(self):
         state = bool(self.phase_change_input.text())
-        for button in [self.phase_type_flag, self.phase_type_banner, self.position_top, self.position_center,
-                       self.position_bottom]:
+        for button in [self.phase_type_flag, self.phase_type_banner, self.position_top, self.position_center, self.position_bottom]:
             button.setEnabled(state)
 
     def update_preferences(self):
         phase_text_type = 'Flag' if self.phase_type_flag.isChecked() else 'Banner'
-        self.data_manager.user_preferences['phase_text_type'] = phase_text_type
+        self.event_bus.emit("update_user_preference", ['phase_text_type', phase_text_type])
 
     def update_position_preference(self, position):
-        if getattr(self, f'position_{position.lower()}').isChecked():
-            self.data_manager.user_preferences['phase_text_position'] = position
+        # Store the string value in user preferences
+        self.event_bus.emit("update_user_preference", ['phase_text_position', position])
 
 
 class AimModeWidget(ModeWidget):
@@ -898,7 +1167,7 @@ class AimModeWidget(ModeWidget):
         self.aim_type_slope = QRadioButton('Slope')
 
         # Set the aim type based on user preferences
-        aim_text_type = self.data_manager.user_preferences.get('aim_line_type', 'Flat')
+        aim_text_type = self.event_bus.emit("get_user_preference", ['aim_line_type', 'Flat'])
         self.aim_type_flat.setChecked(aim_text_type == 'Flat')
         self.aim_type_slope.setChecked(aim_text_type == 'Slope')
 
@@ -920,7 +1189,7 @@ class AimModeWidget(ModeWidget):
         self.position_right = QRadioButton('Right')
 
         # Set the position based on user preferences
-        aim_text_position = self.data_manager.user_preferences.get('aim_text_position', 'Middle')
+        aim_text_position = self.event_bus.emit("get_user_preference", ['aim_text_position', 'Middle'])
         self.position_left.setChecked(aim_text_position == 'Left')
         self.position_middle.setChecked(aim_text_position == 'Middle')
         self.position_right.setChecked(aim_text_position == 'Right')
@@ -949,10 +1218,10 @@ class AimModeWidget(ModeWidget):
         self.update_start_y_state()
 
     def update_aim_text_pos(self, text_pos):
-        self.data_manager.user_preferences['aim_text_position'] = text_pos
+        self.event_bus.emit("update_user_preference", ['aim_text_position', text_pos])
 
     def update_aim_type(self, aim_type):
-        self.data_manager.user_preferences["aim_line_type"] = aim_type
+        self.event_bus.emit("update_user_preference", ["aim_line_type", aim_type])
 
     def update_start_y_state(self):
         """Enable or disable the Baseline input and its label based on the selected line type."""
@@ -981,8 +1250,10 @@ class TrendModeWidget(ModeWidget):
 
         # Define combo box items
         self.trend_methods = ['Least-squares', 'Quarter-intersect', 'Split-middle-line', 'Mean', 'Median']
-        self.envelope_methods = ['None', '5-95 percentile', 'Interquartile range', 'Standard deviation', '90% confidence interval']
-        self.celeration_units = ['Daily', 'Weekly', 'Monthly (Weekly x4)', 'Six-monthly (Weekly x26)', 'Yearly (Weekly x52)', 'Five-yearly (Yearly x5)']
+        self.envelope_methods = ['None', '5-95 percentile', 'Interquartile range', 'Standard deviation',
+                                 '90% confidence interval']
+        self.celeration_units = ['Daily', 'Weekly', 'Monthly (Weekly x4)', 'Six-monthly (Weekly x26)',
+                                 'Yearly (Weekly x52)', 'Five-yearly (Yearly x5)']
 
         # Trend type selector
         trend_col_label = QLabel(self.data_manager.ui_column_label)
@@ -1002,6 +1273,9 @@ class TrendModeWidget(ModeWidget):
             self.layout.addWidget(widget)
         self.layout.addStretch()
 
+        # Disable add button by default
+        self.update_trend_button_state()
+
         # Signal connections
         self.trend_type_combo.currentIndexChanged.connect(lambda: self.event_bus.emit('trend_cleanup'))
         self.trend_type_combo.currentTextChanged.connect(self.highlight_selected_data_series)
@@ -1013,6 +1287,12 @@ class TrendModeWidget(ModeWidget):
         self.event_bus.subscribe('set_celeration_unit', self.set_celeration_unit, has_data=True)
         self.event_bus.subscribe('get_current_trend_column', self.get_current_trend_column)
         self.event_bus.subscribe('highlight_selected_data_series', self.highlight_selected_data_series)
+        self.event_bus.subscribe('update_trend_button_state', self.update_trend_button_state)
+
+    def update_trend_button_state(self):
+        # Update add button state based on marker status in TrendManager (FigureManager.py)
+        first_marker, second_marker = self.event_bus.emit('get_trend_temp_marker_status')
+        self.trend_add_btn.setEnabled(first_marker is not None and second_marker is not None)
 
     def get_current_trend_column(self):
         return self.trend_type_combo.currentText()
@@ -1020,7 +1300,7 @@ class TrendModeWidget(ModeWidget):
     def set_celeration_unit(self, data):
         cel_unit = data['cel_unit']
         self.celeration_unit_combo.setCurrentText(cel_unit)
-        self.data_manager.user_preferences['celeration_unit'] = cel_unit
+        self.event_bus.emit("update_user_preference", ['celeration_unit', cel_unit])
 
     def highlight_selected_data_series(self, user_col=None):
         plot_columns = self.data_manager.plot_columns
@@ -1044,47 +1324,48 @@ class TrendModeWidget(ModeWidget):
 
         self.trend_type_combo.blockSignals(False)
 
+        # Also make sure add button is disabled
+        self.update_trend_button_state()
+
     def _init_trend_controls(self):
         # Create and configure combos
         self.trend_method_combo = QComboBox()
         self.trend_method_combo.addItems(self.trend_methods)
-        self.trend_method_combo.setCurrentText(self.data_manager.user_preferences['fit_method'])
-        self.trend_method_combo.currentIndexChanged.connect(
-            lambda index: self.data_manager.user_preferences.update(
-                {'fit_method': self.trend_method_combo.currentText()})
-        )
+        self.trend_method_combo.setCurrentText(
+            self.event_bus.emit("get_user_preference", ['fit_method', 'Least-squares']))
+        self.trend_method_combo.currentIndexChanged.connect(lambda index: self.event_bus.emit("update_user_preference",
+                                                                                              ['fit_method',
+                                                                                               self.trend_method_combo.currentText()]))
 
         self.envelope_method_combo = QComboBox()
         self.envelope_method_combo.addItems(self.envelope_methods)
-        self.envelope_method_combo.setCurrentText(self.data_manager.user_preferences.get('bounce_envelope', 'None'))
+        self.envelope_method_combo.setCurrentText(
+            self.event_bus.emit("get_user_preference", ['bounce_envelope', 'None']))
         self.envelope_method_combo.currentIndexChanged.connect(
-            lambda index: self.data_manager.user_preferences.update(
-                {'bounce_envelope': self.envelope_method_combo.currentText()})
-        )
+            lambda index: self.event_bus.emit("update_user_preference",
+                                              ['bounce_envelope', self.envelope_method_combo.currentText()]))
 
         self.celeration_unit_combo = QComboBox()
         self.celeration_unit_combo.addItems(self.celeration_units)
-        self.data_manager.user_preferences['celeration_unit'] = 'Weekly'
-        self.celeration_unit_combo.setCurrentText(self.data_manager.user_preferences.get('celeration_unit', 'Weekly'))
+        celeration_unit_text = self.event_bus.emit("get_user_preference", ['celeration_unit', 'Weekly'])
+        self.celeration_unit_combo.setCurrentText(celeration_unit_text)
         self.celeration_unit_combo.currentIndexChanged.connect(
-            lambda index: self.data_manager.user_preferences.update(
-                {'celeration_unit': self.celeration_unit_combo.currentText()})
-        )
+            lambda index: self.event_bus.emit("update_user_preference",
+                                              ['celeration_unit', self.celeration_unit_combo.currentText()]))
 
         # Configure spinbox
         self.forward_projection_spinbox = QSpinBox()
         self.forward_projection_spinbox.setRange(0, 100)
-        self.forward_projection_spinbox.setValue(self.data_manager.user_preferences.get('forward_projection', 0))
+        self.forward_projection_spinbox.setValue(self.event_bus.emit("get_user_preference", ['forward_projection', 0]))
         self.forward_projection_spinbox.valueChanged.connect(
-            lambda value: self.data_manager.user_preferences.update({'forward_projection': value})
-        )
+            lambda value: self.event_bus.emit("update_user_preference", ['forward_projection', value]))
 
         # Create labels
         labels = {
             'trend_method': "Fit method",
             'forward_projection': "Forecast",
             'envelope_method': "Bounce envelope",
-            'celeration_unit': "Celeration unit"
+            'celeration_unit': f"{self.data_manager.ui_cel_label} unit"
         }
 
         return [
@@ -1097,23 +1378,20 @@ class TrendModeWidget(ModeWidget):
     def _create_trend_buttons(self):
         trend_button_layout = QHBoxLayout()
         self.trend_add_btn = QPushButton()
-        self.trend_fit_btn = QPushButton('Fit')
         trend_undo_btn = QPushButton()
         trend_configure_btn = QPushButton()
 
-        self.trend_add_btn.setIcon(QIcon(':/images/plus-solid-disabled.svg'))
-        self.trend_add_btn.setEnabled(False)
+        self.trend_add_btn.setIcon(QIcon(':/images/plus-solid.svg'))
+        self.trend_add_btn.setEnabled(True)
         trend_undo_btn.setIcon(QIcon(':/images/minus-solid.svg'))
         trend_configure_btn.setIcon(QIcon(':/images/gear-solid.svg'))
 
         trend_button_layout.addWidget(self.trend_add_btn)
         trend_button_layout.addWidget(trend_undo_btn)
-        trend_button_layout.addWidget(self.trend_fit_btn)
         trend_button_layout.addWidget(trend_configure_btn)
 
-        # Connect buttons
-        self.trend_fit_btn.clicked.connect(self.fit_trend)
-        self.trend_add_btn.clicked.connect(self.add_trend)
+        # Connect buttons - Plus button now directly fits and adds the trend
+        self.trend_add_btn.clicked.connect(self.fit_and_add_trend)
         self.register_double_click_button(trend_undo_btn, self.undo_trend)
         trend_configure_btn.clicked.connect(self.configure_trends)
 
@@ -1148,9 +1426,19 @@ class TrendModeWidget(ModeWidget):
 
         return date_input_layout
 
-    def add_trend(self):
-        self.event_bus.emit('trend_finalize')
-        self.set_plus_btn_status()
+    def fit_and_add_trend(self):
+        # First fit the trend
+        trend_data = None
+        self.event_bus.emit('plot_cel_trend', trend_data)
+
+        # Immediately finalize/add the trend if a valid fit was created
+        if self.figure_manager.trend_manager.trend_temp_fit_on:
+            self.event_bus.emit('trend_finalize')
+
+        self.setFocus()
+        self.event_bus.emit('refresh_chart')
+
+        self.update_trend_button_state()
 
     def undo_trend(self):
         user_col = self.get_current_trend_column()
@@ -1158,22 +1446,6 @@ class TrendModeWidget(ModeWidget):
             col_instance = self.figure_manager.data_manager.plot_columns[user_col]
             col_instance.remove_trend()
             self.event_bus.emit('refresh_chart')
-            self.set_plus_btn_status()
-
-    def fit_trend(self):
-        trend_data = None
-        self.event_bus.emit('plot_cel_trend_temp', trend_data)
-        self.setFocus()
-        self.set_plus_btn_status()
-        self.event_bus.emit('refresh_chart')
-
-    def set_plus_btn_status(self):
-        if self.figure_manager.trend_manager.trend_temp_fit_on:
-            self.trend_add_btn.setEnabled(True)
-            self.trend_add_btn.setIcon(QIcon(':/images/plus-solid.svg'))
-        else:
-            self.trend_add_btn.setEnabled(False)
-            self.trend_add_btn.setIcon(QIcon(':/images/plus-solid-disabled.svg'))
 
     def configure_trends(self):
         user_col = self.trend_type_combo.currentText()
@@ -1185,6 +1457,9 @@ class TrendModeWidget(ModeWidget):
 
 
 class NoteModeWidget(ModeWidget):
+    # Text truncation parameter for easy testing
+    TEXT_TRUNCATE_LENGTH = 8
+
     def __init__(self, figure_manager):
         super().__init__(figure_manager)
 
@@ -1195,41 +1470,42 @@ class NoteModeWidget(ModeWidget):
         # Main layout
         main_layout = QVBoxLayout()
 
-        # Header section
-        header_widget = QWidget()
-        header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(10, 5, 10, 5)
-
-        # Header labels
-        date_label = QLabel("Date")
-        text_label = QLabel("Text")
-        date_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header_layout.addWidget(date_label, stretch=1)
-        header_layout.addWidget(text_label, stretch=1)
-
-        # List widget
+        # Custom list widget with improved styling
         self.note_list = QListWidget()
         self.note_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.note_list.itemClicked.connect(self.clicked_on_note)
         self.note_list.itemDoubleClicked.connect(self.double_clicked_on_note)
+        self.note_list.setAlternatingRowColors(True)
+
+        # Enhanced styling for better appearance
         self.note_list.setStyleSheet("""
             QListWidget {
-                font-size: 14px;
+                font-size: 12px;
+                font-family: monospace;
+                border: 1px solid #ccc;
+                background-color: white;
+                gridline-color: #e0e0e0;
             }
             QListWidget::item {
-                padding: 5px;
-                text-align: center;
-                margin: 3px 0px;
+                padding: 8px 5px;
+                border-bottom: 1px solid #e0e0e0;
+                min-height: 20px;
             }
-            
+            QListWidget::item:alternate {
+                background-color: #f9f9f9;
+            }
             QListWidget::item:hover {
-            background-color: #96deeb;
+                background-color: #e3f2fd;
             }
-                
             QListWidget::item:selected {
-                background-color: #05c3de;
+                background-color: #2196f3;
                 color: white;
+            }
+            QListWidget::item:selected:hover {
+                background-color: #1976d2;
+            }
+            QListWidget QScrollBar:horizontal {
+                height: 0px;
             }
         """)
 
@@ -1255,7 +1531,6 @@ class NoteModeWidget(ModeWidget):
         button_layout.addWidget(remove_note_btn)
 
         # Combine all layouts
-        main_layout.addWidget(header_widget)  # Header
         main_layout.addWidget(self.note_list)  # List widget
         main_layout.addLayout(button_layout)  # Buttons
 
@@ -1267,12 +1542,81 @@ class NoteModeWidget(ModeWidget):
 
     def refresh_note_listbox(self):
         self.note_list.clear()
+        chart_type = self.data_manager.chart_data['type']
+        chart_period = chart_type[0] if chart_type else 'D'
+
+        # Create header row first
+        if chart_period == 'D':
+            date_header_text = "Day"
+        elif chart_period == 'W':
+            date_header_text = "Week"
+        elif chart_period == 'M':
+            date_header_text = "Month"
+        elif chart_period == 'Y':
+            date_header_text = "Year"
+        else:
+            date_header_text = "Date"
+
+        # Format header row with same spacing as data rows
+        header_date = f"{date_header_text:^10}"  # Center-aligned, 10 chars wide
+        header_text = f"{'Text':<12}"  # LEFT-aligned like data rows, 12 chars wide
+        header_row = f"{header_date} {header_text}"
+
+        # Create header item with special styling
+        header_item = QListWidgetItem(header_row)
+        header_font = header_item.font()
+        header_font.setFamily("Courier New")
+        header_font.setBold(True)
+        header_item.setFont(header_font)
+        header_item.setBackground(QColor("#f5f5f5"))
+        header_item.setFlags(header_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)  # Make non-selectable
+        self.note_list.addItem(header_item)
+
+        # Add data rows
         all_notes = self.data_manager.chart_data['notes']
         for note in all_notes:
             text, date_str, y_val = note.split('|')
-            text_to_show = f'{text[:8]}...' if len(text) > 8 else text
-            note_details_to_show = f'{date_str}\t{text_to_show}'
+
+            # Truncate text if it's longer than the specified length
+            if len(text) > self.TEXT_TRUNCATE_LENGTH:
+                text_to_show = f'{text[:self.TEXT_TRUNCATE_LENGTH]}...'
+            else:
+                text_to_show = text
+
+            # Format date based on chart type
+            try:
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+
+                if chart_period in ['D', 'W']:  # Daily or Weekly - show full date with 2-digit year
+                    formatted_date = date_obj.strftime('%d-%m-%y')
+                elif chart_period == 'M':  # Monthly - show only month number
+                    formatted_date = date_obj.strftime('%m-%Y')
+                elif chart_period == 'Y':  # Yearly - show only year number
+                    formatted_date = date_obj.strftime('%Y')
+                else:  # Default fallback to full date with 2-digit year
+                    formatted_date = date_obj.strftime('%d-%m-%y')
+
+            except:
+                formatted_date = date_str  # Fallback to original format
+
+            # Create properly formatted columns with centering for monthly/yearly
+            if chart_period in ['M', 'Y']:  # Center align for monthly and yearly
+                date_column = f"{formatted_date:^10}"  # Center-aligned, 10 chars wide
+            else:  # Left align for daily and weekly
+                date_column = f"{formatted_date:<10}"  # Left-aligned, 10 chars wide
+
+            text_column = f"{text_to_show:<12}"  # Left-aligned, 12 chars wide
+
+            # Combine columns with proper spacing
+            note_details_to_show = f"{date_column} {text_column}"
+
             item = QListWidgetItem(note_details_to_show)
+
+            # Set a monospace font for consistent spacing
+            font = item.font()
+            font.setFamily("Courier New")
+            item.setFont(font)
+
             self.note_list.addItem(item)
 
     def remove_note(self):
@@ -1283,34 +1627,52 @@ class NoteModeWidget(ModeWidget):
             # Get index
             idx = self.note_list.row(current_item)
 
-            # Remove from listbox
-            row = self.note_list.row(current_item)
-            self.note_list.takeItem(row)
+            # Skip if header row is selected (index 0)
+            if idx == 0:  # Header row
+                return
 
-            # Remove from chart data
-            if idx < len(notes):
-                del notes[idx]
+            # Adjust index for data notes (subtract 1 for header)
+            data_idx = idx - 1
+
+            # Remove from listbox
+            self.note_list.takeItem(idx)
+
+            # Remove from chart data using adjusted index
+            if data_idx < len(notes):
+                del notes[data_idx]
 
             self.event_bus.emit('refresh_note_locations')
             self.event_bus.emit('clear_previous_individual_note_object', data={'refresh': True})
 
     def clicked_on_note(self, item):
         if item:
-            # Get the index of the clicked item
+            # Skip if header row is clicked (index 0)
             index = self.note_list.row(item)
-            # Get the full note data using the same index
-            full_note = self.data_manager.chart_data['notes'][index]
+            if index == 0:  # Header row
+                return
+
+            # Adjust index for data notes (subtract 1 for header)
+            data_index = index - 1
+
+            # Get the full note data using the adjusted index
+            full_note = self.data_manager.chart_data['notes'][data_index]
             text, date_str, y_val = full_note.split('|')
 
-            # # Emit event with the full note data
+            # Emit event with the full note data
             self.event_bus.emit('show_individual_note_locations', data={'date_str': date_str, 'note_y': y_val})
 
     def double_clicked_on_note(self, item):
         if item:
-            # Get the index of the clicked item
+            # Skip if header row is clicked (index 0)
             index = self.note_list.row(item)
+            if index == 0:  # Header row
+                return
+
+            # Adjust index for data notes (subtract 1 for header)
+            data_index = index - 1
+
             # Get the full note data
-            full_note = self.data_manager.chart_data['notes'][index]
+            full_note = self.data_manager.chart_data['notes'][data_index]
             text, date_str, y_val = full_note.split('|')
 
             # Create and show the note dialog
@@ -1322,7 +1684,7 @@ class NoteModeWidget(ModeWidget):
                 new_text = dialog.text_edit.toPlainText().replace('|', '')
                 if new_text != text:  # Only update if the text changed
                     # Remove old note
-                    del self.data_manager.chart_data['notes'][index]
+                    del self.data_manager.chart_data['notes'][data_index]
                     # The new note will have been added by the dialog's save_note method
                     self.refresh_note_listbox()
 
@@ -1528,12 +1890,15 @@ class PlotModeWidget(ModeWidget):
         self.file_path_label.setAlignment(Qt.AlignmentFlag.AlignCenter)  # Center the label
         data_label_layout.addWidget(self.file_path_label)
 
+        # Add stretch to push everything to the bottom
+        data_label_layout.addStretch()
+
         # Add spreadsheet button
-        self.open_spreadsheet_btn = QPushButton("Open Spreadsheet")
+        self.open_spreadsheet_btn = QPushButton("Spreadsheet")
         self.open_spreadsheet_btn.clicked.connect(self.open_spreadsheet)
         data_label_layout.addWidget(self.open_spreadsheet_btn)
 
-        parent_layout.addStretch()
+        # Remove parent_layout.addStretch() since we want the data_label_layout to anchor at the bottom
         parent_layout.addLayout(data_label_layout)
 
     def show_modify_columns_dialog(self):
@@ -1738,9 +2103,9 @@ class PlotModeWidget(ModeWidget):
         self.update_date_button()
 
         # Update vertical line
-        self.update_selected_date_line()
+        # self.update_selected_date_line()
 
-        # Update spreadsheet button visibility
+        # # Update spreadsheet button visibility
         self.update_spreadsheet_button_visibility()
 
     def update_selected_date_line(self):
@@ -1837,55 +2202,55 @@ class PlotModeWidget(ModeWidget):
         # Get all column inputs that have entries
         for col_name, input_field in self.column_input_list.items():
             count_value = input_field.text()
-            if count_value:  # Only collect non-empty inputs
-                user_cols.append(col_name)
-                count_strs.append(count_value)
+            user_cols.append(col_name)
+            count_strs.append(count_value)
 
-                # Look up the appropriate sys_col for this column
-                column_map = self.data_manager.chart_data['column_map']
-                sys_col = None
-                for sc, uc in column_map.items():
-                    if uc == col_name and sc not in ['d', 'm']:
-                        sys_col = sc
-                        break
+            # Look up the appropriate sys_col for this column
+            column_map = self.data_manager.chart_data['column_map']
+            sys_col = None
+            for sc, uc in column_map.items():
+                if uc == col_name and sc not in ['d', 'm']:
+                    sys_col = sc
+                    break
 
-                # Append the sys_col (or default to "o1" if not found)
-                sys_cols.append(sys_col or "o1")
+            # Append the sys_col (or default to "o1" if not found)
+            sys_cols.append(sys_col or "o1")
 
         return user_cols, count_strs, sys_cols
 
     def open_spreadsheet(self):
-        unix_id = self.data_manager.user_preferences.get('unix_id')
-        data_import_path = self.data_manager.chart_data['import_path'].get(unix_id)
+        """
+        Opens a spreadsheet-like dialog for viewing and editing chart data.
+        Provides a better user experience than exporting to an external file.
+        """
+        if self.data_manager.df_raw is None or self.data_manager.df_raw.empty:
+            QMessageBox.warning(self, "No Data", "There is no data to display.")
+            return
 
-        path = Path(data_import_path) if data_import_path else None
+        # Create and show the dialog
+        dialog = SpreadsheetDialog(self)
 
-        if path and path.exists():
-            # Use QDesktopServices to open the file with the default application
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
-        else:
-            QMessageBox.warning(self, "File Not Found",
-                                "The spreadsheet file could not be found.")
+        # Connect to the dataChanged signal
+        dialog.dataChanged.connect(self.on_spreadsheet_data_changed)
+
+        # Show the dialog
+        dialog.exec()
+
+    def on_spreadsheet_data_changed(self):
+        """Handle data changes from the spreadsheet dialog"""
+        # Refresh the plot mode UI
+        self.event_bus.emit('refresh_plot_mode_widget')
+
+        # Refresh the chart
+        self.event_bus.emit('refresh_chart')
+
+        # Update date display in plot mode
+        self.update_date_button()
 
     def update_spreadsheet_button_visibility(self):
-        # Get the import path
-        unix_id = self.data_manager.user_preferences.get('unix_id')
-        data_import_path = self.data_manager.chart_data['import_path'].get(unix_id)
-
-        path = Path(data_import_path) if data_import_path else None
-        has_valid_path = bool(path and path.exists())
-
-        # Update button visibility
-        self.open_spreadsheet_btn.setVisible(has_valid_path)
-
-        # Set tooltip for valid paths
-        if has_valid_path:
-            self.open_spreadsheet_btn.setToolTip(f"Document: {path.name}\nLocation: {path.parent}")
-        else:
-            self.open_spreadsheet_btn.setToolTip("")
-
-        # Hide the file path label completely
-        self.file_path_label.setVisible(False)
+        df = self.data_manager.df_raw
+        has_data = df is not None and not df.empty
+        self.open_spreadsheet_btn.setVisible(has_data)
 
 
 class ChartDateHandler:
