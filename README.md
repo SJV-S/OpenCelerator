@@ -39,7 +39,16 @@ The app can be downloaded below. Pick your platform, extract content, and launch
 
 
 #### Mac
-How to run on Sequoia: [video](https://www.youtube.com/watch?v=scdAMJDGJvA)
+
+_Apple Silicon_
+```
+curl -L -o ~/Downloads/OpenCelerator-macOS.zip https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-macOS-Sequoia-Apple-chip.zip && unzip -q -o -d ~/Downloads ~/Downloads/OpenCelerator-macOS.zip && open ~/Downloads/OpenCelerator.app && rm ~/Downloads/OpenCelerator-macOS.zip
+```
+
+_Intel_
+```
+curl -L -o ~/Downloads/OpenCelerator-macOS.zip https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-macOS-Sequoia-Intel-processor.zip && unzip -q -o -d ~/Downloads ~/Downloads/OpenCelerator-macOS.zip && open ~/Downloads/OpenCelerator.app && rm ~/Downloads/OpenCelerator-macOS.zip
+```
 
 #### Windows
 
