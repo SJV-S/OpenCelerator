@@ -31,7 +31,7 @@ Contact: opencelerator.9qpel@simplelogin.com
 
 #### Mac
 
-Run one of these commands: Open the Terminal. Paste command. Press enter.
+Run one of these commands. Open the Terminal. Paste command. Press enter.
 
 _Apple Silicon_
 ```
