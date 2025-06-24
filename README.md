@@ -29,13 +29,6 @@ Contact: opencelerator.9qpel@simplelogin.com
 
 ## Download & Installation
 
-The app can be downloaded below. Pick your platform, extract content, and launch by running executable. The latest version will be fetched automatically.
-
-- [Windows 10 and 11](https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-Windows-10-and-11.zip)
-- [Linux (AppImage)](https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-Linux.AppImage)
-- [Linux (Flatpak)](https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-Linux.flatpak)
-
-
 #### Mac
 
 Run one of these commands: Open the Terminal. Paste command. Press enter.
@@ -52,9 +45,14 @@ curl -L -o ~/Downloads/OpenCelerator-macOS.zip https://github.com/SJV-S/OpenCele
 
 #### Windows
 
+- [Windows 10 and 11](https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-Windows-10-and-11.zip)
+
 How to run on Windows 10 and 11: [video](https://youtu.be/u8ugPqEv8LM)
 
 #### Linux
+
+- [Linux (AppImage)](https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-Linux.AppImage)
+- [Linux (Flatpak)](https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-Linux.flatpak)
 
 OpenCelerator is available as an AppImage and Flatpak, so FUSE or Flatpak need to be installed. If using the AppImage, do not place it in privileged directories. Tahoma is the default font on Windows and Mac, so consider installing Tahoma if you want the exact same chart appearance as the majority of users. Otherwise, DejaVu Sans is the fallback – which is likely fine in most cases.
 
