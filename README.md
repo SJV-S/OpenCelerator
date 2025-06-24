@@ -38,7 +38,7 @@ The app can be downloaded below. Pick your platform, extract content, and launch
 
 #### Mac
 
-Run one of these commands in the Terminal. Simply paste the command and press enter.
+Run one of these commands: Open the Terminal. Paste command. Press enter.
 
 _Apple Silicon_
 ```
