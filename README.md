@@ -31,14 +31,14 @@ Contact: opencelerator.9qpel@simplelogin.com
 
 #### Mac
 
-Run one of these commands. Open the Terminal. Paste command. Press enter.
+Run one of these commands for your specific Apple hardware. Open the Terminal. Paste command. Press enter.
 
-_Apple Silicon Chip_
+_Apple Silicon_
 ```
 curl -L -o ~/Downloads/OpenCelerator-macOS.zip https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-macOS-Sequoia-Apple-chip.zip && unzip -q -o -d ~/Downloads ~/Downloads/OpenCelerator-macOS.zip && open ~/Downloads/OpenCelerator.app && rm ~/Downloads/OpenCelerator-macOS.zip
 ```
 
-_Intel Chip_
+_Intel_
 ```
 curl -L -o ~/Downloads/OpenCelerator-macOS.zip https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-macOS-Sequoia-Intel-processor.zip && unzip -q -o -d ~/Downloads ~/Downloads/OpenCelerator-macOS.zip && open ~/Downloads/OpenCelerator.app && rm ~/Downloads/OpenCelerator-macOS.zip
 ```
