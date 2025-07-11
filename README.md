@@ -35,7 +35,7 @@ Run one of these commands for your specific macOS hardware. Open the Terminal. P
 
 _Apple Silicon_
 ```
-curl -L -o ~/Downloads/OpenCelerator-macOS.zip https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-macOS-Sequoia-Apple-chip.zip && unzip -q -o -d ~/Downloads ~/Downloads/OpenCelerator-macOS.zip && open ~/Downloads/OpenCelerator.app && rm ~/Downloads/OpenCelerator-macOS.zip
+curl -L -o ~/Downloads/OpenCelerator-macOS.zip https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-macOS-Sequoia-Apple-chip.zip && unzip -q -o -d ~/Downloads ~/Downloads/OpenCelerator-macOS.zip && xattr -d com.apple.quarantine ~/Downloads/OpenCelerator.app 2>/dev/null || true && open ~/Downloads/OpenCelerator.app && rm ~/Downloads/OpenCelerator-macOS.zip
 ```
 
 _Intel_
