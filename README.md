@@ -31,7 +31,7 @@ Contact: opencelerator.9qpel@simplelogin.com
 
 #### Mac
 
-Run one of these commands for your specific macOS hardware. Open the Terminal. Paste command. Press enter.
+Run the command below in your MacOS terminal. _Don't worry if you have never used the terminal!_ This process is extremely simple: Search for "Terminal" with Spotlight or check Applications under Utilities. Open. Paste command. Press enter. Finished.
 
 _MacOS_
 ```
