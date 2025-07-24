@@ -33,14 +33,9 @@ Contact: opencelerator.9qpel@simplelogin.com
 
 Run one of these commands for your specific macOS hardware. Open the Terminal. Paste command. Press enter.
 
-_Apple Silicon_
+_MacOS_
 ```
-curl -L -o ~/Downloads/OpenCelerator-macOS.zip https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-macOS-Sequoia-Apple-chip.zip && unzip -q -o -d ~/Downloads ~/Downloads/OpenCelerator-macOS.zip && xattr -d com.apple.quarantine ~/Downloads/OpenCelerator.app 2>/dev/null || true && open ~/Downloads/OpenCelerator.app && rm ~/Downloads/OpenCelerator-macOS.zip
-```
-
-_Intel_
-```
-curl -L -o ~/Downloads/OpenCelerator-macOS.zip https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/OpenCelerator-e0.12.0-macOS-Sequoia-Intel-processor.zip && unzip -q -o -d ~/Downloads ~/Downloads/OpenCelerator-macOS.zip && open ~/Downloads/OpenCelerator.app && rm ~/Downloads/OpenCelerator-macOS.zip
+curl -L -o ~/Downloads/macos_installoc.command https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/macos_installoc.command && chmod +x ~/Downloads/macos_installoc.command && ~/Downloads/macos_installoc.command```
 ```
 
 #### Windows
