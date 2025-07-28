@@ -42,7 +42,7 @@ curl -L -o ~/Downloads/macos_installoc.command https://github.com/SJV-S/OpenCele
 
 - [Download for Windows 10 and 11.](https://github.com/SJV-S/OpenCelerator/releases/download/0.13.0/OpenCelerator-e0.13.0-Windows-10-and-11.zip)
 
-How to run on Windows: [video](https://youtu.be/u8ugPqEv8LM)
+- [How to run on Windows tutorial](https://youtu.be/u8ugPqEv8LM)
 
 #### Linux
 
