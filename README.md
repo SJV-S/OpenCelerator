@@ -35,7 +35,7 @@ Run the command below in your MacOS terminal. _Don't worry if you have never use
 
 _MacOS_
 ```
-curl -L -o ~/Downloads/macos_installoc.command https://github.com/SJV-S/OpenCelerator/releases/download/0.12.0/macos_installoc.command && chmod +x ~/Downloads/macos_installoc.command && ~/Downloads/macos_installoc.command
+curl -L -o ~/Downloads/macos_installoc.command https://github.com/SJV-S/OpenCelerator/releases/download/0.13.0/macos_installoc.command && chmod +x ~/Downloads/macos_installoc.command && ~/Downloads/macos_installoc.command
 ```
 
 #### Windows
