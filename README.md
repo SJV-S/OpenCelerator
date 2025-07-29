@@ -31,7 +31,7 @@ Contact: opencelerator.9qpel@simplelogin.com
 
 #### Mac
 
-Run the command below in your MacOS terminal. _Don't worry if you have never used the terminal._ This process is extremely simple: Search for "Terminal" with Spotlight or check Applications under Utilities. Open. Paste command below. Press enter. Finished.
+Run the command below in your MacOS terminal. _Don't worry if you have never used the terminal._ This process is extremely simple: Search for "Terminal" with Spotlight or check Applications under Utilities. Open. Paste command below. Press enter. Finished – you can close the terminal window.
 
 _MacOS_
 ```
