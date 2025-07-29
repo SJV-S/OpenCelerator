@@ -268,7 +268,7 @@ class FigureManager(QWidget):
                                       va=va,
                                       rotation=rotation,
                                       fontsize=phase['font_size'],
-                                      color=phase['font_color']
+                                      color=phase['font_color'],
                                       )
 
             # Make the phase text draggable
@@ -2302,7 +2302,7 @@ class DraggableFanManager:
             # Create line with picker
             line = Line2D([self.x_mid, x_end], [self.y_mid, y_end],
                           linestyle='-', color=self.figure_manager.Chart.custom_grid_color,
-                          linewidth=1, picker=True, pickradius=10, clip_on=False)
+                          linewidth=1, picker=True, pickradius=20, clip_on=False)
             self.figure_manager.ax.add_line(line)
             self.fan_lines.append(line)
 

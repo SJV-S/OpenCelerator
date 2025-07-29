@@ -1,14 +1,24 @@
 import platform
-import os
+from pathlib import Path
 
 
 def get_system_font():
     os_name = platform.system()
 
     if os_name == "Linux":
-        available_fonts = os.popen('fc-list : family').read()
-        if "Tahoma" in available_fonts:
-            return ("Tahoma", 12)
+        available_fonts = Path('/usr/share/fonts').exists()
+        if available_fonts:
+            # Use fc-list to check for fonts
+            import subprocess
+            try:
+                result = subprocess.run(['fc-list', ':', 'family'], capture_output=True, text=True)
+                available_fonts = result.stdout
+                if "Tahoma" in available_fonts:
+                    return ("Tahoma", 12)
+                else:
+                    return ("DejaVu Sans", 12)
+            except:
+                return ("DejaVu Sans", 12)
         else:
             return ("DejaVu Sans", 12)
     else:
@@ -263,11 +273,37 @@ QDialog {{
 QComboBox {{
     color: black;
     background-color: #ececec;
+    border: 1px solid gray;
+    padding: 3px;
+    border-radius: 0px;  /* Remove rounded corners */
+}}
+
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 20px;
+    border-left-width: 1px;
+    border-left-color: gray;
+    border-left-style: solid;
+    border-top-right-radius: 0px;
+    border-bottom-right-radius: 0px;
+    background-color: #ececec;
+}}
+
+QComboBox::down-arrow {{
+    image: none;  /* Remove default arrow if you want */
+    width: 0px;
+    height: 0px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid black;
 }}
 
 QComboBox QAbstractItemView {{
     color: black;
     background-color: white;
+    border: 1px solid gray;
+    selection-background-color: #e7efff;
 }}
 
 /* QFileDialog styles */
@@ -282,12 +318,12 @@ QMessageBox {{
 
 QSpinBox {{
     color: black;
-    background-color: white;
+    background-color: #ececec;
 }}
 
 QDoubleSpinBox {{
     color: black;
-    background-color: white;
+    background-color: #ececec;
 }}
 
 QDialog {{
@@ -298,5 +334,35 @@ QDialog {{
 QScrollArea QWidget {{
     background-color: #f9f9f9;
     color: black;
+}}
+
+/* QMenu styles */
+QMenu {{
+    background-color: white;
+    color: black;
+    border: 1px solid gray;
+    padding: 2px;
+}}
+
+QMenu::item {{
+    background-color: white;
+    color: black;
+    padding: 5px 20px;
+}}
+
+QMenu::item:selected {{
+    background-color: #e7efff;
+    color: black;
+}}
+
+QMenu::item:disabled {{
+    background-color: white;
+    color: gray;
+}}
+
+QMenu::separator {{
+    height: 1px;
+    background-color: gray;
+    margin: 2px 0px;
 }}
 """

@@ -752,23 +752,13 @@ class SupportDevDialog(QDialog):
         paypal_btn.setIcon(paypal_icon)
         paypal_btn.clicked.connect(self.paypal_btn_clicked)
 
-        patreon_btn = QPushButton('Patreon')
-        patreon_icon = QIcon(':/images/patreon_logo.png')
-        patreon_btn.setIcon(patreon_icon)
-        patreon_btn.clicked.connect(self.patreon_btn_clicked)
-
         bitcoin_btn = QPushButton('Bitcoin')
         bitcoin_icon = QIcon(':/images/bitcoin_logo.png')
         bitcoin_btn.setIcon(bitcoin_icon)
         bitcoin_btn.clicked.connect(self.bitcoin_btn_clicked)
 
-        # exit_btn = QPushButton('Exit')
-        # exit_btn.clicked.connect(self.exit_btn_clicked)
-
         btn_layout.addWidget(paypal_btn)
-        btn_layout.addWidget(patreon_btn)
         btn_layout.addWidget(bitcoin_btn)
-        # btn_layout.addWidget(exit_btn)
         layout.addLayout(btn_layout)
 
         self.setLayout(layout)
@@ -1785,7 +1775,7 @@ class ModifyColumns(QDialog):
         self.data_manager.chart_data['column_map'] = new_column_map
         self.event_bus.emit("reload_current_mode")
         self.event_bus.emit('update_legend')
-        self.data_manager.handle_data_saving()
+        self.event_bus.emit('save_complete_chart')
 
         self.accept()
 
@@ -2280,7 +2270,7 @@ class SpreadsheetDialog(QDialog):
         # Refresh chart and save
         self.event_bus.emit('update_legend')
         self.event_bus.emit('refresh_chart')
-        self.data_manager.handle_data_saving()
+        # self.data_manager.handle_data_saving()
         self.dataChanged.emit()
         self.accept()
 
@@ -2317,187 +2307,154 @@ class ChartBrowserDialog(QDialog):
         super().__init__(parent)
         self.data_manager = DataManager()
         self.event_bus = EventBus()
+
+        self.username_prefix = "User: "
         self.selected_chart_id = None
         self.selected_file_path = None
-        self.chart_metadata_cache = {}  # Cache for chart metadata
-        self.current_location = self.data_manager.event_bus.emit("get_user_preference", ['last_open_tab', 'local'])
 
+        # Get available locations
+        self.location_names = self._get_available_locations()
+        self.current_location = self._get_initial_location()
+
+        # UI state
+        self.location_grids = {}
+        self.location_buttons = []
+        self.plus_button = None
+        self.location_layout = None  # Store reference to the button layout
+
+        # Setup UI and load data
         self.setWindowTitle("Chart Browser")
         self.setMinimumSize(800, 600)
-
         self.setup_ui()
+
+        # Load charts for all locations
         self.load_charts()
 
+    def _get_available_locations(self):
+        """Get list of available database locations"""
+        db_locations = self.data_manager.user_preferences.get('db_location', {})
+        # Keys are directory names (or 'local'/'cloud'), values are full paths
+        return list(db_locations.keys())
+
+    def _get_initial_location(self):
+        """Determine initial location to display"""
+        current_pref = self.event_bus.emit("get_user_preference", ['last_open_tab', 'local'])
+        if current_pref not in self.location_names:
+            return 'local'
+        return current_pref
+
     def setup_ui(self):
+        """Set up the user interface"""
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(8)
 
-        # Search bar with label
-        search_layout = QHBoxLayout()
-        search_layout.setSpacing(6)
-        search_label = QLabel("Search:")
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Filter by name, type, or credit lines")
-        self.search_input.textChanged.connect(self.filter_charts)
-        search_layout.addWidget(search_label)
-        search_layout.addWidget(self.search_input)
-        main_layout.addLayout(search_layout)
+        self._create_top_bar(main_layout)
+        self._create_content_area(main_layout)
+        self._create_bottom_bar(main_layout)
 
-        # Stacked widget for location views
-        self.stacked_widget = QStackedWidget()
-
-        # Create grids for each location
-        self.grid_local = self.create_charts_grid()
-        self.grid_cloud = self.create_charts_grid()
-        self.grid_other = self.create_charts_grid()
-
-        # Add message labels for cloud and other
-        self.cloud_label = QLabel("Coming in a future version")
-        self.cloud_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.cloud_label.setStyleSheet("color: #888; font-size: 14px; padding: 20px;")
-
-        self.other_label = QLabel("Coming in a future version")
-        self.other_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.other_label.setStyleSheet("color: #888; font-size: 14px; padding: 20px;")
-
-        # Create container widgets for each grid
-        local_widget = QWidget()
-        local_layout = QVBoxLayout(local_widget)
-        local_layout.setContentsMargins(0, 0, 0, 0)
-        local_layout.addWidget(self.grid_local)
-
-        cloud_widget = QWidget()
-        cloud_layout = QVBoxLayout(cloud_widget)
-        cloud_layout.setContentsMargins(0, 0, 0, 0)
-        cloud_layout.addWidget(self.grid_cloud)
-        self.cloud_label.setParent(self.grid_cloud)
-
-        other_widget = QWidget()
-        other_layout = QVBoxLayout(other_widget)
-        other_layout.setContentsMargins(0, 0, 0, 0)
-        other_layout.addWidget(self.grid_other)
-        self.other_label.setParent(self.grid_other)
-
-        # Add widgets to stacked widget
-        self.stacked_widget.addWidget(local_widget)
-        self.stacked_widget.addWidget(cloud_widget)
-        self.stacked_widget.addWidget(other_widget)
-
-        # Add stacked widget to main layout
-        main_layout.addWidget(self.stacked_widget)
-
-        # Bottom bar layout with location buttons on left, control buttons on right
-        bottom_layout = QHBoxLayout()
-        bottom_layout.setSpacing(8)
-
-        # Create location selector buttons with custom styling
-        self.location_buttons = []
-
-        # Location buttons - left side
-        location_layout = QHBoxLayout()
-        location_layout.setSpacing(0)  # Tighter spacing between buttons
-
-        for loc in ['local', 'cloud', 'other']:
-            button = QPushButton(loc.capitalize())
-            button.setCheckable(True)
-            button.setProperty("location", loc)
-            button.clicked.connect(self.on_location_button_clicked)
-
-            # Apply custom styling for tab-like buttons
-            button.setStyleSheet("""
-                QPushButton {
-                    border: 1px solid #c0c0c0;
-                    border-radius: 0;
-                    padding: 6px 12px;
-                    background-color: #f0f0f0;
-                    min-width: 80px;
-                }
-                QPushButton:checked {
-                    background-color: #e0e0e0;
-                    border-bottom: 3px solid #4080c0;
-                    font-weight: bold;
-                }
-                QPushButton:hover:!checked {
-                    background-color: #e8e8e8;
-                }
-            """)
-
-            location_layout.addWidget(button)
-            self.location_buttons.append(button)
-
-        # Add location buttons to left side of bottom bar
-        bottom_layout.addLayout(location_layout)
-
-        # Add a small spacer instead of a vertical line
-        spacer = QSpacerItem(20, 1, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
-        bottom_layout.addSpacerItem(spacer)
-
-        # Add a stretch to push the action buttons to the right
-        bottom_layout.addStretch(1)
-
-        # File operations
-        self.browse_button = QPushButton("Browse")
-        self.browse_button.clicked.connect(self.browse_for_json)
-        bottom_layout.addWidget(self.browse_button)
-
-        # Add delete button
-        self.delete_button = QPushButton("Delete")
-        self.delete_button.setEnabled(False)
-        self.delete_button.setStyleSheet("QPushButton { color: #a0a0a0; }")
-        self.delete_button.clicked.connect(self.delete_selected_chart)
-        bottom_layout.addWidget(self.delete_button)
-
-        self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.clicked.connect(self.reject)
-        bottom_layout.addWidget(self.cancel_button)
-
-        # Add the bottom bar to the main layout
-        main_layout.addLayout(bottom_layout)
-
-        # Now that all UI elements are created, set the active location
         self.set_active_location(self.current_location)
 
-        # Set positions of message labels
-        self.resizeEvent(None)
+    def _create_top_bar(self, main_layout):
+        """Create the top bar with username and search"""
+        top_layout = QHBoxLayout()
+        top_layout.setSpacing(40)
 
-    def set_active_location(self, location):
-        """Set the active location and update UI"""
-        self.current_location = location
-        index = ['local', 'cloud', 'other'].index(location)
+        # Username section - anchored to left
+        self._create_username_section(top_layout)
 
-        # Update stacked widget
-        self.stacked_widget.setCurrentIndex(index)
+        # Search section
+        self._create_search_section(top_layout)
 
-        # Update button states
-        for button in self.location_buttons:
-            btn_loc = button.property("location")
-            button.setChecked(btn_loc == location)
+        main_layout.addLayout(top_layout)
 
-        # Save preference
-        self.data_manager.event_bus.emit("update_user_preference", ['last_open_tab', location])
+    def _create_username_section(self, parent_layout):
+        """Create username display and editing controls"""
+        username_layout = QHBoxLayout()
+        username_layout.setSpacing(6)
 
-        # Update selection state
-        self.on_selection_changed()
+        current_username = self.event_bus.emit("get_user_preference", ['user_name', ''])
 
-    def on_location_button_clicked(self):
-        """Handle location button clicks"""
-        button = self.sender()
-        location = button.property("location")
-        self.set_active_location(location)
+        self.username_field = QLineEdit(f"{self.username_prefix}{current_username}")
+        self.username_field.setReadOnly(True)
+        self.username_field.setToolTip("Double click to edit")
 
-    def resizeEvent(self, event):
-        # Position message labels in center of their grids
-        if hasattr(self, 'cloud_label'):
-            self.cloud_label.setGeometry(0, 0, self.grid_cloud.width(), self.grid_cloud.height())
+        self._apply_username_styles()
+        self._setup_username_events()
 
-        if hasattr(self, 'other_label'):
-            self.other_label.setGeometry(0, 0, self.grid_other.width(), self.grid_other.height())
+        # Calculate width based on username length plus two extra spaces AFTER applying styles
+        font_metrics = self.username_field.fontMetrics()
+        text_width = font_metrics.horizontalAdvance(f"{self.username_prefix}{current_username}  ")  # Two extra spaces
+        # Account for the padding in the stylesheet (4px + 8px = 12px on each side = 24px total)
+        total_width = text_width + 24
+        self.username_field.setFixedWidth(total_width)
 
-        super().resizeEvent(event) if event else None
+        username_layout.addWidget(self.username_field)
+        parent_layout.addLayout(username_layout)
 
-    def create_charts_grid(self):
-        """Create a list widget for displaying chart thumbnails with consistent styling"""
+    def _apply_username_styles(self):
+        """Apply styles to username field"""
+        self.username_field.setStyleSheet("""
+            QLineEdit[readOnly="true"] {
+                padding: 4px 8px;
+                background-color: #f0f0f0;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                color: #333;
+            }
+            QLineEdit[readOnly="false"] {
+                padding: 4px 8px;
+                background-color: white;
+                border: 2px solid #4080c0;
+                border-radius: 4px;
+                color: #000;
+            }
+        """)
+
+    def _setup_username_events(self):
+        """Setup username field event handlers"""
+
+        def handle_double_click(event):
+            self._start_username_edit(event)
+
+        self.username_field.mouseDoubleClickEvent = handle_double_click
+        self.username_field.editingFinished.connect(self._finish_username_edit)
+        self.username_field.returnPressed.connect(self._finish_username_edit)
+
+    def _create_search_section(self, parent_layout):
+        """Create search input section"""
+        search_layout = QHBoxLayout()
+        search_layout.setSpacing(6)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search by name or credit lines (use ampersand for AND and comma for OR)")
+        self.search_input.textChanged.connect(self.filter_charts)
+
+        search_layout.addWidget(self.search_input)
+        parent_layout.addLayout(search_layout)
+
+    def _create_content_area(self, main_layout):
+        """Create the main content area with stacked widgets"""
+        self.stacked_widget = QStackedWidget()
+
+        for location in self.location_names:
+            if self._validate_location_path(location):
+                grid = self._create_charts_grid()
+                self.location_grids[location] = grid
+
+                container = QWidget()
+                layout = QVBoxLayout(container)
+                layout.setContentsMargins(0, 0, 0, 0)
+                layout.addWidget(grid)
+            else:
+                container = self._create_add_folder_widget(location)
+
+            self.stacked_widget.addWidget(container)
+
+        main_layout.addWidget(self.stacked_widget)
+
+    def _create_charts_grid(self):
+        """Create a list widget for displaying chart thumbnails"""
         grid = QListWidget()
         grid.setViewMode(QListWidget.ViewMode.IconMode)
         grid.setIconSize(QSize(120, 100))
@@ -2508,7 +2465,43 @@ class ChartBrowserDialog(QDialog):
         grid.setWordWrap(True)
         grid.setTextElideMode(Qt.TextElideMode.ElideMiddle)
 
-        # Set stylesheet for grid items
+        self._apply_grid_styles(grid)
+        self._setup_grid_events(grid)
+
+        return grid
+
+    def _create_add_folder_widget(self, location):
+        """Create widget for adding folder path when location path is invalid"""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        add_folder_btn = QPushButton("Add Folder")
+        add_folder_btn.setMinimumSize(200, 80)
+        add_folder_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 16px;
+                font-weight: bold;
+                background-color: #e0e0e0;
+                border: 2px dashed #999;
+                border-radius: 8px;
+                color: #666;
+            }
+            QPushButton:hover {
+                background-color: #d0d0d0;
+                border-color: #777;
+            }
+            QPushButton:pressed {
+                background-color: #c0c0c0;
+            }
+        """)
+        add_folder_btn.clicked.connect(lambda: self._select_folder_for_location(location))
+
+        layout.addWidget(add_folder_btn)
+        return container
+
+    def _apply_grid_styles(self, grid):
+        """Apply styles to chart grid"""
         grid.setStyleSheet("""
             QListWidget::item {
                 border: 1px solid transparent;
@@ -2529,203 +2522,914 @@ class ChartBrowserDialog(QDialog):
             }
         """)
 
+    def _setup_grid_events(self, grid):
+        """Setup event handlers for chart grid"""
         grid.itemDoubleClicked.connect(self.chart_double_clicked)
         grid.itemSelectionChanged.connect(self.on_selection_changed)
-        return grid
+        grid.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        grid.customContextMenuRequested.connect(self.show_chart_context_menu)
 
-    def delete_selected_chart(self):
-        # Get the active grid based on current location
-        active_grid = getattr(self, f"grid_{self.current_location}")
+    def _create_bottom_bar(self, main_layout):
+        """Create the bottom bar with location buttons and action buttons"""
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setSpacing(8)
 
-        # Get the currently selected chart
-        selected_items = active_grid.selectedItems()
-        if not selected_items:
+        self._create_location_buttons(bottom_layout)
+        bottom_layout.addStretch(1)
+        self._create_action_buttons(bottom_layout)
+
+        main_layout.addLayout(bottom_layout)
+
+    def _create_location_buttons(self, bottom_layout):
+        """Create location selector buttons"""
+        self.location_layout = QHBoxLayout()  # Store reference
+        self.location_layout.setSpacing(0)
+
+        for location in self.location_names:
+            if location != 'cloud':  # Hidden for now
+                button = self._create_location_button(location)
+                self.location_layout.addWidget(button)
+                self.location_buttons.append(button)
+
+        # Add plus button for new locations - smaller and round
+        # Count non-default locations (excluding 'local' and potentially 'cloud')
+        non_default_locations = [loc for loc in self.location_names if loc not in ['local', 'cloud']]
+
+        if len(non_default_locations) < 3:
+            self.plus_button = QPushButton()
+            self.plus_button.setCheckable(False)
+            self.plus_button.setToolTip("Add new location")
+            self.plus_button.setIcon(QIcon(':/images/plus-solid.svg'))
+            self.plus_button.clicked.connect(self._add_new_location)
+            self.plus_button.setStyleSheet("""
+                QPushButton {
+                    border: 1px solid #ccc !important;
+                    border-radius: 14px !important;
+                    margin-left: 10px !important;
+                    padding: 0px !important;
+                    min-width: 28px !important;
+                    min-height: 28px !important;
+                    max-width: 28px !important; 
+                    max-height: 28px !important;
+                    background-color: #f8f8f8 !important;
+                }
+                QPushButton:hover {
+                    background-color: #e0e0e0 !important;
+                }
+                QPushButton:pressed {
+                    background-color: #d8d8d8 !important;
+                }
+            """)
+            self.location_layout.addWidget(self.plus_button)
+
+        bottom_layout.addLayout(self.location_layout)
+        spacer = QSpacerItem(20, 1, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
+        bottom_layout.addSpacerItem(spacer)
+
+    def _create_location_button(self, location):
+        """Create a single location button"""
+        button = QPushButton(location.capitalize())
+        button.setCheckable(True)
+        button.setProperty("location", location)
+        button.clicked.connect(self.on_location_button_clicked)
+
+        # Add context menu and tooltip for non-local locations
+        if location != 'local' and location != 'cloud':
+            button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            button.customContextMenuRequested.connect(
+                lambda pos, loc=location: self._show_location_context_menu(pos, loc, button)
+            )
+            button.setToolTip("Right click for options.")
+
+        button.setStyleSheet("""
+            QPushButton {
+                border: 1px solid #c0c0c0;
+                border-radius: 0;
+                padding: 6px 12px;
+                background-color: #f0f0f0;
+                min-width: 80px;
+            }
+            QPushButton:checked {
+                background-color: #e0e0e0;
+                border-bottom: 3px solid #4080c0;
+            }
+            QPushButton:hover:!checked {
+                background-color: #e8e8e8;
+            }
+        """)
+
+        return button
+
+    def _create_action_buttons(self, bottom_layout):
+        """Create action buttons"""
+        self.browse_button = QPushButton("Import")
+        self.browse_button.clicked.connect(self.browse_for_json)
+        bottom_layout.addWidget(self.browse_button)
+
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
+        bottom_layout.addWidget(self.cancel_button)
+
+        self.open_button = QPushButton("Open")
+        self.open_button.clicked.connect(self.open_selected_chart)
+        self.open_button.setEnabled(False)  # Initially disabled
+        self.open_button.setStyleSheet("""
+            QPushButton:disabled {
+                color: #888888;
+            }
+        """)
+        bottom_layout.addWidget(self.open_button)
+
+    def _validate_location_path(self, location):
+        """Check if location has a valid path"""
+        if location == 'local':
+            return True
+        if location == 'cloud':
+            return True  # Cloud is handled separately
+
+        db_locations = self.data_manager.user_preferences.get('db_location', {})
+        path = db_locations.get(location, '')
+
+        if not path or path.lower() == 'none':
+            return False
+
+        return Path(path).exists()
+
+    def _show_location_context_menu(self, position, location, button):
+        """Show context menu for location buttons"""
+        menu = QMenu(self)
+
+        change_path_action = QAction("Change folder", self)
+        change_path_action.triggered.connect(lambda: self._select_folder_for_location(location))
+        menu.addAction(change_path_action)
+
+        if location not in ['local', 'cloud']:  # Don't allow removal of default locations
+            menu.addSeparator()
+            remove_action = QAction("Remove", self)
+            remove_action.triggered.connect(lambda: self._remove_location(location))
+            menu.addAction(remove_action)
+
+        menu.exec(button.mapToGlobal(position))
+
+    def _select_folder_for_location(self, location):
+        """Select folder for a specific location"""
+        current_path = ""
+        if location != 'local':
+            db_locations = self.data_manager.user_preferences.get('db_location', {})
+            current_path = db_locations.get(location, "")
+
+        if not current_path or not Path(current_path).exists():
+            current_path = self.event_bus.emit("get_user_preference", ['home_folder', str(Path.home())])
+
+        folder = QFileDialog.getExistingDirectory(
+            self, f"Select Folder for {location.capitalize()}", current_path
+        )
+
+        if folder:
+            self._update_location_path(location, folder)
+
+    def _update_location_path(self, location, path):
+        """Update the path for a location"""
+        db_locations = self.data_manager.user_preferences.get('db_location', {})
+
+        # If changing path for existing location, we need to update the key
+        if location != 'local' and location != 'cloud':
+            # Remove old entry
+            if location in db_locations:
+                del db_locations[location]
+
+            # Add new entry with directory name as key
+            dir_name = Path(path).name
+
+            # Handle duplicate directory names
+            if dir_name in db_locations and dir_name not in ['local', 'cloud']:
+                counter = 1
+                original_name = dir_name
+                while f"{original_name}_{counter}" in db_locations:
+                    counter += 1
+                dir_name = f"{original_name}_{counter}"
+
+            db_locations[dir_name] = path
+
+            # Update UI to reflect new name
+            for i, button in enumerate(self.location_buttons):
+                if button.property("location") == location:
+                    button.setText(dir_name.capitalize())
+                    button.setProperty("location", dir_name)
+                    # Update context menu connection
+                    try:
+                        button.customContextMenuRequested.disconnect()
+                    except:
+                        pass
+                    button.customContextMenuRequested.connect(
+                        lambda pos, loc=dir_name: self._show_location_context_menu(pos, loc, button)
+                    )
+                    break
+
+            # Update location_names
+            index = self.location_names.index(location)
+            self.location_names[index] = dir_name
+
+            # Update current location if needed
+            if self.current_location == location:
+                self.current_location = dir_name
+        else:
+            # For local/cloud, just update the path
+            db_locations[location] = path
+
+        self.event_bus.emit("update_user_preference", ['db_location', db_locations])
+        self.data_manager.save_user_preferences()
+
+        # Refresh the view
+        self._refresh_location_view(dir_name if location not in ['local', 'cloud'] else location)
+
+    def _add_new_location(self):
+        """Add a new location by selecting folder"""
+        # Check if we already have 3 non-default locations
+        non_default_locations = [loc for loc in self.location_names if loc not in ['local', 'cloud']]
+        if len(non_default_locations) >= 3:
+            QMessageBox.information(self, "Limit Reached", "Maximum of 3 additional locations allowed.")
             return
 
-        # Get the chart_id from the selected item
-        chart_id = selected_items[0].data(Qt.ItemDataRole.UserRole)
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Folder",
+            self.event_bus.emit("get_user_preference", ['home_folder', str(Path.home())])
+        )
 
-        # Use the user prompt system to confirm deletion
+        if folder:
+            db_locations = self.data_manager.user_preferences.get('db_location', {})
+            dir_name = Path(folder).name
+
+            # Handle duplicate directory names
+            if dir_name in db_locations:
+                counter = 1
+                original_name = dir_name
+                while f"{original_name}_{counter}" in db_locations:
+                    counter += 1
+                dir_name = f"{original_name}_{counter}"
+
+            db_locations[dir_name] = folder
+            self.event_bus.emit("update_user_preference", ['db_location', db_locations])
+            self.data_manager.save_user_preferences()
+
+            # Add to location_names
+            self.location_names.append(dir_name)
+
+            # Create button
+            button = self._create_location_button(dir_name)
+
+            # Insert before plus button
+            if self.plus_button:
+                plus_index = self.location_layout.indexOf(self.plus_button)
+                self.location_layout.insertWidget(plus_index, button)
+            else:
+                self.location_layout.addWidget(button)
+
+            self.location_buttons.append(button)
+
+            # Hide plus button if we've reached the limit
+            if len(non_default_locations) + 1 >= 3 and self.plus_button:
+                self.plus_button.hide()
+
+            # Create stacked widget
+            grid = self._create_charts_grid()
+            self.location_grids[dir_name] = grid
+
+            container = QWidget()
+            layout = QVBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(grid)
+
+            self.stacked_widget.addWidget(container)
+
+            # Load charts for the new location
+            self._load_charts_for_location(dir_name)
+
+            # Switch to the new location
+            self.set_active_location(dir_name)
+
+    def _remove_location(self, location):
+        """Remove a location after confirmation"""
         data = {
-            'title': "Delete Chart",
-            'message': f"Delete {chart_id}?",
+            'title': "Remove Location",
+            'message': f"Remove location '{location}'?\nAll data in this location will be deleted.",
             'options': ['Yes', 'No']
         }
         result = self.event_bus.emit('trigger_user_prompt', data)
 
-        # Delete if user confirmed (selected "Yes")
-        if result == 0:  # "Yes" is index 0
-            # Delete the chart using event bus
-            self.event_bus.emit('delete_chart', chart_id)
+        if result == 0:  # "Yes"
+            db_locations = self.data_manager.user_preferences.get('db_location', {})
+            if location in db_locations:
+                # Delete files before removing from preferences
+                location_path = db_locations[location]
+                if location_path and Path(location_path).exists():
+                    try:
+                        # Delete all JSON files in the location
+                        for json_file in Path(location_path).glob("*.json"):
+                            json_file.unlink()
+                    except Exception as e:
+                        print(f"Error deleting files in {location_path}: {e}")
 
-            # Refresh the chart grid
-            self.load_charts()
+                del db_locations[location]
 
-    def on_selection_changed(self):
-        """Enable the Open and Delete buttons if a chart is selected"""
-        # Get active grid based on current location
-        active_grid = getattr(self, f"grid_{self.current_location}")
+                self.event_bus.emit("update_user_preference", ['db_location', db_locations])
+                self.data_manager.save_user_preferences()
 
-        # Only enable buttons for Local tab for now
-        if self.current_location != 'local':
-            self.delete_button.setEnabled(False)
-            self.delete_button.setStyleSheet("QPushButton { color: #a0a0a0; }")
+                # Remove from location_names
+                if location in self.location_names:
+                    index = self.location_names.index(location)
+                    self.location_names.remove(location)
+
+                    # Remove button
+                    for i, button in enumerate(self.location_buttons):
+                        if button.property("location") == location:
+                            button.hide()
+                            button.setParent(None)
+                            button.deleteLater()
+                            self.location_buttons.pop(i)
+                            break
+
+                    # Remove stacked widget
+                    if index < self.stacked_widget.count():
+                        widget = self.stacked_widget.widget(index)
+                        self.stacked_widget.removeWidget(widget)
+                        widget.deleteLater()
+
+                    # Remove from grids
+                    if location in self.location_grids:
+                        del self.location_grids[location]
+
+                # Show plus button if we're now under the limit
+                non_default_locations = [loc for loc in self.location_names if loc not in ['local', 'cloud']]
+                if len(non_default_locations) < 3 and self.plus_button:
+                    self.plus_button.show()
+
+                # Switch to local if current location was removed
+                if self.current_location == location:
+                    self.set_active_location('local')
+
+    def _refresh_location_view(self, location):
+        """Refresh view for a specific location"""
+        if location in self.location_names:
+            index = self.location_names.index(location)
+
+            # Create new widget based on path validity
+            if self._validate_location_path(location):
+                grid = self._create_charts_grid()
+                self.location_grids[location] = grid
+
+                container = QWidget()
+                layout = QVBoxLayout(container)
+                layout.setContentsMargins(0, 0, 0, 0)
+                layout.addWidget(grid)
+
+                # Load charts for this location
+                self._load_charts_for_location(location)
+            else:
+                container = self._create_add_folder_widget(location)
+                if location in self.location_grids:
+                    del self.location_grids[location]
+
+            # Replace the widget in the stack
+            old_widget = self.stacked_widget.widget(index)
+            self.stacked_widget.removeWidget(old_widget)
+            old_widget.deleteLater()
+            self.stacked_widget.insertWidget(index, container)
+
+            # Update current view if this is the active location
+            if self.current_location == location:
+                self.stacked_widget.setCurrentIndex(index)
+
+    def _start_username_edit(self, event):
+        """Start editing the username field on double-click"""
+        # Extract just the username part for editing
+        current_text = self.username_field.text()
+        if current_text.startswith(self.username_prefix):
+            username_only = current_text[len(self.username_prefix):]
+            self.username_field.setText(username_only)
+
+        self.username_field.setReadOnly(False)
+        self.username_field.setProperty("readOnly", False)
+        self.username_field.style().polish(self.username_field)
+        self.username_field.selectAll()
+        self.username_field.setFocus()
+
+    def _finish_username_edit(self):
+        """Finish editing the username field and apply changes"""
+        full_text = self.username_field.text().strip()
+        # Extract username part after prefix
+        if full_text.startswith(self.username_prefix):
+            new_username = full_text[len(self.username_prefix):]
+        else:
+            new_username = full_text
+
+        current_username = self.event_bus.emit("get_user_preference", ['user_name', ''])
+
+        # Set back to read-only and update style
+        self.username_field.setReadOnly(True)
+        self.username_field.setProperty("readOnly", True)
+        self.username_field.style().polish(self.username_field)
+
+        # Validate and update username
+        if new_username and new_username != current_username and len(new_username) <= 50:
+            success = self.event_bus.emit('update_username_ownership', {
+                'old_username': current_username,
+                'new_username': new_username
+            })
+
+            if success:
+                # Update field width based on new username with prefix
+                font_metrics = self.username_field.fontMetrics()
+                text_width = font_metrics.horizontalAdvance(f"{self.username_prefix}{new_username}  ")
+                min_width = max(text_width + 24, 60)
+                self.username_field.setFixedWidth(min_width)
+
+                self.load_charts()  # Refresh charts to reflect ownership changes
+            else:
+                self.username_field.setText(f"{self.username_prefix}{current_username}")  # Reset on failure
+        else:
+            self.username_field.setText(f"{self.username_prefix}{current_username}")
+
+    def set_active_location(self, location):
+        """Set the active location and update UI"""
+        if location not in self.location_names:
+            location = self.location_names[0] if self.location_names else 'local'
+
+        self.current_location = location
+        index = self.location_names.index(location)
+        self.stacked_widget.setCurrentIndex(index)
+
+        # Update button states
+        for button in self.location_buttons:
+            btn_loc = button.property("location")
+            button.setChecked(btn_loc == location)
+
+        # Save preference
+        self.event_bus.emit("update_user_preference", ['last_open_tab', location])
+        self.on_selection_changed()
+
+    def on_location_button_clicked(self):
+        """Handle location button clicks"""
+        button = self.sender()
+        location = button.property("location")
+        self.set_active_location(location)
+
+    # Chart Loading and Display
+    def load_charts(self):
+        """Load charts for all locations"""
+        # Clear all grids first
+        for grid in self.location_grids.values():
+            grid.clear()
+
+        # Load charts for each location that has a valid path
+        for location in self.location_names:
+            if self._validate_location_path(location):
+                self._load_charts_for_location(location)
+
+    def _load_charts_for_location(self, location):
+        """Load charts for a specific location"""
+        if not self._validate_location_path(location):
             return
 
-        selected_items = active_grid.selectedItems()
-        is_selected = len(selected_items) > 0
+        try:
+            grid = self.location_grids.get(location)
+            if not grid:
+                return
 
-        # Enable/disable buttons
-        self.delete_button.setEnabled(is_selected)
+            chart_ids = self.event_bus.emit('get_chart_ids_for_location', location)
 
-        # Visual indication for delete button
-        if is_selected:
-            self.delete_button.setStyleSheet("")
-        else:
-            self.delete_button.setStyleSheet("QPushButton { color: #a0a0a0; }")
+            for chart_id in chart_ids:
+                try:
+                    self._create_chart_item(grid, chart_id, location)
+                except Exception as e:
+                    print(f"Error creating chart item for {chart_id}: {e}")
 
-    def add_frame_to_pixmap(self, pixmap):
+        except Exception as e:
+            print(f"Error loading charts for location {location}: {e}")
+
+    def _create_chart_item(self, grid, chart_id, location):
+        """Create a chart item for the grid"""
+        # Get chart metadata
+        chart_data = self.event_bus.emit('get_chart_metadata', chart_id)
+        if not chart_data:
+            return
+
+        metadata = chart_data['metadata']
+        thumbnail_data = chart_data['thumbnail']
+
+        # Create list item
+        item = QListWidgetItem()
+
+        # Set item text and data
+        self._configure_chart_item_text(item, chart_id, metadata)
+        self._configure_chart_item_icon(item, chart_id, location, thumbnail_data)
+
+        # Set tooltip based on ownership
+        permissions = self.event_bus.emit('get_chart_permissions', chart_id)
+        is_owner = permissions.get('is_owner', False)
+
+        if is_owner:
+            item.setToolTip("Double left click to open.\nRight click for options.")
+        elif location != 'local':
+            # Get owner information from database for non-owned charts
+            owner_result = self.data_manager.sqlite_manager._execute_with_retry(
+                f"SELECT owner FROM {self.data_manager.sqlite_manager.TABLE_CHART_METADATA} WHERE chart_id = ?",
+                (chart_id,),
+                fetch='one'
+            )
+
+            if owner_result and owner_result[0]:
+                owner_name = owner_result[0]
+                item.setToolTip(f"{owner_name}'s chart")
+
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        grid.addItem(item)
+
+    def _configure_chart_item_text(self, item, chart_id, metadata):
+        """Configure chart item text and user data"""
+        # Extract chart name (remove timestamp if present)
+        last_underscore = chart_id.rfind('_')
+        chart_name = chart_id[:last_underscore] if last_underscore != -1 else chart_id
+        chart_type = metadata.get('type', 'Unknown')
+
+        item.setText(f"{chart_name}\n{chart_type}")
+        item.setData(Qt.ItemDataRole.UserRole, chart_id)
+
+        # Store credit lines for search functionality
+        credit_lines = metadata.get('credit', [])
+        if credit_lines and isinstance(credit_lines, (list, tuple)):
+            credit_text = " ".join(str(line) for line in credit_lines)
+            item.setData(Qt.ItemDataRole.UserRole + 1, credit_text)
+
+    def _configure_chart_item_icon(self, item, chart_id, location, thumbnail_data):
+        """Configure chart item icon with permission indicators"""
+        if not thumbnail_data:
+            item.setIcon(QIcon.fromTheme("image-missing"))
+            return
+
+        try:
+            original_pixmap = QPixmap()
+            if not original_pixmap.loadFromData(thumbnail_data) or original_pixmap.isNull():
+                item.setIcon(QIcon.fromTheme("image-missing"))
+                return
+
+            # Add permission indicator for shared locations
+            if location != 'local':
+                final_pixmap = self._add_permission_indicator(original_pixmap, chart_id)
+            else:
+                final_pixmap = self._add_frame_to_pixmap(original_pixmap)
+
+            item.setIcon(QIcon(final_pixmap))
+
+        except Exception as e:
+            print(f"Error processing thumbnail for chart {chart_id}: {e}")
+            item.setIcon(QIcon.fromTheme("image-missing"))
+
+    def _add_frame_to_pixmap(self, pixmap):
         """Add a black frame around a pixmap"""
         if pixmap.isNull():
             return pixmap
 
-        # Create a slightly larger pixmap to accommodate the frame
-        frame_width = 2  # 2px border
+        frame_width = 2
         width = pixmap.width() + (frame_width * 2)
         height = pixmap.height() + (frame_width * 2)
 
         framed_pixmap = QPixmap(width, height)
-        framed_pixmap.fill(Qt.GlobalColor.transparent)  # Start with transparent background
+        framed_pixmap.fill(Qt.GlobalColor.transparent)
 
-        # Create painter for drawing
         painter = QPainter(framed_pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.drawPixmap(frame_width, frame_width, pixmap)
+        painter.setPen(QPen(QColor(0, 0, 0), frame_width))
+        painter.drawRect(frame_width // 2, frame_width // 2, width - frame_width, height - frame_width)
+        painter.end()
 
-        # Draw the original pixmap in the center
+        return framed_pixmap
+
+    def _add_permission_indicator(self, pixmap, chart_id):
+        """Add permission indicator to pixmap"""
+        if pixmap.isNull():
+            return pixmap
+
+        frame_width = 2
+        width = pixmap.width() + (frame_width * 2)
+        height = pixmap.height() + (frame_width * 2)
+
+        framed_pixmap = QPixmap(width, height)
+        framed_pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(framed_pixmap)
+
+        # Draw the original pixmap
         painter.drawPixmap(frame_width, frame_width, pixmap)
 
-        # Draw the black frame
+        # Draw frame
         painter.setPen(QPen(QColor(0, 0, 0), frame_width))
-        painter.drawRect(frame_width // 2, frame_width // 2,
-                         width - frame_width, height - frame_width)
+        painter.drawRect(frame_width // 2, frame_width // 2, width - frame_width, height - frame_width)
+
+        # Get permissions and draw indicator
+        permissions = self.event_bus.emit('get_chart_permissions', chart_id)
+        is_owner = permissions.get('is_owner', False)
+        has_write_access = permissions.get('has_write_access', False)
+
+        # Draw permission indicator
+        self._draw_permission_icon(painter, width, height, is_owner, has_write_access)
 
         painter.end()
         return framed_pixmap
 
-    def load_charts(self):
-        # Clear all grids
-        self.grid_local.clear()
-        self.grid_cloud.clear()
-        self.grid_other.clear()
+    def _draw_permission_icon(self, painter, width, height, is_owner, has_write_access):
+        """Draw permission icon on the pixmap"""
+        icon_size = int(width * 0.2)
+        icon_x = width - icon_size - 4
+        icon_y = 4
 
-        # Only load data for local tab for now
-        active_grid = self.grid_local
+        # Choose icon and background color based on permissions
+        if is_owner:
+            icon_path = ':/images/crown-solid.svg'
+            background_color = QColor(255, 230, 150, 180)
+        elif has_write_access:
+            icon_path = ':/images/pen-to-square-regular.svg'
+            background_color = QColor(150, 220, 150, 180)
+        else:
+            icon_path = ':/images/eye-regular.svg'
+            background_color = QColor(150, 180, 255, 180)
 
-        # Get chart IDs from SQLite database
-        chart_ids = self.data_manager.sqlite_manager.get_all_chart_ids()
+        # Draw background circle
+        painter.setBrush(background_color)
+        painter.setPen(QPen(QColor(0, 0, 0), 1))
+        painter.drawEllipse(icon_x, icon_y, icon_size, icon_size)
 
-        # Clear metadata cache
-        self.chart_metadata_cache.clear()
+        # Draw icon
+        icon_pixmap = QPixmap(icon_path)
+        if not icon_pixmap.isNull():
+            icon_inner_size = int(icon_size * 0.7)
+            icon_offset = (icon_size - icon_inner_size) // 2
 
-        for chart_id in chart_ids:
-            # Get metadata and thumbnail for the chart
-            metadata = self._get_chart_metadata(chart_id)
-            thumbnail_data = self.data_manager.sqlite_manager.get_chart_thumbnail(chart_id)
+            scaled_icon = icon_pixmap.scaled(
+                icon_inner_size,
+                icon_inner_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
 
-            if metadata:
-                # Store metadata in cache for search filtering
-                self.chart_metadata_cache[chart_id] = metadata
+            icon_draw_x = icon_x + icon_offset + (icon_inner_size - scaled_icon.width()) // 2
+            icon_draw_y = icon_y + icon_offset + (icon_inner_size - scaled_icon.height()) // 2
+            painter.drawPixmap(icon_draw_x, icon_draw_y, scaled_icon)
 
-                # Create list item for the grid
-                item = QListWidgetItem()
+    # Chart Operations
+    def show_chart_context_menu(self, position):
+        """Show context menu when right-clicking on a chart"""
+        if self.current_location not in self.location_grids:
+            return
 
-                # Set chart name
-                chart_name = Path(chart_id).stem
+        grid = self.location_grids[self.current_location]
+        item = grid.itemAt(position)
 
-                # Get chart type
-                chart_type = metadata.get('type', 'Unknown')
+        if not item:
+            return
 
-                # Set display text - keep it shorter to ensure tight layout
-                item.setText(f"{chart_name}\n{chart_type}")
+        chart_id = item.data(Qt.ItemDataRole.UserRole)
+        menu = QMenu(self)
 
-                # Store metadata for search filtering
-                item.setData(Qt.ItemDataRole.UserRole, chart_id)
+        # Get chart sync status and permissions
+        is_synced = self.event_bus.emit('is_chart_synced', chart_id)
+        permissions = self.event_bus.emit('get_chart_permissions', chart_id)
+        is_owner = permissions.get('is_owner', False)
 
-                # Add credit lines as additional search data
-                credit_lines = metadata.get('credit', [])
-                if credit_lines and isinstance(credit_lines, (list, tuple)):
-                    credit_text = " ".join(str(line) for line in credit_lines)
-                    item.setData(Qt.ItemDataRole.UserRole + 1, credit_text)
+        # Add delete option for owned charts
+        if is_owner:
+            delete_action = QAction("Delete", self)
+            delete_action.triggered.connect(lambda: self.delete_chart(chart_id))
+            menu.addAction(delete_action)
 
-                # Set icon with black frame by creating a framed pixmap
-                if thumbnail_data:
-                    original_pixmap = QPixmap()
-                    original_pixmap.loadFromData(thumbnail_data)
+        if not is_synced:
+            self._add_share_menu_items(menu, chart_id)
+        else:
+            self._add_sync_management_items(menu, chart_id, is_owner)
 
-                    # Create a new pixmap with a border
-                    framed_pixmap = self.add_frame_to_pixmap(original_pixmap)
-                    item.setIcon(QIcon(framed_pixmap))
-                else:
-                    # Use a default icon if no thumbnail
-                    item.setIcon(QIcon.fromTheme("image-missing"))
+        if menu.actions():
+            menu.exec(grid.mapToGlobal(position))
 
-                # Set alignment
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+    def _add_share_menu_items(self, menu, chart_id):
+        """Add share options to context menu"""
+        # Get permissions to check if user owns the chart
+        permissions = self.event_bus.emit('get_chart_permissions', chart_id)
+        is_owner = permissions.get('is_owner', False)
 
-                # Add to grid view
-                active_grid.addItem(item)
+        if is_owner:
+            # Add export option for owned charts even if not synced
+            export_action = QAction("Export", self)
+            export_action.triggered.connect(lambda: self.export_chart(chart_id))
+            menu.addAction(export_action)
+            menu.addSeparator()
 
-    def _get_chart_metadata(self, chart_id):
-        """Get metadata for a chart from the database"""
-        try:
-            # Query the database
-            conn = self.data_manager.sqlite_manager.connection
-            if not conn:
-                self.data_manager.sqlite_manager.connect()
-                conn = self.data_manager.sqlite_manager.connection
+        db_locations = self.data_manager.user_preferences.get('db_location', {})
+        sync_locations = [loc for loc in db_locations.keys() if loc != 'local']
 
-            if conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    f"SELECT metadata FROM {self.data_manager.sqlite_manager.TABLE_CHART_METADATA} WHERE chart_id = ?",
-                    (chart_id,)
+        if sync_locations:
+            for location in sync_locations:
+                share_action = QAction(f"Share to {location.capitalize()}", self)
+                share_action.triggered.connect(
+                    lambda checked, loc=location: self._share_chart_to_location(chart_id, loc)
                 )
-                result = cursor.fetchone()
+                menu.addAction(share_action)
 
-                if result and result[0]:
-                    # Parse the JSON metadata
-                    return json.loads(result[0])
+    def export_chart(self, chart_id):
+        """Export a chart to JSON file"""
+        try:
+            # Extract display name for the default filename
+            underscore = chart_id.rfind('_')
+            display_chart_name = chart_id[:underscore] if underscore != -1 else chart_id
 
-            return None
+            # Get export folder preference
+            export_folder = self.event_bus.emit("get_user_preference", ['export_folder', ''])
+            if not export_folder:
+                export_folder = self.event_bus.emit("get_user_preference", ['home_folder', str(Path.home())])
+
+            # Open file dialog
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export chart",
+                str(Path(export_folder) / f"{display_chart_name}.json"),
+                "JSON Files (*.json);;All Files (*)"
+            )
+
+            if not file_path:
+                return
+
+            # Ensure .json extension
+            if not file_path.endswith('.json'):
+                file_path += '.json'
+
+            # Save export directory preference
+            export_dir = str(Path(file_path).parent)
+            self.event_bus.emit("update_user_preference", ['export_folder', export_dir])
+
+            # Export the chart through the event bus
+            success = self.event_bus.emit('export_json_from_database', {
+                'chart_id': chart_id,
+                'file_path': file_path
+            })
+
+            if success:
+                QMessageBox.information(self, "Export Successful", f"Chart exported to {file_path}")
+            else:
+                QMessageBox.warning(self, "Export Failed", "Failed to export chart. Please try again.")
+
         except Exception as e:
-            print(f"Error retrieving chart metadata: {e}")
-            return None
+            print(f"Error exporting chart {chart_id}: {e}")
+            QMessageBox.warning(self, "Export Error", f"An error occurred while exporting: {str(e)}")
 
+    def _add_sync_management_items(self, menu, chart_id, is_owner):
+        """Add sync management options to context menu"""
+        if is_owner:
+            # Add export option
+            export_action = QAction("Export Chart", self)
+            export_action.triggered.connect(lambda: self.export_chart(chart_id))
+            menu.addAction(export_action)
+
+            # Add separator before other options
+            menu.addSeparator()
+
+            # Add unsync option
+            unsync_action = QAction("Stop sharing", self)
+            unsync_action.triggered.connect(lambda: self._unsync_chart(chart_id))
+            menu.addAction(unsync_action)
+
+            # Add toggle accepting changes option
+            self._add_accepting_changes_toggle(menu, chart_id)
+
+    def _add_accepting_changes_toggle(self, menu, chart_id):
+        """Add accepting changes toggle to context menu"""
+        try:
+            permissions = self.event_bus.emit('get_chart_permissions', chart_id)
+            is_owner = permissions.get('is_owner', False)
+            accepting_changes = permissions.get('accepting_changes', False)
+
+            if is_owner:
+                if accepting_changes:
+                    action_text = "Disable remote edits"
+                else:
+                    action_text = "Allow remote edits"
+
+                toggle_action = QAction(action_text, self)
+                toggle_action.triggered.connect(lambda: self._toggle_accepting_changes(chart_id))
+                menu.addAction(toggle_action)
+
+        except Exception as e:
+            print(f"Error adding accepting_changes toggle for chart {chart_id}: {e}")
+
+    def _share_chart_to_location(self, chart_id, location):
+        """Share a chart to the specified location"""
+        success = self.event_bus.emit('share_chart_to_location', {
+            'chart_id': chart_id,
+            'location': location
+        })
+
+        if success:
+            self.load_charts()
+
+    def _unsync_chart(self, chart_id):
+        """Remove chart from sync"""
+        # Extract display name for confirmation
+        underscore = chart_id.rfind('_')
+        display_chart_name = chart_id[:underscore] if underscore != -1 else chart_id
+
+        data = {
+            'title': "Remove from Sync",
+            'message': f"Remove '{display_chart_name}' from sync? This will stop sharing it to remote locations.",
+            'options': ['Yes', 'No']
+        }
+        result = self.event_bus.emit('trigger_user_prompt', data)
+
+        if result == 0:  # "Yes"
+            new_chart_id = self.event_bus.emit('unsync_chart', chart_id)
+            if new_chart_id:
+                self.load_charts()
+            else:
+                print(f"Failed to unsync chart {chart_id}")
+
+    def _toggle_accepting_changes(self, chart_id):
+        """Toggle accepting_changes for a chart"""
+        success = self.event_bus.emit('toggle_accepting_changes', chart_id)
+        if success:
+            # Refresh current location to update icons - but clear first to prevent duplication
+            grid = self.location_grids[self.current_location]
+            grid.clear()
+            self._load_charts_for_location(self.current_location)
+
+    def delete_chart(self, chart_id):
+        """Delete the specified chart"""
+
+        underscore_idx = chart_id.rfind('_')
+        chart_name = chart_id[:underscore_idx]
+        data = {
+            'title': "Delete Chart",
+            'message': f"Delete {chart_name}?",
+            'options': ['Yes', 'No']
+        }
+        result = self.event_bus.emit('trigger_user_prompt', data)
+
+        if result == 0:
+            success = self.event_bus.emit('delete_chart', chart_id)
+            if success:
+                self.load_charts()
+
+    # Search and Filter
     def filter_charts(self):
-        """Filter charts based on search input - includes credit lines"""
-        search_text = self.search_input.text().lower()
+        """Filter charts with & for AND and , for OR"""
+        search_text = self.search_input.text().strip()
 
-        # Only filter the current active grid
-        active_grid = getattr(self, f"grid_{self.current_location}")
+        if self.current_location in self.location_grids:
+            grid = self.location_grids[self.current_location]
 
-        if self.current_location == 'local':  # Only filter local tab (has actual data)
-            for i in range(active_grid.count()):
-                item = active_grid.item(i)
+            for i in range(grid.count()):
+                item = grid.item(i)
                 if item:
-                    # Get item text (name and type)
                     item_text = item.text().lower()
+                    credit_text = (item.data(Qt.ItemDataRole.UserRole + 1) or "").lower()
+                    combined_text = f"{item_text} {credit_text}"
 
-                    # Get credit lines from cached metadata
-                    chart_id = item.data(Qt.ItemDataRole.UserRole)
-                    credit_text = item.data(Qt.ItemDataRole.UserRole + 1) or ""
-                    credit_text = credit_text.lower()
+                    if not search_text:
+                        item.setHidden(False)
+                    elif ',' in search_text:
+                        # Split by comma - any term can match (OR)
+                        or_terms = [term.strip() for term in search_text.lower().split(',') if term.strip()]
+                        should_hide = not any(term in combined_text for term in or_terms)
+                        item.setHidden(should_hide)
+                    elif '&' in search_text:
+                        # Split by ampersand - all terms must match (AND)
+                        and_terms = [term.strip() for term in search_text.lower().split('&') if term.strip()]
+                        should_hide = not all(term in combined_text for term in and_terms)
+                        item.setHidden(should_hide)
+                    else:
+                        # No operators, treat as single search term
+                        should_hide = search_text.lower() not in combined_text
+                        item.setHidden(should_hide)
 
-                    # Show item if search text is in either name, type, or credit lines
-                    # Only hide if: there is a search text AND it's not found in either place
-                    should_hide = bool(search_text) and (search_text not in item_text) and (
-                                search_text not in credit_text)
-                    item.setHidden(should_hide)
+    def on_selection_changed(self):
+        """Handle selection changes"""
+        # Enable/disable Open button based on selection
+        has_selection = False
+        if self.current_location in self.location_grids:
+            grid = self.location_grids[self.current_location]
+            has_selection = len(grid.selectedItems()) > 0
 
+        self.open_button.setEnabled(has_selection)
+
+    def open_selected_chart(self):
+        """Open the currently selected chart"""
+        if self.current_location not in self.location_grids:
+            return
+
+        grid = self.location_grids[self.current_location]
+        selected_items = grid.selectedItems()
+
+        if selected_items:
+            item = selected_items[0]
+            self.chart_double_clicked(item)
+
+    # File Operations
     def chart_double_clicked(self, item):
         """Handle double-click on a chart item"""
         self.selected_chart_id = item.data(Qt.ItemDataRole.UserRole)
@@ -2733,18 +3437,30 @@ class ChartBrowserDialog(QDialog):
 
     def browse_for_json(self):
         """Open file dialog to browse for JSON file"""
+        home_folder = self.event_bus.emit("get_user_preference", ['home_folder', str(Path.home())])
+
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             'Select chart file',
-            self.data_manager.user_preferences['home_folder'],
+            home_folder,
             'JSON files (*.json);;All files (*.*)'
         )
 
         if file_path:
-            # Store both the chart_id (for database lookup) and the full file path
-            self.selected_chart_id = Path(file_path).stem
-            self.selected_file_path = file_path  # Store the full path
-            self.accept()
+            chart_id = Path(file_path).stem
+
+            # Import to database without opening
+            success = self.event_bus.emit('json_import_to_database', {
+                'json_file_path': file_path,
+                'chart_id': chart_id
+            })
+
+            if success:
+                # Refresh charts to show the newly imported chart as thumbnail
+                self.load_charts()
+                # Don't set selected_chart_id or call accept() - just show as thumbnail
+            else:
+                QMessageBox.warning(self, "Import Failed", "Failed to import the selected chart file.")
 
     def get_selected_chart_path(self):
         """Return the full path or ID of the selected chart"""
@@ -2753,4 +3469,8 @@ class ChartBrowserDialog(QDialog):
         elif self.selected_chart_id:
             return self.selected_chart_id
         return None
+
+    def resizeEvent(self, event):
+        """Handle resize events"""
+        super().resizeEvent(event) if event else None
 

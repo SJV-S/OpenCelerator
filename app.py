@@ -1,6 +1,7 @@
 from app_imports import *
 from FigureManager import FigureManager
 from DataManager import DataManager
+from database import DatabaseMonitor
 from EventStateManager import EventBus, StateRegistry
 from Popups import SaveImageDialog, StartDateDialog, SupportDevDialog, NoteDialog, DataColumnMappingDialog, UserPrompt
 from Modes import ViewModeWidget, StyleModeWidget, PhaseModeWidget, AimModeWidget, TrendModeWidget, NoteModeWidget, PlotModeWidget
@@ -40,7 +41,7 @@ class ChartApp(QMainWindow):
 
         # Initialize the main window properties
         version = self.event_bus.emit("get_user_preference", ['version', ''])
-        self.window_title_str = f'OpenCelerator v{version}'
+        self.window_title_str = f'OpenCelerator v{version}' if version else 'OpenCelerator'
         self.setWindowTitle(self.window_title_str)
         self.setWindowIcon(QIcon(':/images/opencelerator_logo_no_text.svg'))
 
@@ -114,6 +115,11 @@ class ChartApp(QMainWindow):
 
         # Check version change status
         self.report_on_version_change()
+
+        # Setup remote db sync
+        self.event_bus.emit('sync_remotes')  # Initial sync on boot
+        self.db_monitor = DatabaseMonitor(self.data_manager)
+        QTimer.singleShot(1000, self.db_monitor.start_monitoring)  # Start monitoring remote db for changes
 
     def report_on_version_change(self):
         if hasattr(sys, 'version_change_status') and sys.version_change_status:
@@ -296,37 +302,7 @@ class ChartApp(QMainWindow):
         settings_layout = QVBoxLayout()
         self.tab_settings.setLayout(settings_layout)
 
-        # Create a group for preferences
-        preferences_group = QGroupBox("Preferences")
-        preferences_group_layout = QVBoxLayout()
-        preferences_group.setLayout(preferences_group_layout)
-
-        # Reset preferences to default
-        self.reset_preferences_btn = QPushButton('Reset')
-        self.reset_preferences_btn.clicked.connect(self.reset_preferences_msg)
-        preferences_group_layout.addWidget(self.reset_preferences_btn)
-
-        # Autosave
-        settings_autosave_label = QLabel('Autosave')
-        self.settings_autosave_options = QComboBox()
-        self.settings_autosave_options.addItem("On")
-        self.settings_autosave_options.addItem("Off")
-        autosave = self.event_bus.emit("get_user_preference", ['autosave', False])
-        self.settings_autosave_options.setCurrentText("On" if autosave else "Off")
-        self.settings_autosave_options.currentIndexChanged.connect(lambda index: self.event_bus.emit("update_user_preference", ['autosave', self.settings_autosave_options.currentText() == "On"]))
-        preferences_group_layout.addWidget(settings_autosave_label)
-        preferences_group_layout.addWidget(self.settings_autosave_options)
-
-        update_checker_settings = QComboBox()
-        update_checker_label = QLabel('Updates')
-        update_checker_settings.addItems(['Auto', 'Off'])
-        update_policy = self.event_bus.emit("get_user_preference", ['update', 'Off'])
-        update_checker_settings.setCurrentText(update_policy)
-        update_checker_settings.activated.connect(lambda idx: self.event_bus.emit("update_user_preference", ['update', update_checker_settings.currentText()]))
-        preferences_group_layout.addWidget(update_checker_label)
-        preferences_group_layout.addWidget(update_checker_settings)
-
-        # Create group for Chart types
+        # Create group for Chart types (moved to top)
         chart_type_settings_group = QGroupBox('Chart')
         chart_type_settings_layout = QVBoxLayout()
         chart_type_settings_group.setLayout(chart_type_settings_layout)
@@ -354,7 +330,6 @@ class ChartApp(QMainWindow):
         if index != -1:
             self.chart_type_settings_dropdown.setCurrentIndex(index)
         self.chart_type_settings_dropdown.currentIndexChanged.connect(self.event_handlers.change_chart_type)
-        settings_layout.addWidget(chart_type_settings_group)
 
         # Zero counts below timing floor or don't display
         settings_zero_count_handling_label = QLabel('Zero counts')
@@ -374,7 +349,6 @@ class ChartApp(QMainWindow):
         self.settings_zero_count_handling.currentIndexChanged.connect(
             lambda index: self.event_handlers.update_zero_count_handling(
                 self.settings_zero_count_handling.itemData(index)))
-        settings_layout.addWidget(preferences_group)
 
         # SpinBox for chart size
         chart_size_label = QLabel("Width (6 - 15)")
@@ -403,6 +377,49 @@ class ChartApp(QMainWindow):
         self.chart_grid_color_button.clicked.connect(
             lambda: self.event_handlers.choose_color(color_category='chart_grid_color'))
 
+        settings_layout.addWidget(chart_type_settings_group)
+
+        # Add spacing between Chart and Preferences
+        settings_layout.addSpacing(20)
+
+        # Create a group for preferences
+        preferences_group = QGroupBox("Preferences")
+        preferences_group_layout = QVBoxLayout()
+        preferences_group.setLayout(preferences_group_layout)
+
+        # Reset preferences to default
+        self.reset_preferences_btn = QPushButton('Reset')
+        self.reset_preferences_btn.clicked.connect(self.reset_preferences_msg)
+        preferences_group_layout.addWidget(self.reset_preferences_btn)
+
+        # Autosave
+        settings_autosave_label = QLabel('Autosave')
+        self.settings_autosave_options = QComboBox()
+        self.settings_autosave_options.addItem("On")
+        self.settings_autosave_options.addItem("Off")
+        autosave = self.event_bus.emit("get_user_preference", ['autosave', False])
+        self.settings_autosave_options.setCurrentText("On" if autosave else "Off")
+        self.settings_autosave_options.currentIndexChanged.connect(
+            lambda index: self.event_bus.emit("update_user_preference",
+                                              ['autosave', self.settings_autosave_options.currentText() == "On"]))
+        preferences_group_layout.addWidget(settings_autosave_label)
+        preferences_group_layout.addWidget(self.settings_autosave_options)
+
+        update_checker_settings = QComboBox()
+        update_checker_label = QLabel('Updates')
+        update_checker_settings.addItems(['Auto', 'Off'])
+        update_policy = self.event_bus.emit("get_user_preference", ['update', 'Off'])
+        update_checker_settings.setCurrentText(update_policy)
+        update_checker_settings.activated.connect(lambda idx: self.event_bus.emit("update_user_preference", ['update',
+                                                                                                             update_checker_settings.currentText()]))
+        preferences_group_layout.addWidget(update_checker_label)
+        preferences_group_layout.addWidget(update_checker_settings)
+
+        settings_layout.addWidget(preferences_group)
+
+        # Add spacing between Preferences and Misc
+        settings_layout.addSpacing(20)
+
         # Create a group for Other settings
         other_settings_group = QGroupBox('Misc')
         other_settings_layout = QVBoxLayout()
@@ -411,12 +428,13 @@ class ChartApp(QMainWindow):
         settings_test_angle_check = QCheckBox('Test angle')
         other_settings_layout.addWidget(settings_test_angle_check)
         settings_test_angle_check.stateChanged.connect(self.event_handlers.test_angle)
-        settings_layout.addWidget(other_settings_group)
 
         self.right_dev_btn = QPushButton('Support developer')
         self.right_dev_btn.setStyleSheet('font-weight: bold; background-color: #96deeb')
         other_settings_layout.addWidget((self.right_dev_btn))
         self.right_dev_btn.clicked.connect(self.support_dev_btn_clicked)
+
+        settings_layout.addWidget(other_settings_group)
 
         # Push everything to the top
         settings_layout.addStretch()
@@ -438,47 +456,45 @@ class ChartApp(QMainWindow):
             QApplication.instance().quit()
 
     def save_decision(self, event=None):
-        autosave = self.event_bus.emit("get_user_preference", ['autosave', False])
+        # Collect all bools and variables needed for decision making
         chart_file_path = self.data_manager.chart_data['chart_file_path']
+        autosave = self.event_bus.emit("get_user_preference", ['autosave', False])
         data_exists = self.data_manager.df_raw is not None and not self.data_manager.df_raw.empty
+        has_chart_path = bool(chart_file_path)
+        save_needed = self.event_bus.emit('has_chart_changed', chart_file_path) if has_chart_path else False
+        has_event = event is not None
 
-        # Check if chart data has been modified using the event bus
-        save_needed = False
-        if chart_file_path:
-            save_needed = self.event_bus.emit('has_chart_changed', chart_file_path)
+        # Extract display name once (remove timestamp after last underscore)
+        if has_chart_path and isinstance(chart_file_path, str):
+            last_underscore = chart_file_path.rfind('_')
+            display_name = chart_file_path[:last_underscore] if last_underscore != -1 else chart_file_path
+        else:
+            display_name = chart_file_path
 
-        if chart_file_path and not autosave and save_needed:
-            file_name = Path(chart_file_path).stem if isinstance(chart_file_path, str) else chart_file_path
-            if event:
-                data = {
-                    'title': 'Save Chart',
-                    'message': f"Save {file_name}?",
-                    'options': ['Yes', 'No', 'Cancel']
-                }
-                result = self.event_bus.emit('trigger_user_prompt', data)
+        # Decision logic
+        if has_chart_path and not autosave and save_needed:
+            # Prompt user to save
+            options = ['Yes', 'No', 'Cancel'] if has_event else ['Yes', 'No']
+            data = {
+                'title': 'Save Chart',
+                'message': f"Save {display_name}?",
+                'options': options
+            }
+            result = self.event_bus.emit('trigger_user_prompt', data)
 
-                if result == 0:  # Yes selected
-                    self.event_handlers.save_chart(chart_file_path)
-                elif result == 2:  # Cancel selected
-                    if event:
-                        event.ignore()
-            else:
-                data = {
-                    'title': 'Save Chart',
-                    'message': f"Save {file_name}?",
-                    'options': ['Yes', 'No']
-                }
-                result = self.event_bus.emit('trigger_user_prompt', data)
+            if result == 0:  # Yes selected
+                self.event_handlers.save_chart(chart_file_path)
+            elif result == 2 and has_event:  # Cancel selected (only possible with event)
+                event.ignore()
 
-                if result == 0:  # Yes selected
-                    self.event_handlers.save_chart(chart_file_path)
-
-        elif autosave and chart_file_path and save_needed:
+        elif autosave and has_chart_path and save_needed:
+            # Autosave without prompting
             self.event_handlers.save_chart(chart_file_path)
-            if event:
+            if has_event:
                 event.accept()
 
-        elif not chart_file_path and data_exists:
+        elif not has_chart_path and data_exists:
+            # No chart file but data exists - prompt to save
             data = {
                 'title': "No chart file",
                 'message': 'Save this chart?',
@@ -488,7 +504,7 @@ class ChartApp(QMainWindow):
 
             if result == 0:  # Yes selected
                 self.event_handlers.save_chart(chart_file_path)
-            if event:
+            if has_event:
                 event.accept()
 
     def closeEvent(self, event):
@@ -498,6 +514,9 @@ class ChartApp(QMainWindow):
         # Save current preferences
         if self.save_preferences_upon_close:
             self.data_manager.save_user_preferences()
+
+        # Sync with remote databases after all save operations
+        self.event_bus.emit('sync_remotes')
 
         # Reclaim space
         self.event_bus.emit('vacuum_database')
@@ -912,34 +931,42 @@ class FilesTab(QWidget):
         spacer = QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         files_layout.addItem(spacer)
 
-        # Recent Charts ListBox
-        lbl_recent_charts = QLabel("Recent")
-        lbl_recent_charts.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_recent_charts.setStyleSheet("font-weight: bold; font-style: normal; font-size: 12px")
+        # Recent Charts ListBox - Remove the separate label since we'll add a header row
         self.lst_recent_charts = QListWidget()
 
+        # Apply the same enhanced styling as NoteModeWidget
         self.lst_recent_charts.setStyleSheet("""
             QListWidget {
-                font-size: 14px;
+                font-size: 12px;
+                font-family: monospace;
+                border: 1px solid #ccc;
+                background-color: white;
+                gridline-color: #e0e0e0;
             }
             QListWidget::item {
-                padding: 5px;
-                text-align: center;
-                margin: 3px 0px;
+                padding: 8px 5px;
+                border-bottom: 1px solid #e0e0e0;
+                min-height: 20px;
             }
-
+            QListWidget::item:alternate {
+                background-color: #f9f9f9;
+            }
             QListWidget::item:hover {
-            background-color: #96deeb;
+                background-color: #e3f2fd;
             }
-
             QListWidget::item:selected {
-                background-color: #05c3de;
+                background-color: #2196f3;
                 color: white;
+            }
+            QListWidget::item:selected:hover {
+                background-color: #1976d2;
+            }
+            QListWidget QScrollBar:horizontal {
+                height: 0px;
             }
         """)
 
         self.lst_recent_charts.setFixedHeight(500)
-        files_layout.addWidget(lbl_recent_charts)
         files_layout.addWidget(self.lst_recent_charts)
 
         # Populate recents for listboxes
@@ -975,26 +1002,73 @@ class FilesTab(QWidget):
     def remove_selected_item(self, list_widget, preference_key):
         selected_item = list_widget.currentItem()
         if selected_item:
+            # Skip if header row is selected (index 0)
+            index = list_widget.row(selected_item)
+            if index == 0:  # Header row
+                return
+
             file_path = selected_item.data(self.chart_app.FullFilePathRole)
             preference_value = self.event_bus.emit("get_user_preference", [preference_key, []])
             if file_path in preference_value:
                 preference_value.remove(file_path)
                 self.event_bus.emit("update_user_preference", [preference_key, preference_value])
-            list_widget.takeItem(list_widget.row(selected_item))
+            list_widget.takeItem(index)
 
     def refresh_recent_charts_list(self):
         self.lst_recent_charts.clear()
+        header_text = "Recent charts"
+
+        # Create header item with special styling
+        header_item = QListWidgetItem(header_text)
+        header_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_font = header_item.font()
+        header_font.setFamily("Courier New")
+        header_font.setBold(True)
+        header_item.setFont(header_font)
+        header_item.setBackground(QColor("#f5f5f5"))
+        header_item.setFlags(header_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)  # Make non-selectable
+        self.lst_recent_charts.addItem(header_item)
+
+        # Add data rows
         recent_charts = self.event_bus.emit("get_user_preference", ['recent_charts', []])
         db_chart_ids = self.data_manager.sqlite_manager.get_all_chart_ids()
         valid_chart_ids = []
-        for chart_id in recent_charts:
-            if chart_id in db_chart_ids:
-                # Add to the list widget
-                item = QListWidgetItem(chart_id)
-                item.setData(self.chart_app.FullFilePathRole, chart_id)
-                self.lst_recent_charts.addItem(item)
 
-                # Track valid IDs
+        # Get chart display info for all recent charts that exist in database
+        existing_chart_ids = [chart_id for chart_id in recent_charts if chart_id in db_chart_ids]
+        chart_info = self.event_bus.emit('get_chart_display_info', existing_chart_ids)
+
+        for chart_id in recent_charts:
+            if chart_id in db_chart_ids and chart_id in chart_info:
+                # Display just the name part (before timestamp)
+                last_underscore = chart_id.rfind('_')
+                display_name = chart_id[:last_underscore] if last_underscore != -1 else chart_id
+
+                # Get ownership information from chart_info
+                info = chart_info[chart_id]
+                is_owner = info['is_owner']
+
+                # Create item with icon if not owner
+                if not is_owner:
+                    # Create item with scaled share icon
+                    original_icon = QIcon(':/images/share-nodes-solid.svg')
+                    scaled_pixmap = original_icon.pixmap(16, 16)  # 16x16 pixels or whatever size you want
+                    scaled_icon = QIcon(scaled_pixmap)
+                    item = QListWidgetItem(scaled_icon, display_name)
+
+                    # Set tooltip with owner name
+                    owner_name = info['owner']
+                    item.setToolTip(f"{owner_name}'s chart")
+                else:
+                    item = QListWidgetItem(display_name)
+
+                # Set a monospace font for consistent spacing
+                font = item.font()
+                font.setFamily("Courier New")
+                item.setFont(font)
+
+                item.setData(self.chart_app.FullFilePathRole, chart_id)  # Store full ID
+                self.lst_recent_charts.addItem(item)
                 valid_chart_ids.append(chart_id)
 
         # Update the user preferences to remove any invalid entries
@@ -1002,28 +1076,35 @@ class FilesTab(QWidget):
             self.event_bus.emit("update_user_preference", ['recent_charts', valid_chart_ids])
 
     def handle_chart_double_click(self, item):
-        chart_id = item.data(self.chart_app.FullFilePathRole)
+        if item:
+            # Skip if header row is clicked (index 0)
+            index = self.lst_recent_charts.row(item)
+            if index == 0:  # Header row
+                return
 
-        if chart_id:
-            # Load the chart using the ID
-            self.event_handlers.load_chart(chart_id)
+            # Adjust index for data charts (subtract 1 for header)
+            chart_id = item.data(self.chart_app.FullFilePathRole)
 
-            # Update recents list - ensure the selected chart is moved to the top
-            recent_charts = self.event_bus.emit("get_user_preference", ['recent_charts', []])
+            if chart_id:
+                # Load the chart using the ID
+                self.event_handlers.load_chart(chart_id)
 
-            # Remove the chart ID if it exists in the list
-            if chart_id in recent_charts:
-                recent_charts.remove(chart_id)
-            # Also try removing as file path for backward compatibility
-            elif isinstance(chart_id, str) and chart_id.endswith('.json') and chart_id in recent_charts:
-                recent_charts.remove(chart_id)
+                # Update recents list - ensure the selected chart is moved to the top
+                recent_charts = self.event_bus.emit("get_user_preference", ['recent_charts', []])
 
-            # Add the chart ID to the top of the list
-            recent_charts.insert(0, chart_id)
+                # Remove the chart ID if it exists in the list
+                if chart_id in recent_charts:
+                    recent_charts.remove(chart_id)
+                # Also try removing as file path for backward compatibility
+                elif isinstance(chart_id, str) and chart_id.endswith('.json') and chart_id in recent_charts:
+                    recent_charts.remove(chart_id)
 
-            # Update the preference and refresh the list
-            self.event_bus.emit("update_user_preference", ['recent_charts', recent_charts])
-            self.event_bus.emit('refresh_recent_charts_list')
+                # Add the chart ID to the top of the list
+                recent_charts.insert(0, chart_id)
+
+                # Update the preference and refresh the list
+                self.event_bus.emit("update_user_preference", ['recent_charts', recent_charts])
+                self.event_bus.emit('refresh_recent_charts_list')
 
     def new_chart_dialog(self):
         # Use the event bus to trigger a user prompt
@@ -1151,42 +1232,29 @@ class EventHandlers:
     def save_chart(self, chart_id=None):
         # If no explicit chart_id is provided, prompt the user for a name
         if not chart_id:
-            # Get a list of existing chart IDs for validation
-            existing_chart_ids = self.data_manager.sqlite_manager.get_all_chart_ids()
 
             # Prompt the user for a chart name
-            chart_id, ok = QInputDialog.getText(
+            chart_name, ok = QInputDialog.getText(
                 self.chart_app,
                 "Save Chart",
                 "Enter a name for this chart:"
             )
 
             # User canceled or provided empty name
-            if not ok or not chart_id.strip():
+            if not ok or not chart_name.strip():
                 return
 
-            # Check if the name already exists
-            if chart_id in existing_chart_ids:
-                # Ask for confirmation to overwrite
-                confirm = QMessageBox.question(
-                    self.chart_app,
-                    "Chart Already Exists",
-                    f"A chart named '{chart_id}' already exists. Do you want to overwrite it?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No
-                )
+            # Generate chart_id with timestamp to prevent conflicts
+            timestamp = int(time.time())
+            chart_id = f"{chart_name.strip()}_{timestamp}"
 
-                if confirm == QMessageBox.StandardButton.No:
-                    # User chose not to overwrite, prompt again
-                    return self.save_chart(None)  # Recursively call to prompt again
-
-        # Save directly to database using the chart_id
+        # Save directly to database
         self.data_manager.chart_data['chart_file_path'] = chart_id
-        df_save = self.data_manager.df_raw.copy()
-        self.data_manager.sqlite_manager.save_complete_chart(chart_id, df_save, self.data_manager.chart_data)
+        self.event_bus.emit('save_complete_chart')
 
-        # Update UI
-        self.chart_app.setWindowTitle(f'{self.chart_app.window_title_str} – {chart_id}')
+        # Update UI - display just the name part for readability
+        display_name = chart_id.split('_')[0] if '_' in chart_id else chart_id
+        self.chart_app.setWindowTitle(f'{self.chart_app.window_title_str} – {display_name}')
 
         # Update recents
         self.event_bus.emit('save_chart_as_recent', data={'file_path': chart_id, 'recent_type': 'recent_charts'})
@@ -1194,21 +1262,36 @@ class EventHandlers:
 
     def load_chart(self, file_path):
         # Decide whether to save data
-
         if file_path is None:
             # Use the new chart browser dialog instead of QFileDialog
             from Popups import ChartBrowserDialog
             browser_dialog = ChartBrowserDialog(self.chart_app)
-            result = browser_dialog.exec()
 
-            if result == QDialog.DialogCode.Accepted:
-                file_path = browser_dialog.get_selected_chart_path()
-            else:
-                return  # User canceled
+            # Make it non-modal but still behave like modal
+            browser_dialog.setModal(False)
+            browser_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+            browser_dialog.show()
 
+            # Connect to finished signal instead of using exec()
+            browser_dialog.finished.connect(lambda result: self._handle_browser_result(browser_dialog, result))
+            return
+
+        # If we have a file_path, proceed with loading directly
         if file_path:
             self.event_bus.emit('save_decision', data=None)
             self.event_bus.emit('load_chart', file_path)
+
+    def _handle_browser_result(self, dialog, result):
+        if result == QDialog.DialogCode.Accepted:
+            file_path = dialog.get_selected_chart_path()
+            dialog.deleteLater()  # Clean up the dialog
+
+            if file_path:
+                # Don't call load_chart() again - just emit the events directly
+                self.event_bus.emit('save_decision', data=None)
+                self.event_bus.emit('load_chart', file_path)
+        else:
+            dialog.deleteLater()
 
     def update_zero_count_handling(self, bool_type):
         # Update chart data with the new zero count handling setting
@@ -1259,7 +1342,12 @@ class EventHandlers:
 
         # Display name of loaded chart file
         chart_id = self.data_manager.chart_data['chart_file_path']
-        self.chart_app.setWindowTitle(chart_id)
+        if chart_id:
+            last_underscore = chart_id.rfind('_')
+            display_name = chart_id[:last_underscore] if last_underscore != -1 else chart_id
+            self.chart_app.setWindowTitle(f'{self.chart_app.window_title_str} – {display_name}')
+        else:
+            self.chart_app.setWindowTitle(self.chart_app.window_title_str)
 
         self.event_bus.emit('refresh_trend_column_list')
         self.event_bus.emit('refresh_style_columns')

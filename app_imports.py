@@ -7,14 +7,14 @@ from PySide6.QtWidgets import (
     QStackedWidget, QSpinBox, QSpacerItem, QSizePolicy, QDoubleSpinBox, QColorDialog, 
     QListWidgetItem, QFrame, QCalendarWidget, QDialogButtonBox, QScrollArea, QTextEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QMenu, QFormLayout, 
-    QSplitter, QItemDelegate, QInputDialog
+    QSplitter, QItemDelegate, QInputDialog, QStackedLayout
 )
 from PySide6.QtGui import (
     QDoubleValidator, QFont, QIcon, QIntValidator, QDesktopServices, QPixmap, 
-    QAction, QFontMetrics, QPainter, QPen, QColor, QShortcut, QValidator
+    QAction, QFontMetrics, QPainter, QPen, QColor, QShortcut, QValidator, QMouseEvent
 )
 from PySide6.QtCore import (
-    Qt, QDate, QUrl, QEvent, QObject, QTimer, Signal, QSize, QDir, QKeyCombination
+    Qt, QDate, QUrl, QEvent, QObject, QTimer, Signal, QSize, QDir, QKeyCombination, QPoint, QPointF
 )
 
 # Standard libraries
@@ -32,6 +32,7 @@ import warnings
 import calendar
 import hashlib
 import subprocess
+import uuid
 import io
 import colorsys
 import sqlite3
@@ -53,5 +54,5 @@ import matplotlib.font_manager as font_manager
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 
 # Resources
-from resources.resources_rc import *
+from resources_rc import *
 

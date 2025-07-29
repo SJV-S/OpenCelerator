@@ -1,6 +1,8 @@
 # Standard library imports
 import io
 import sys
+import subprocess
+import uuid
 import json
 import time
 import re
@@ -28,16 +30,19 @@ import numpy as np
 import pandas as pd
 import matplotlib
 import pgpy
+import cryptography
 import colorsys
 
 # PySide6 GUI implementation
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QDialog, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QProgressBar, QFrame, QMessageBox, QWidget
+    QApplication, QDialog, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QProgressBar, QFrame
 )
-from PySide6.QtCore import Qt, QTimer, Signal, QObject, QUrl
-from PySide6.QtGui import QFont, QDesktopServices, QPixmap, QIcon, QPainter, QColor
-from resources.resources_rc import *
+from PySide6.QtCore import Qt, Signal, QObject, QByteArray
+from PySide6.QtGui import QFont, QPixmap, QPainter
+from PySide6.QtSvg import QSvgRenderer
+
+CELERATION_SVG = '''<svg version="1.1" viewBox="0 0 135.47 135.47" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><path d="m4.3015 64.311 87.088-62.48 4.6641 6.5-62.79 45.048 96.739-36.089 2.7949 7.4941-103.92 38.777h102.47v8h-102.52l103.48 38.584-2.7949 7.4961-96.312-35.905 63.312 45.399-4.6641 6.5-87.553-62.824-0.91797-0.91797-0.49805-0.93359-0.2521-1.3975 0.2521-1.3974 0.49805-0.93555 0.91797-0.91797v0"/></svg>'''
 
 # Fingerprint: 7621B7F1341F46231C2410A9BB1FEF6686C62068
 PUBLIC_KEY = """-----BEGIN PGP PUBLIC KEY BLOCK-----
@@ -112,7 +117,7 @@ def get_config_directory():
 
 # Parameters
 DEBUGGING = True
-LAUNCHER_ENVIRONMENT = '0.12.0'
+LAUNCHER_ENVIRONMENT = '0.13.0'
 APP_ZIP_FILENAME = "app_modules"
 MAIN_MODULE_NAME = "app"
 APP_NAME = 'OpenCelerator'
@@ -129,7 +134,8 @@ MESSAGES = {
     "DOWNLOADING_PROGRESS": "Downloading: {:.1f}%",
     "DOWNLOADING_SIGNATURE": "Downloading signature...",
     "VERIFYING_DOWNLOAD": "Verifying download...",
-    "ENVIRONMENT_MISMATCH": f"The app needs to be updated manually. Please download a new version:"
+    "ENVIRONMENT_MISMATCH": f"The app needs to be updated manually. Please download a new version:",
+    "NO_WORKING_VERSION": "No working version available. Please try later."
 }
 
 #  PGPy warnings - not relevant for signature verification:
@@ -188,7 +194,9 @@ logger = Logger()
 
 def download_file_with_progress(url, destination, progress_callback=None):
     try:
-        response = requests.get(url, stream=True)
+        session = requests.Session()
+        session.trust_env = False
+        response = session.get(url, stream=True)
         response.raise_for_status()
 
         total_size = int(response.headers.get('content-length', 0))
@@ -208,6 +216,39 @@ def download_file_with_progress(url, destination, progress_callback=None):
     except Exception as e:
         logger.error(f"Error downloading file from {url}: {e}")
         return False
+
+
+def compare_semantic_versions(version1, version2):
+    """
+    Compare two semantic version strings.
+    Returns:
+        -1 if version1 < version2
+         0 if version1 == version2
+         1 if version1 > version2
+    """
+    try:
+        parts1 = [int(part) for part in version1.split('.')]
+        parts2 = [int(part) for part in version2.split('.')]
+
+        # Compare version components from left to right
+        for i in range(max(len(parts1), len(parts2))):
+            # If we run out of parts in either version, pad with zeros
+            part1 = parts1[i] if i < len(parts1) else 0
+            part2 = parts2[i] if i < len(parts2) else 0
+
+            if part1 > part2:
+                return 1
+            elif part1 < part2:
+                return -1
+
+        return 0  # All components were equal
+    except (ValueError, IndexError):
+        # Fallback to string comparison if parsing fails
+        if version1 < version2:
+            return -1
+        elif version1 > version2:
+            return 1
+        return 0
 
 
 class ModuleVerifier:
@@ -320,6 +361,7 @@ class GuiInterface:
         window.move(window_geometry.topLeft())
         return window.width(), window.height()
 
+    # Then replace the complete show_download_permission_dialog method:
     def show_download_permission_dialog(self, version=None):
         # Create the dialog without fixed size
         dialog = QDialog()
@@ -336,22 +378,46 @@ class GuiInterface:
         top_layout.setSpacing(15)
         layout.addLayout(top_layout)
 
-        # Create icon label with celeration.svg
+        # Create icon label with embedded SVG
         icon_label = QLabel()
-        icon_pixmap = QPixmap(":/images/celeration.svg")
-        colored_pixmap = QPixmap(icon_pixmap.size())
-        colored_pixmap.fill(Qt.GlobalColor.transparent)
+        try:
+            # Create QPixmap from SVG data
 
-        painter = QPainter(colored_pixmap)
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
-        painter.drawPixmap(0, 0, icon_pixmap)
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-        painter.setBrush(QColor('#05c3de'))
-        painter.setPen(QColor('#05c3de'))
-        painter.drawRect(colored_pixmap.rect())
-        painter.end()
+            # Modify SVG to include the desired color
+            colored_svg = CELERATION_SVG.replace('<path d=', '<path fill="#05c3de" d=')
 
-        icon_label.setPixmap(colored_pixmap.scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            # Convert SVG string to QByteArray
+            svg_data = QByteArray(colored_svg.encode('utf-8'))
+
+            # Create SVG renderer
+            svg_renderer = QSvgRenderer(svg_data)
+
+            if svg_renderer.isValid():
+                # Create pixmap and render SVG to it
+                icon_pixmap = QPixmap(48, 48)
+                icon_pixmap.fill(Qt.GlobalColor.transparent)
+
+                painter = QPainter(icon_pixmap)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                svg_renderer.render(painter)
+                painter.end()
+
+                icon_label.setPixmap(icon_pixmap)
+            else:
+                # SVG invalid, use text fallback
+                icon_label.setText("🚀")
+                icon_label.setStyleSheet("font-size: 32px;")
+
+        except ImportError:
+            # QSvg not available, use text fallback
+            icon_label.setText("🚀")
+            icon_label.setStyleSheet("font-size: 32px;")
+        except Exception as e:
+            # Any other error, use text fallback
+            logger.warning(f"Failed to load SVG icon: {e}")
+            icon_label.setText("🚀")
+            icon_label.setStyleSheet("font-size: 32px;")
+
         top_layout.addWidget(icon_label)
 
         # Set dialog message based on version
@@ -859,7 +925,9 @@ class UpdateChecker:
         # Get all releases directly
         api_url = f"https://api.github.com/repos/{owner}/{repo}/releases"
         logger.info(f"Getting all releases from: {api_url}")
-        response = requests.get(api_url, timeout=15)
+        session = requests.Session()
+        session.trust_env = False
+        response = session.get(api_url, timeout=15)
         logger.info(f"Releases request status code: {response.status_code}")
 
         if response.status_code != 200:
@@ -1005,7 +1073,9 @@ class UpdateChecker:
             if signals:
                 signals.update_progress(MESSAGES["DOWNLOADING_SIGNATURE"])
 
-            sig_response = requests.get(sig_url)
+            session = requests.Session()
+            session.trust_env = False
+            sig_response = session.get(sig_url)
             sig_response.raise_for_status()
 
             with open(sig_path, 'w') as f:
@@ -1077,31 +1147,12 @@ class AppLauncher:
             # Determine if this is an update or downgrade using semantic versioning
             result = None
             if current_version:
-                # Convert version strings to lists of integers for comparison
-                try:
-                    current_parts = [int(part) for part in current_version.split('.')]
-                    new_parts = [int(part) for part in version_str.split('.')]
-
-                    # Compare version components from left to right
-                    for i in range(max(len(current_parts), len(new_parts))):
-                        # If we run out of parts in either version, pad with zeros
-                        current_part = current_parts[i] if i < len(current_parts) else 0
-                        new_part = new_parts[i] if i < len(new_parts) else 0
-
-                        if new_part > current_part:
-                            result = "update"
-                            break
-                        elif new_part < current_part:
-                            result = "downgrade"
-                            break
-
-                    # If all components were equal (shouldn't happen since we checked equality above)
-                    if result is None:
-                        return None
-
-                except (ValueError, IndexError) as e:
-                    logger.error(f"Error comparing versions: {e}")
-                    # If there's an error in comparison, still update the version but return None
+                comparison = compare_semantic_versions(version_str, current_version)
+                if comparison > 0:
+                    result = "update"
+                elif comparison < 0:
+                    result = "downgrade"
+                # If comparison == 0, versions are equal (already handled above)
             else:
                 # No previous version, so it's an update
                 result = "update"
@@ -1131,8 +1182,9 @@ class AppLauncher:
                 env_str = LAUNCHER_ENVIRONMENT.lstrip(".")  # Use default if extraction fails
 
         # Check if launcher environment matches the module environment
-        if env_str != LAUNCHER_ENVIRONMENT.lstrip("."):
-            logger.error(f"Environment mismatch: Launcher env={LAUNCHER_ENVIRONMENT.lstrip('.')}, Module env={env_str}")
+        launcher_env = LAUNCHER_ENVIRONMENT.lstrip(".")
+        if compare_semantic_versions(env_str, launcher_env) > 0:
+            logger.error(f"Environment mismatch: Module env={env_str} requires newer launcher (current: {launcher_env})")
             error_message = MESSAGES["ENVIRONMENT_MISMATCH"]
             self.gui.show_error_dialog(error_message)
             return 2  # Return special code for environment mismatch
@@ -1186,11 +1238,13 @@ def remove_splash_screen():
 
         return False
 
+
 def main():
     # Windows splash screen
     if platform.system() == 'Windows':  # Check if OS is Windows
         if "NUITKA_ONEFILE_PARENT" in environ:
-            splash_filename = Path(tempfile.gettempdir()) / f"onefile_{int(environ['NUITKA_ONEFILE_PARENT'])}_splash_feedback.tmp"
+            splash_filename = Path(
+                tempfile.gettempdir()) / f"onefile_{int(environ['NUITKA_ONEFILE_PARENT'])}_splash_feedback.tmp"
             if splash_filename.exists():
                 splash_filename.unlink()
             logger.info("Splash Screen has been removed")
@@ -1204,20 +1258,84 @@ def main():
         # Find the external module
         external_file, is_zip, main_module_name, version_str, env_str = loader.find_external_module()
 
-        # If module found, run it
+        # If module found, try to run it
         if external_file is not None:
             logger.info(f"Found application at: {external_file.resolve()}")
             logger.info(f"Version: v{version_str}, Environment: e{env_str}")
 
-            # Run the application first
-            launcher.run_application(external_file, main_module_name, version_str, env_str)
+            try:
+                # Try to run the application
+                launcher.run_application(external_file, main_module_name, version_str, env_str)
 
-            # Check for updates
-            update_checker.check_for_updates_after_app_termination()
+                # Check for updates after successful run
+                update_checker.check_for_updates_after_app_termination()
+                return
 
-            return
+            except ImportError as e:
+                # This block handles situations where the module is broken
+                logger.error(f"Module loading failed: {e}")
+                logger.info("Offering user option to download newer version...")
 
-        # Ask permission to download the latest version
+                # Ask permission to download newer version (same as when no module found)
+                if not gui.show_download_permission_dialog():
+                    logger.info("Download permission declined. Exiting gracefully.")
+                    return 0
+
+                # User approved, check for updates and download
+                logger.info("Checking for updates after module loading failure...")
+                latest_version, download_url, sig_url, version_exists = update_checker.check_for_updates()
+
+                # Check if the available version is the same as the broken local version
+                if latest_version == version_str:
+                    gui.show_error_dialog(MESSAGES["NO_WORKING_VERSION"])
+                    return 1
+
+                if latest_version and download_url and sig_url:
+                    logger.info(f"Latest version: v{latest_version}")
+                    logger.info(f"Download URL: {download_url}")
+
+                    # Create download window
+                    download_window = gui.create_download_window(latest_version)
+                    download_window.show()
+
+                    # Create signals for progress updates
+                    signals = gui.create_progress_signals()
+                    signals.on_progress(download_window.update_status)
+
+                    # Handle download completion
+                    def on_download_finished(success, file_path):
+                        if success:
+                            logger.info(f"Update downloaded successfully to {file_path}")
+                            # Extract env_str from filename
+                            version_str, env_str = loader.extract_version_info_from_filename(file_path.name)
+                            if env_str is None:
+                                logger.error(f"Could not extract environment string")
+                                env_str = LAUNCHER_ENVIRONMENT.lstrip(".")  # Use default if extraction fails
+
+                            # Launch the application
+                            launcher.run_application(file_path, MAIN_MODULE_NAME, latest_version, env_str)
+
+                        else:
+                            gui.show_error_dialog(MESSAGES["DOWNLOAD_FAILED"])
+                            return 1
+
+                    signals.on_finished(on_download_finished)
+
+                    # Start download in a separate thread to keep UI responsive
+                    download_thread = Thread(
+                        target=update_checker.download_update,
+                        args=(latest_version, download_url, sig_url, signals)
+                    )
+                    download_thread.daemon = True
+                    download_thread.start()
+
+                    # Start the event loop
+                    return gui.run_event_loop()
+                else:
+                    gui.show_error_dialog(MESSAGES["NO_UPDATES"])
+                    return 1
+
+        # No module found - original download flow
         logger.info("No module found. Asking for permission to download the latest version...")
         if not gui.show_download_permission_dialog():
             logger.info("Download permission declined. Exiting gracefully.")
@@ -1281,4 +1399,10 @@ def main():
 if __name__ == "__main__":
     if DEBUGGING:
         logger.set_level(logging.DEBUG)
-    sys.exit(main())
+
+    try:
+        result = main()
+        sys.exit(result)
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        sys.exit(1)

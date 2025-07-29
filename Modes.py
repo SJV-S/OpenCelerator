@@ -686,7 +686,6 @@ class ViewModeWidget(ModeWidget):
         if user_col == "All":
             for col_name, column_instance in self.data_manager.plot_columns.items():
                 column_instance.set_visibility(element_type, show)
-                column_instance.view_settings[element_type] = show
                 self.event_bus.emit('sync_column_view_settings', col_name)
         elif user_col in self.data_manager.plot_columns.keys():
             # Apply to just the selected column
@@ -2248,9 +2247,12 @@ class PlotModeWidget(ModeWidget):
         self.update_date_button()
 
     def update_spreadsheet_button_visibility(self):
-        df = self.data_manager.df_raw
-        has_data = df is not None and not df.empty
-        self.open_spreadsheet_btn.setVisible(has_data)
+        # Temporarily disabled until I've fixed stuff here
+        self.open_spreadsheet_btn.setVisible(False)
+
+        # df = self.data_manager.df_raw
+        # has_data = df is not None and not df.empty
+        # self.open_spreadsheet_btn.setVisible(has_data)
 
 
 class ChartDateHandler:

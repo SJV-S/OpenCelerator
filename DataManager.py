@@ -1,5 +1,6 @@
 from app_imports import *
 from EventStateManager import EventBus
+from database import SQLiteManager
 
 
 class DataManager:
@@ -152,7 +153,8 @@ class DataManager:
 
             self.user_preferences = {
                 'machine_id': self.get_machine_id(),
-                'db_location': {'local': self.get_config_directory(as_str=True), 'cloud': '', 'other': ''},
+                'user_name': self.get_default_user_name(),
+                'db_location': {'local': self.get_config_directory(as_str=True), 'cloud': ''},
                 'last_open_tab': 'local',
                 'chart_font_color': '#05c3de',
                 'chart_grid_color': '#6ad1e3',
@@ -185,6 +187,7 @@ class DataManager:
 
             self.chart_data = {
                 'type': 'Daily',
+                'created': int(time.time()),
                 'data_modified': '',  # Will be a unix timestamp
                 'import_path': {},
                 'chart_file_path': None,
@@ -313,7 +316,7 @@ class DataManager:
         # Refresh chart and save (only once)
         self.event_bus.emit('update_legend')
         self.event_bus.emit('refresh_chart')
-        self.handle_data_saving()
+        self.event_bus.emit('save_complete_chart')
 
     def remove_latest_entry(self):
         # Check if dataframe is not empty
@@ -326,9 +329,7 @@ class DataManager:
                 self.plot_columns[col_name].refresh_view()
 
             self.event_bus.emit('refresh_chart')
-
-            # Save data after removal
-            self.handle_data_saving()
+            self.event_bus.emit('save_complete_chart')
 
     def ensure_backwards_compatibility(self, sample_dict, default_dict):
         # Skip special fields that should not be modified
@@ -379,7 +380,7 @@ class DataManager:
         if cel < 1:
             symbol = '÷'
             cel = 1 / cel
-        cel_label = f'c = {symbol}{cel:.2f} / {unit_case}'
+        cel_label = f'{symbol}{cel:.2f} / {unit_case}'
 
         chart_type = self.event_bus.emit("get_chart_data", ['type', 'Daily'])[0].lower()
         doubling = {'d': 7, 'w': 5, 'm': 6, 'y': 5}
@@ -676,16 +677,23 @@ class DataManager:
             if key != 'type' and key in most_common_settings and most_common_settings[key] is not None:
                 self.chart_data['view']['chart'][key] = most_common_settings[key]
 
+    def get_default_user_name(self):
+        if platform.system() == "Windows":
+            return os.environ.get('USERNAME', '')
+        else:  # Linux, macOS
+            return os.environ.get('USER', '')
+
     def get_machine_id(self):
-        # Collect system information available across all platforms
-        os_info = [
-            platform.system(),  # OS name (Windows, Darwin, Linux)
-            platform.node(),  # Computer hostname
-            platform.machine(),  # CPU architecture (x86_64, arm64, etc.)
-            platform.processor()  # Processor info
+        identifiers = [
+            platform.system(),
+            platform.machine(),
+            platform.release(),
+            platform.node(),
+            os.environ.get('USER', os.environ.get('USERNAME', ''))
         ]
-        combined_id = ":".join(filter(None, os_info))
-        return hashlib.sha256(combined_id.encode()).hexdigest()
+
+        combined_id = ":".join(filter(None, identifiers))
+        return hashlib.md5(combined_id.encode()).hexdigest()
 
     def get_config_directory(self, as_str=False):
         system = platform.system()
@@ -726,31 +734,6 @@ class DataManager:
         if column_instance:
             key = f'{column_instance.sys_col}|{user_col}'
             self.chart_data['view'][key] = copy.deepcopy(column_instance.view_settings)
-
-    def handle_data_saving(self):
-        has_chart_path = self.chart_data.get('chart_file_path') is not None
-        has_valid_column_map = isinstance(self.chart_data.get('column_map'), dict) and bool(
-            self.chart_data.get('column_map'))
-        has_data = not self.df_raw.empty
-
-        if has_chart_path and has_data and has_valid_column_map:
-            # Save data formatting - prepare the dataframe for storage
-            df_save = self.df_raw.copy()
-            df_save = df_save.assign(d=pd.to_datetime(df_save['d'])).sort_values(by='d')
-            df_save = df_save.reindex(
-                columns=list(self.chart_data['column_map'].keys()))  # Ensure all columns from column_map
-
-            # Handle minute chart data
-            is_minute_chart = 'Minute' in self.chart_data['type']
-            has_m_column = 'm' in df_save.columns
-            only_1s_in_m = has_m_column and (df_save['m'] == 1).all()
-
-            if not is_minute_chart and only_1s_in_m:  # Discard floor column if safe to do so
-                df_save = df_save.drop(columns=['m'])
-
-            # SQLite
-            self.sqlite_manager.save_chart_data(self.chart_data['chart_file_path'], df_save)
-            self.event_bus.emit("update_chart_data", ['data_modified', str(int(time.time()))])
 
     def save_user_preferences(self):
         filepath = self.get_preferences_path()
@@ -1549,7 +1532,7 @@ class TrendFitter:
             symbol = '÷'
             cel = 1 / cel
 
-        return f'c = {symbol}{cel:.2f} / {unit_case}'
+        return f'{symbol}{cel:.2f} / {unit_case}'
 
     def _calculate_bounce(self, bounce_envelope, y, slope, extended_x, intercept):
         if bounce_envelope == 'None':
@@ -1582,7 +1565,7 @@ class TrendFitter:
         lower_bounce = np.power(10, log_lower)
         bounce_ratio = upper_bounce[0] / lower_bounce[0]
 
-        return upper_bounce, lower_bounce, f'b = x{bounce_ratio:.2f}'
+        return upper_bounce, lower_bounce, f'x{bounce_ratio:.2f}'
 
 
 class FileManager:
@@ -1592,42 +1575,8 @@ class FileManager:
         self.standard_date_string = '%Y-%m-%d'
 
         # Event subscription events
-        self.event_bus.subscribe('save_chart', self.save_chart, has_data=True)
         self.event_bus.subscribe('load_chart', self.load_chart_file, has_data=True)
-
-    def save_chart(self, data):
-        file_path = data['file_path']
-        start_date = data['start_date']
-
-        # Ensure the file has a .json extension
-        if not file_path.endswith('.json'):
-            file_path += '.json'
-        json_to_save = copy.deepcopy(self.data_manager.chart_data)
-
-        # Backwards compatibility cleanup
-        if 'Backup' in json_to_save:
-            del json_to_save['Backup']  # Remove old Backup field
-
-        # Ensure that the current chart type is saved
-        json_to_save['type'] = self.data_manager.chart_data['type']
-
-        # Save current start date in ISO format
-        json_to_save['start_date'] = start_date.strftime(self.standard_date_string) if isinstance(start_date,
-                                                                                                  datetime) else start_date
-
-        # Save raw data directly in the chart file
-        # Convert DataFrame to JSON-compatible format
-        if not self.data_manager.df_raw.empty:
-            json_to_save['raw_data'] = json.loads(self.data_manager.df_raw.to_json(date_format='iso'))
-        else:
-            json_to_save['raw_data'] = {}  # Empty dictionary for empty dataframe
-
-        # Save chart to file
-        with open(file_path, 'w') as file:
-            json.dump(json_to_save, file, indent=4)
-
-        df_save = self.data_manager.df_raw.copy()
-        self.data_manager.sqlite_manager.save_complete_chart(file_path, df_save, json_to_save)
+        self.event_bus.subscribe("export_json_from_database", self.export_json_from_database, has_data=True)
 
     def chart_cleaning(self, loaded_chart, file_path):
         default_chart = self.data_manager.default_chart
@@ -1740,57 +1689,15 @@ class FileManager:
         return self.load_chart_from_db(chart_id)
 
     def import_json_to_database(self, json_file_path, chart_id):
-        try:
-            with open(json_file_path, 'r') as file:
-                loaded_chart = json.load(file)
-        except json.JSONDecodeError:
-            # File is corrupted, attempt to repair it
-            loaded_chart = self._repair_corrupted_chart_file(json_file_path)
-            # Notify user about the repair
-            data = {
-                'title': "Corrupted Chart File",
-                'message': f"The chart file was corrupted and has been repaired. Some settings may have been reset to defaults.",
-                'options': ['OK']
-            }
-            self.event_bus.emit('trigger_user_prompt', data)
-        except FileNotFoundError:
-            print(f"File not found: {json_file_path}")
-            return False
+        """Import JSON file to database via event bus"""
+        return self.event_bus.emit('json_import_to_database', {
+            'json_file_path': json_file_path,
+            'chart_id': chart_id
+        })
 
-        # Clean the chart data
-        clean_chart_data = self.chart_cleaning(loaded_chart, chart_id)
-
-        # Process raw_data if it exists
-        raw_data = clean_chart_data.get('raw_data')
-
-        # If raw_data is not available, try using the legacy Backup field
-        if not raw_data:
-            backup_data = clean_chart_data.get('Backup')
-            if backup_data:
-                # Migrate the data to the new raw_data field
-                clean_chart_data['raw_data'] = backup_data
-                raw_data = backup_data
-
-        if raw_data:
-            try:
-                # Convert stored JSON data back to a DataFrame
-                df = pd.DataFrame.from_records(raw_data)
-
-                # Convert 'd' column to datetime
-                if 'd' in df.columns:
-                    df['d'] = pd.to_datetime(df['d'])
-
-                # Save to database
-                self.data_manager.sqlite_manager.save_complete_chart(chart_id, df, clean_chart_data)
-                return True
-            except Exception as e:
-                print(f"Error importing JSON chart to database: {e}")
-                return False
-        else:
-            # For empty charts with no data
-            empty_df = pd.DataFrame()
-            self.data_manager.sqlite_manager.save_complete_chart(chart_id, empty_df, clean_chart_data)
-            return True
+    def export_json_from_database(self, data):
+        """Export chart from database to JSON file via event bus"""
+        return self.event_bus.emit('json_export_from_database', data)
 
     def load_chart_from_db(self, chart_id):
         # Make sure the database connection is initialized
@@ -1833,363 +1740,6 @@ class FileManager:
         self.event_bus.emit('view_mode_selected')
 
 
-class SQLiteManager:
-    TABLE_DATA_POINTS = "series"
-    TABLE_CHART_METADATA = "chart"
 
-    def __init__(self, data_manager):
-        self.data_manager = data_manager
-        self.event_bus = EventBus()
-        self.connection = None
-        self.cursor = None
-        self.initialized = False
 
-        # Event subscriptions
-        self.event_bus.subscribe('has_chart_changed', self.has_chart_changed, has_data=True)
-        self.event_bus.subscribe('delete_chart', self.delete_chart, has_data=True)
-        self.event_bus.subscribe('vacuum_database', self.vacuum_database)
 
-    def connect(self, db_path=None):
-        """Establish database connection and create tables if needed."""
-        if not db_path:
-            db_path = self.data_manager.get_config_directory(as_str=True)
-
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        db_file = Path(db_path) / "opencelerator.db"
-
-        try:
-            self.connection = sqlite3.connect(str(db_file))
-            self.cursor = self.connection.cursor()
-            self.initialized = True
-            self._create_tables()
-            return True
-        except sqlite3.Error as e:
-            print(f"Database connection error: {e}")
-            self.initialized = False
-            return False
-
-    def _create_tables(self):
-        """Create necessary database tables if they don't exist."""
-        # Data points table
-        self.cursor.execute(f'''
-        CREATE TABLE IF NOT EXISTS {self.TABLE_DATA_POINTS} (
-            chart_id TEXT,
-            date TEXT,
-            sys_col TEXT,
-            value REAL,
-            PRIMARY KEY (chart_id, date, sys_col)
-        )
-        ''')
-
-        # Chart metadata table
-        self.cursor.execute(f'''
-        CREATE TABLE IF NOT EXISTS {self.TABLE_CHART_METADATA} (
-            chart_id TEXT PRIMARY KEY,
-            metadata TEXT,
-            thumbnail BLOB,
-            metadata_hash TEXT
-        )
-        ''')
-
-        self.connection.commit()
-
-    def _ensure_connection(self):
-        """Ensure database connection is established."""
-        if not self.initialized:
-            return self.connect()
-        return True
-
-    def _extract_chart_id(self, chart_path):
-        """Extract chart ID from file path or return as-is if already an ID."""
-        if isinstance(chart_path, str) and ("/" in chart_path or "\\" in chart_path):
-            return Path(chart_path).stem
-        return chart_path
-
-    def _generate_thumbnail(self):
-        """Generate chart thumbnail."""
-        try:
-            return self.data_manager.event_bus.emit('get_thumbnail', {'size': (96, 96)})
-        except Exception as e:
-            print(f"Error generating thumbnail: {e}")
-            return None
-
-    def _prepare_metadata(self, chart_data=None):
-        """Prepare metadata for storage (removes raw_data)."""
-        metadata = copy.deepcopy(chart_data or self.data_manager.chart_data)
-        metadata.pop('raw_data', None)  # Remove raw_data to avoid duplication
-        return json.dumps(json.loads(json.dumps(metadata, default=str)))
-
-    def _calculate_metadata_hash(self, metadata_json):
-        """Calculate MD5 hash of metadata."""
-        return hashlib.md5(metadata_json.encode('utf-8')).hexdigest()
-
-    def save_complete_chart(self, chart_path, df_data, chart_data):
-        """Save complete chart (data + metadata) to database."""
-        if not self._ensure_connection():
-            return False
-
-        chart_id = self._extract_chart_id(chart_path)
-
-        try:
-            self.cursor.execute("BEGIN IMMEDIATE TRANSACTION")
-
-            # Clear existing data
-            self._delete_chart_data(chart_id)
-
-            # Save data points
-            if not df_data.empty:
-                self._save_data_points(chart_id, df_data)
-
-            # Save metadata
-            self._save_metadata(chart_id, chart_data)
-
-            self.connection.commit()
-            self._cleanup_journal()
-            return True
-
-        except Exception as e:
-            print(f"Error saving complete chart: {e}")
-            self.connection.rollback()
-            return False
-
-    def _save_data_points(self, chart_id, df_data):
-        """Save data points to database."""
-        rows = []
-        for _, row in df_data.iterrows():
-            date = row['d'].strftime('%Y-%m-%d') if hasattr(row['d'], 'strftime') else str(row['d'])
-
-            for col in row.index:
-                if col != 'd' and not pd.isna(row[col]):
-                    rows.append((chart_id, date, col, float(row[col])))
-
-        if rows:
-            self.cursor.executemany(
-                f"INSERT INTO {self.TABLE_DATA_POINTS} (chart_id, date, sys_col, value) VALUES (?, ?, ?, ?)",
-                rows
-            )
-
-    def _save_metadata(self, chart_id, chart_data=None):
-        """Save chart metadata to database."""
-        metadata_json = self._prepare_metadata(chart_data)
-        metadata_hash = self._calculate_metadata_hash(metadata_json)
-        thumbnail_data = self._generate_thumbnail()
-
-        self.cursor.execute(
-            f"INSERT OR REPLACE INTO {self.TABLE_CHART_METADATA} (chart_id, metadata, thumbnail, metadata_hash) VALUES (?, ?, ?, ?)",
-            (chart_id, metadata_json, thumbnail_data, metadata_hash)
-        )
-
-    def _cleanup_journal(self):
-        """Clean up database journal files."""
-        self.cursor.execute("PRAGMA journal_mode=DELETE")
-        self.cursor.execute("PRAGMA wal_checkpoint(FULL)")
-
-    def save_chart_data(self, chart_path, df_data):
-        """Save only chart data points to database."""
-        if not self._ensure_connection():
-            return False
-
-        chart_id = self._extract_chart_id(chart_path)
-
-        try:
-            self.cursor.execute("BEGIN TRANSACTION")
-
-            # Delete existing data points
-            self.cursor.execute(f"DELETE FROM {self.TABLE_DATA_POINTS} WHERE chart_id = ?", (chart_id,))
-
-            # Save new data points
-            self._save_data_points(chart_id, df_data)
-
-            # Update metadata
-            self._save_metadata(chart_id)
-
-            self.connection.commit()
-            return True
-
-        except sqlite3.Error as e:
-            print(f"Error saving chart data: {e}")
-            self.connection.rollback()
-            return False
-
-    def load_chart_data(self, chart_id):
-        """Load chart data from database and return as DataFrame."""
-        if not self._ensure_connection():
-            return None
-
-        chart_id = self._extract_chart_id(chart_id)
-
-        try:
-            # Load data points
-            self.cursor.execute(
-                f"SELECT date, sys_col, value FROM {self.TABLE_DATA_POINTS} WHERE chart_id = ?",
-                (chart_id,)
-            )
-            results = self.cursor.fetchall()
-
-            # Load metadata
-            self._load_chart_metadata(chart_id)
-
-            if not results:
-                return pd.DataFrame()
-
-            return self._build_dataframe_from_results(results)
-
-        except sqlite3.Error as e:
-            print(f"Error loading chart data: {e}")
-            return None
-
-    def _build_dataframe_from_results(self, results):
-        """Build DataFrame from database query results."""
-        # Get unique dates and columns
-        dates = sorted(set(row[0] for row in results))
-        columns = set(row[1] for row in results)
-
-        # Initialize data dictionary
-        data_dict = {'d': dates}
-        for col in columns:
-            data_dict[col] = [None] * len(dates)
-
-        # Fill in values
-        date_to_index = {date: idx for idx, date in enumerate(dates)}
-        for date, col, value in results:
-            data_dict[col][date_to_index[date]] = value
-
-        # Create and return DataFrame
-        df = pd.DataFrame(data_dict)
-        df['d'] = pd.to_datetime(df['d'])
-        return df
-
-    def _load_chart_metadata(self, chart_id):
-        """Load chart metadata from database."""
-        try:
-            self.cursor.execute(
-                f"SELECT metadata FROM {self.TABLE_CHART_METADATA} WHERE chart_id = ?",
-                (chart_id,)
-            )
-            result = self.cursor.fetchone()
-
-            if result:
-                metadata = json.loads(result[0])
-                # Preserve raw_data if it exists
-                raw_data = self.data_manager.chart_data.get('raw_data', {})
-                self.data_manager.chart_data.update(metadata)
-                self.data_manager.chart_data['raw_data'] = raw_data
-                return True
-            return False
-
-        except Exception as e:
-            print(f"Error loading chart metadata: {e}")
-            return False
-
-    def get_chart_thumbnail(self, chart_id):
-        """Get chart thumbnail from database."""
-        if not self._ensure_connection():
-            return None
-
-        chart_id = self._extract_chart_id(chart_id)
-
-        try:
-            self.cursor.execute(
-                f"SELECT thumbnail FROM {self.TABLE_CHART_METADATA} WHERE chart_id = ?",
-                (chart_id,)
-            )
-            result = self.cursor.fetchone()
-            return result[0] if result and result[0] else None
-
-        except Exception as e:
-            print(f"Error retrieving chart thumbnail: {e}")
-            return None
-
-    def get_all_chart_ids(self):
-        """Get list of all chart IDs in database."""
-        if not self._ensure_connection():
-            return []
-
-        try:
-            self.cursor.execute(f"SELECT DISTINCT chart_id FROM {self.TABLE_CHART_METADATA}")
-            return [row[0] for row in self.cursor.fetchall()]
-        except sqlite3.Error as e:
-            print(f"Error retrieving chart IDs: {e}")
-            return []
-
-    def delete_chart(self, chart_id):
-        """Delete chart data and metadata from database."""
-        if not self._ensure_connection():
-            return False
-
-        chart_id = self._extract_chart_id(chart_id)
-
-        try:
-            self.cursor.execute("BEGIN TRANSACTION")
-            self._delete_chart_data(chart_id)
-            self.connection.commit()
-            return True
-        except sqlite3.Error as e:
-            print(f"Error deleting chart data: {e}")
-            self.connection.rollback()
-            return False
-
-    def _delete_chart_data(self, chart_id):
-        """Delete chart data and metadata (helper method)."""
-        self.cursor.execute(f"DELETE FROM {self.TABLE_DATA_POINTS} WHERE chart_id = ?", (chart_id,))
-        self.cursor.execute(f"DELETE FROM {self.TABLE_CHART_METADATA} WHERE chart_id = ?", (chart_id,))
-
-    def has_chart_changed(self, chart_id):
-        """Check if current chart data differs from stored version."""
-        if not self._ensure_connection():
-            return True  # Assume changed if connection fails
-
-        chart_id = self._extract_chart_id(chart_id)
-
-        try:
-            # Get stored hash
-            self.cursor.execute(
-                f"SELECT metadata_hash FROM {self.TABLE_CHART_METADATA} WHERE chart_id = ?",
-                (chart_id,)
-            )
-            result = self.cursor.fetchone()
-
-            if not result:
-                return True  # Chart doesn't exist, needs saving
-
-            stored_hash = result[0]
-            current_metadata_json = self._prepare_metadata()
-            current_hash = self._calculate_metadata_hash(current_metadata_json)
-
-            return stored_hash != current_hash
-
-        except Exception as e:
-            print(f"Error checking if chart has changed: {e}")
-            return True  # Assume changed if error occurs
-
-    def vacuum_database(self, respect_time_limit=True):
-        if not self.initialized or not self.connection:
-            return  # Skip if no connection
-
-        # Handle type conversion
-        last_vacuum_raw = self.data_manager.event_bus.emit("get_user_preference", ['last_vacuum', 0])
-        if isinstance(last_vacuum_raw, str):
-            if last_vacuum_raw.isdigit():
-                last_vacuum = int(last_vacuum_raw)
-            else:
-                last_vacuum = 0
-        else:
-            last_vacuum = int(last_vacuum_raw)
-
-        # Run max once a week
-        current_time = int(pd.Timestamp.now().timestamp())
-        one_week_seconds = 7 * 24 * 60 * 60
-        time_to_vacuum = current_time - last_vacuum > one_week_seconds
-
-        if not respect_time_limit or time_to_vacuum:
-            try:
-                self.cursor.execute("VACUUM")
-                self.data_manager.event_bus.emit("update_user_preference", ['last_vacuum', current_time])
-            except sqlite3.Error as e:
-                print(f"Error vacuuming database: {e}")
-
-    def close(self):
-        """Close database connection."""
-        if self.connection:
-            self.connection.close()
-            self.initialized = False
