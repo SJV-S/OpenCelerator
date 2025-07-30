@@ -33,7 +33,6 @@ Contact: opencelerator.9qpel@simplelogin.com
 
 Run the command below in your MacOS terminal. _Don't worry if you have never used the terminal._ This process is extremely simple: Search for "Terminal" with Spotlight or check Applications under Utilities. Open. Paste command below. Press enter. Finished – you can close the terminal window.
 
-_MacOS_
 ```
 curl -L -o ~/Downloads/macos_installoc.command https://github.com/SJV-S/OpenCelerator/releases/download/0.13.0/macos_installoc.command && chmod +x ~/Downloads/macos_installoc.command && ~/Downloads/macos_installoc.command
 ```
