@@ -1,7 +1,7 @@
 from app_imports import *
-from DataManager import DataManager, DataPointColumn  # Direct import to avoid circular dependency
-from EventStateManager import EventBus  # Direct import to avoid circular dependency
-import scc  # Direct import to avoid circular dependency
+from DataManager import DataManager, DataPointColumn
+from EventStateManager import EventBus
+import scc
 
 
 class FigureManager(QWidget):

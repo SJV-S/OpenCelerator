@@ -410,8 +410,12 @@ class ChartApp(QMainWindow):
         update_checker_settings.addItems(['Auto', 'Off'])
         update_policy = self.event_bus.emit("get_user_preference", ['update', 'Off'])
         update_checker_settings.setCurrentText(update_policy)
-        update_checker_settings.activated.connect(lambda idx: self.event_bus.emit("update_user_preference", ['update',
-                                                                                                             update_checker_settings.currentText()]))
+        update_checker_settings.activated.connect(
+            lambda index: (
+                self.event_bus.emit("update_user_preference", ["update", update_checker_settings.itemText(index)]),
+                self.event_bus.emit("update_user_preference", ["last_update_check", ""])  # Reset daily check if the user changes this setting
+            )
+        )
         preferences_group_layout.addWidget(update_checker_label)
         preferences_group_layout.addWidget(update_checker_settings)
 

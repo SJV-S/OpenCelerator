@@ -1781,12 +1781,6 @@ class ModifyColumns(QDialog):
 
 
 class SpreadsheetDialog(QDialog):
-    """
-    A dialog that provides a spreadsheet-like interface for viewing and editing chart data.
-    Allows users to navigate through data by calendar unit, edit cells, and delete rows.
-    """
-    dataChanged = Signal()
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Data Editor")
@@ -1796,46 +1790,20 @@ class SpreadsheetDialog(QDialog):
         self.data_manager = DataManager()
         self.event_bus = EventBus()
 
-        # Get chart type and calendar unit
+        # Get chart type
         self.chart_type = self.data_manager.chart_data['type']
-        self.calendar_unit = self.chart_type[0]  # D, W, M, Y
         self.is_minute_chart = 'Minute' in self.chart_type
 
-        # Current view date and data
-        self.current_view_date = pd.Timestamp.now()
-        self.df_view = None
-        self.original_df = None
-        self.start_date = None
-        self.end_date = None
+        # Data
+        self.original_df = None  # snapshot of original data (unchanged until Apply)
+        self.table_df = None  # live working copy that reflects table edits
+        self._suppress_item_changed = False  # guard during programmatic population
 
         self.setup_ui()
         self.refresh_data()
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # === LEFT SIDEBAR ===
-        sidebar = QFrame()
-        sidebar.setFrameShape(QFrame.Shape.StyledPanel)
-        sidebar_layout = QVBoxLayout(sidebar)
-
-        # Calendar unit mapping
-        calendar_unit_map = {'D': 'Day', 'W': 'Week', 'M': 'Month', 'Y': 'Year'}
-        calendar_unit_text = calendar_unit_map.get(self.calendar_unit, 'Dates')
-
-        dates_group = QGroupBox(calendar_unit_text)
-        dates_group.setStyleSheet("QGroupBox { border: none; }")
-        dates_layout = QVBoxLayout(dates_group)
-
-        self.dates_list = QListWidget()
-        self.dates_list.itemClicked.connect(self.on_date_list_item_clicked)
-        dates_layout.addWidget(self.dates_list)
-        sidebar_layout.addWidget(dates_group)
-
-        # === MAIN CONTENT ===
-        main_content = QFrame()
-        main_content_layout = QVBoxLayout(main_content)
 
         self.table = QTableWidget()
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -1843,13 +1811,11 @@ class SpreadsheetDialog(QDialog):
         self.table.customContextMenuRequested.connect(self.show_context_menu)
         self.table.setEditTriggers(
             QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed)
-        main_content_layout.addWidget(self.table)
+        self.table.verticalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(self.table)
 
         # Button bar
         button_layout = QHBoxLayout()
-
-        add_row_btn = QPushButton("Add Row")
-        add_row_btn.clicked.connect(self.add_row)
 
         delete_row_btn = QPushButton("Delete Selected")
         delete_row_btn.clicked.connect(self.delete_selected_rows)
@@ -1861,343 +1827,171 @@ class SpreadsheetDialog(QDialog):
         apply_btn.clicked.connect(self.apply_changes)
         apply_btn.setStyleSheet("background-color: #96deeb;")
 
-        button_layout.addWidget(add_row_btn)
         button_layout.addWidget(delete_row_btn)
         button_layout.addWidget(export_csv_btn)
         button_layout.addStretch()
         button_layout.addWidget(apply_btn)
-        main_content_layout.addLayout(button_layout)
+        main_layout.addLayout(button_layout)
 
-        # Add to splitter and layout
-        splitter.addWidget(sidebar)
-        splitter.addWidget(main_content)
-        splitter.setSizes([200, 600])
-        main_layout.addWidget(splitter)
+        # Live write-through
+        self.table.itemChanged.connect(self._on_item_changed)
 
     def refresh_data(self):
-        """Refresh the dialog with current data"""
         self.original_df = self.data_manager.df_raw.copy()
-
-        # Set initial view date
-        if self.original_df is not None and not self.original_df.empty and 'd' in self.original_df.columns:
-            self.current_view_date = pd.to_datetime(self.original_df['d']).min()
-        else:
-            self.current_view_date = pd.Timestamp.now()
-
-        self.populate_dates_list()
-        self.calculate_view_dates()
-        self.update_view_data()
+        self.table_df = self.data_manager.df_raw.copy(deep=True)
         self.populate_table()
-
-    def calculate_view_dates(self):
-        """Calculate start and end dates for the current view based on calendar unit"""
-        current_date = self.current_view_date
-
-        if self.calendar_unit == 'D':
-            self.start_date = pd.Timestamp(current_date.year, current_date.month, current_date.day)
-            self.end_date = self.start_date + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-        elif self.calendar_unit == 'W':
-            weekday = current_date.weekday()
-            sunday_offset = weekday + 1 if weekday < 6 else 0
-            self.start_date = current_date - pd.Timedelta(days=sunday_offset)
-            self.start_date = pd.Timestamp(self.start_date.year, self.start_date.month, self.start_date.day)
-            self.end_date = self.start_date + pd.Timedelta(days=7) - pd.Timedelta(seconds=1)
-        elif self.calendar_unit == 'M':
-            self.start_date = pd.Timestamp(current_date.year, current_date.month, 1)
-            if current_date.month == 12:
-                self.end_date = pd.Timestamp(current_date.year + 1, 1, 1) - pd.Timedelta(seconds=1)
-            else:
-                self.end_date = pd.Timestamp(current_date.year, current_date.month + 1, 1) - pd.Timedelta(seconds=1)
-        elif self.calendar_unit == 'Y':
-            self.start_date = pd.Timestamp(current_date.year, 1, 1)
-            self.end_date = pd.Timestamp(current_date.year, 12, 31, 23, 59, 59)
-
-    def update_view_data(self):
-        """Update the data view based on the current date range"""
-        if self.original_df is not None and not self.original_df.empty:
-            df = self.original_df.copy()
-            df['d'] = pd.to_datetime(df['d'])
-            self.df_view = df[(df['d'] >= self.start_date) & (df['d'] <= self.end_date)].copy()
-            self.df_view = self.df_view.sort_values('d')
 
     def populate_table(self):
-        """Populate the table with data from the current view"""
-        self.table.clear()
+        self._suppress_item_changed = True
+        try:
+            self.table.clear()
 
-        if self.df_view is None or self.df_view.empty:
-            # Set up empty table with headers
+            # If empty, set up an empty table with headers from column_map
+            if self.table_df is None or self.table_df.empty:
+                column_map = self.data_manager.chart_data['column_map']
+                headers = ['Date']
+                if self.is_minute_chart:
+                    headers.append('Minutes')
+                for col_key, col_name in column_map.items():
+                    if col_key not in ['d', 'm']:
+                        headers.append(col_name)
+
+                self.table.setColumnCount(len(headers))
+                self.table.setHorizontalHeaderLabels(headers)
+                self.table.setRowCount(0)
+                return
+
+            # Prepare dataframe
+            df = self.table_df.copy()
+            if 'd' in df.columns:
+                df['d'] = pd.to_datetime(df['d'], errors='coerce')
+                df = df.sort_values('d')
+
+            # Get column map and setup columns
             column_map = self.data_manager.chart_data['column_map']
-            headers = ['Date']
-            if self.is_minute_chart:
-                headers.append('Minutes')
-            for col_key, col_name in column_map.items():
-                if col_key not in ['d', 'm']:
-                    headers.append(col_name)
+            sys_cols = (['d'] + (['m'] if self.is_minute_chart and 'm' in df.columns else []))
+            data_cols = sorted([col for col in df.columns if col not in ['d', 'm']],
+                               key=lambda x: ('z' + x if not x.startswith('o') else x))
+            all_cols = [c for c in sys_cols + data_cols if c in df.columns]
 
-            self.table.setColumnCount(len(headers))
-            self.table.setHorizontalHeaderLabels(headers)
-            self.table.setRowCount(0)
-            return
-
-        # Get column map and setup columns
-        column_map = self.data_manager.chart_data['column_map']
-        sys_cols = ['d'] + (['m'] if self.is_minute_chart else [])
-        data_cols = sorted([col for col in self.df_view.columns if col not in ['d', 'm']],
-                           key=lambda x: ('z' + x if not x.startswith('o') else x))
-        all_cols = sys_cols + data_cols
-
-        # Create headers
-        headers = []
-        for col in all_cols:
-            if col == 'd':
-                headers.append('Date')
-            elif col == 'm':
-                headers.append('Minutes')
-            else:
-                # Find user column name
-                headers.append(next((user_col for sys_col, user_col in column_map.items() if sys_col == col), col))
-
-        # Set table dimensions and headers
-        self.table.setColumnCount(len(headers))
-        self.table.setRowCount(len(self.df_view))
-        self.table.setHorizontalHeaderLabels(headers)
-
-        # Populate data
-        for row_idx, (_, row_data) in enumerate(self.df_view.iterrows()):
-            for col_idx, col_name in enumerate(all_cols):
-                cell_value = row_data.get(col_name, '')
-
-                if col_name == 'd':
-                    date_str = pd.to_datetime(cell_value).strftime('%Y-%m-%d')
-                    item = QTableWidgetItem(date_str)
-                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            # Create headers
+            headers = []
+            for col in all_cols:
+                if col == 'd':
+                    headers.append('Date')
+                elif col == 'm':
+                    headers.append('Minutes')
                 else:
-                    if pd.isna(cell_value):
-                        item = QTableWidgetItem("")  # Show empty string for NaN
-                    elif isinstance(cell_value, (float, int)):
-                        formatted_value = self.data_manager.format_y_value(cell_value)
-                        item = QTableWidgetItem(str(formatted_value))
+                    headers.append(next((user_col for sys_col, user_col in column_map.items() if sys_col == col), col))
+
+            # Set table dimensions and headers
+            self.table.setColumnCount(len(headers))
+            self.table.setRowCount(len(df))
+            self.table.setHorizontalHeaderLabels(headers)
+
+            # Populate data
+            for row_idx, (_, row_data) in enumerate(df.iterrows()):
+                for col_idx, col_name in enumerate(all_cols):
+                    cell_value = row_data.get(col_name, '')
+
+                    if col_name == 'd':
+                        date_str = ""
+                        if pd.notna(cell_value):
+                            date_str = pd.to_datetime(cell_value).strftime('%Y-%m-%d')
+                        item = QTableWidgetItem(date_str)
+                        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     else:
-                        item = QTableWidgetItem(str(cell_value))
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                        if pd.isna(cell_value):
+                            item = QTableWidgetItem("")
+                        elif isinstance(cell_value, (float, int)):
+                            formatted_value = self.data_manager.format_y_value(cell_value)
+                            item = QTableWidgetItem(str(formatted_value))
+                        else:
+                            item = QTableWidgetItem(str(cell_value))
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-                item.setData(Qt.ItemDataRole.UserRole, col_name)
-                self.table.setItem(row_idx, col_idx, item)
+                    # Store the system column key for round-trip mapping
+                    item.setData(Qt.ItemDataRole.UserRole, col_name)
+                    self.table.setItem(row_idx, col_idx, item)
 
-        # Set column resize modes
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            # Set column resize modes
+            self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
 
-        # Set numeric delegates for editing
-        for col_idx in range(1, len(headers)):
-            self.table.setItemDelegateForColumn(col_idx, self.create_numeric_delegate())
+            # Set numeric delegates for editing
+            for col_idx in range(1, len(headers)):
+                self.table.setItemDelegateForColumn(col_idx, self.create_numeric_delegate())
+        finally:
+            self._suppress_item_changed = False
 
-    def populate_dates_list(self):
-        """Populate the dates list with all unique dates in the data"""
-        self.dates_list.clear()
-
-        if self.original_df is None or self.original_df.empty:
+    def _on_item_changed(self, item: QTableWidgetItem):
+        """Live write-through: when a cell changes, write it to self.table_df."""
+        if self._suppress_item_changed or self.table_df is None:
             return
 
-        df = self.original_df.copy()
-        df['d'] = pd.to_datetime(df['d'])
-        grouped_dates = []
+        sys_col = item.data(Qt.ItemDataRole.UserRole)
+        if not sys_col or sys_col == 'd':  # Date is non-editable
+            return
 
-        # Group dates by calendar unit - handle each case separately due to pandas limitations
-        if self.calendar_unit == 'D':
-            unique_dates = df['d'].dt.floor('D').unique()
-            for date in sorted(unique_dates):
-                formatted_date = date.strftime('%Y-%m-%d')
-                grouped_dates.append((date, formatted_date))
-        elif self.calendar_unit == 'W':
-            df['week_start'] = df['d'].dt.floor('D') - pd.to_timedelta(df['d'].dt.dayofweek, unit='D')
-            unique_dates = df['week_start'].unique()
-            for date in sorted(unique_dates):
-                week_end = date + pd.Timedelta(days=6)
-                formatted_date = f"{date.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}"
-                grouped_dates.append((date, formatted_date))
-        elif self.calendar_unit == 'M':
-            # Create month start dates manually to avoid pandas floor('M') issue
-            df['month_start'] = pd.to_datetime(df['d'].dt.to_period('M').dt.start_time)
-            unique_dates = df['month_start'].unique()
-            for date in sorted(unique_dates):
-                formatted_date = date.strftime('%B %Y')
-                grouped_dates.append((date, formatted_date))
-        elif self.calendar_unit == 'Y':
-            df['year_start'] = pd.to_datetime(df['d'].dt.year, format='%Y')
-            unique_dates = df['year_start'].unique()
-            for date in sorted(unique_dates):
-                formatted_date = date.strftime('%Y')
-                grouped_dates.append((date, formatted_date))
+        r = item.row()
+        text = (item.text() or "").strip()
 
-        # Add items to list and calculate optimal width
-        max_text_width = 0
-        font_metrics = QFontMetrics(self.dates_list.font())
+        # Parse into appropriate Python/NA value
+        if text == "":
+            value = pd.NA
+        elif sys_col == 'm':
+            try:
+                value = float(text)
+            except ValueError:
+                value = pd.NA
+        else:
+            try:
+                value = int(text)
+            except ValueError:
+                try:
+                    value = float(text)
+                except ValueError:
+                    value = text
 
-        for date_value, date_text in grouped_dates:
-            item = QListWidgetItem(date_text)
-            item.setData(Qt.ItemDataRole.UserRole, date_value)
-            self.dates_list.addItem(item)
-            max_text_width = max(max_text_width, font_metrics.horizontalAdvance(date_text))
-
-        # Set optimal list width
-        optimal_width = max_text_width + 39  # 16 scrollbar + 8 padding + 15 extra
-        self.dates_list.setFixedWidth(optimal_width)
-
-        # Find and set sidebar width
-        sidebar = self.dates_list.parent().parent()
-        if sidebar:
-            sidebar.setFixedWidth(optimal_width + 4)
-
-        # Update splitter sizes
-        splitter = self.findChild(QSplitter)
-        if splitter:
-            total_width = sum(splitter.sizes())
-            splitter.setSizes([optimal_width + 4, total_width - optimal_width - 4])
-
-        self.highlight_current_date_in_list()
-
-    def highlight_current_date_in_list(self):
-        """Highlight the current date/period in the dates list"""
-        for i in range(self.dates_list.count()):
-            item = self.dates_list.item(i)
-            date_value = item.data(Qt.ItemDataRole.UserRole)
-
-            # Check if current date falls within this period
-            match_conditions = {
-                'D': date_value.date() == self.current_view_date.date(),
-                'W': date_value <= self.current_view_date <= date_value + pd.Timedelta(days=6),
-                'M': (date_value.month == self.current_view_date.month and
-                      date_value.year == self.current_view_date.year),
-                'Y': date_value.year == self.current_view_date.year
-            }
-
-            if match_conditions.get(self.calendar_unit, False):
-                self.dates_list.setCurrentItem(item)
-                break
-
-    def on_date_list_item_clicked(self, item):
-        """Handle click on a date in the dates list"""
-        date_value = item.data(Qt.ItemDataRole.UserRole)
-        self.current_view_date = date_value
-        self.calculate_view_dates()
-        self.update_view_data()
-        self.populate_table()
+        # Assign; if dtype blocks, upcast to object
+        try:
+            self.table_df.at[r, sys_col] = value
+        except Exception:
+            self.table_df[sys_col] = self.table_df[sys_col].astype('object')
+            self.table_df.at[r, sys_col] = value
 
     def show_context_menu(self, position):
         """Show context menu for table"""
         context_menu = QMenu(self)
 
-        add_action = QAction("Add Row", self)
-        add_action.triggered.connect(self.add_row)
-
         delete_action = QAction("Delete Row", self)
         delete_action.triggered.connect(self.delete_selected_rows)
         delete_action.setEnabled(len(self.table.selectedItems()) > 0)
 
-        context_menu.addAction(add_action)
         context_menu.addAction(delete_action)
         context_menu.exec(self.table.mapToGlobal(position))
 
-    def add_row(self):
-        """Add a new row to the table"""
-        current_rows = self.table.rowCount()
-        self.table.insertRow(current_rows)
-
-        column_map = self.data_manager.chart_data['column_map']
-
-        # Set date (non-editable)
-        date_str = self.current_view_date.strftime('%Y-%m-%d')
-        date_item = QTableWidgetItem(date_str)
-        date_item.setData(Qt.ItemDataRole.UserRole, 'd')
-        date_item.setFlags(date_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.table.setItem(current_rows, 0, date_item)
-
-        # Set default values for other columns
-        for col_idx in range(1, self.table.columnCount()):
-            header_text = self.table.horizontalHeaderItem(col_idx).text()
-
-            # Find system column key
-            sys_col = next((key for key, value in column_map.items() if value == header_text), None)
-
-            if sys_col:
-                default_value = "1" if sys_col == 'm' else "0"
-                item = QTableWidgetItem(default_value)
-                item.setData(Qt.ItemDataRole.UserRole, sys_col)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.table.setItem(current_rows, col_idx, item)
-
     def delete_selected_rows(self):
-        """Delete selected rows from the table"""
-        selected_rows = {item.row() for item in self.table.selectedItems()}
-        for row in sorted(selected_rows, reverse=True):
-            self.table.removeRow(row)
+        """Delete selected rows from both the UI and the working copy."""
+        selected_rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        if not selected_rows:
+            return
 
-    def _collect_table_data(self):
-        """Helper method to collect data from table and return processed DataFrame"""
-        new_data_rows = []
-        column_map = self.data_manager.chart_data['column_map']
+        # Remove from working DataFrame by position
+        keep_idx = [i for i in range(len(self.table_df)) if i not in selected_rows]
+        self.table_df = self.table_df.iloc[keep_idx].reset_index(drop=True)
 
-        # Process each row in the table
-        for row_idx in range(self.table.rowCount()):
-            row_data = {}
-
-            # Process each column in the row
-            for col_idx in range(self.table.columnCount()):
-                item = self.table.item(row_idx, col_idx)
-                if not item:
-                    continue
-
-                sys_col = item.data(Qt.ItemDataRole.UserRole)
-                if not sys_col:
-                    continue
-
-                cell_value = item.text().strip()
-
-                if sys_col == 'd':
-                    row_data['d'] = pd.to_datetime(cell_value)
-                elif sys_col == 'm':
-                    minutes_val = float(cell_value) if cell_value else 1.0
-                    row_data['m'] = max(1.0, minutes_val)
-                else:
-                    if not cell_value:
-                        row_data[sys_col] = np.nan
-                    else:
-                        # Use pd.to_numeric which handles invalid values gracefully
-                        numeric_val = pd.to_numeric(cell_value, errors='coerce')
-                        if pd.isna(numeric_val):
-                            row_data[sys_col] = np.nan
-                        else:
-                            row_data[sys_col] = max(0, numeric_val)
-
-            if 'd' in row_data:
-                new_data_rows.append(row_data)
-
-        if not new_data_rows:
-            return pd.DataFrame()
-
-        # Convert to DataFrame
-        new_df = pd.DataFrame(new_data_rows)
-
-        # Ensure all required columns exist
-        all_sys_cols = set(column_map.keys())
-        for sys_col in all_sys_cols:
-            if sys_col not in new_df.columns:
-                if sys_col == 'm':
-                    new_df[sys_col] = 1.0
-                elif sys_col != 'd':
-                    new_df[sys_col] = np.nan
-
-        # Sort by date
-        return new_df.sort_values('d').reset_index(drop=True)
+        # Remove from UI
+        self._suppress_item_changed = True
+        try:
+            for row in selected_rows:
+                self.table.removeRow(row)
+        finally:
+            self._suppress_item_changed = False
 
     def export_to_csv(self):
-        """Export current data to CSV file"""
-        # Get current table data
-        export_df = self._collect_table_data()
-
-        if export_df.empty:
+        if self.original_df is None or self.original_df.empty:
             QMessageBox.warning(self, "Export Error", "No data to export.")
             return
 
@@ -2219,8 +2013,10 @@ class SpreadsheetDialog(QDialog):
         export_dir = str(Path(file_path).parent)
         self.event_bus.emit("update_user_preference", ['export_csv_folder', export_dir])
 
-        # Prepare export dataframe
-        export_df['d'] = pd.to_datetime(export_df['d']).dt.strftime('%Y-%m-%d')
+        # Export all data
+        export_df = self.original_df.copy()
+        if 'd' in export_df.columns:
+            export_df['d'] = pd.to_datetime(export_df['d']).dt.strftime('%Y-%m-%d')
 
         if not self.is_minute_chart and 'm' in export_df.columns:
             export_df = export_df.drop(columns=['m'])
@@ -2228,7 +2024,6 @@ class SpreadsheetDialog(QDialog):
         # Rename columns using column map
         column_map = self.data_manager.chart_data['column_map']
         rename_dict = {col: column_map[col] for col in export_df.columns if col in column_map}
-
         if rename_dict:
             export_df = export_df.rename(columns=rename_dict)
 
@@ -2236,46 +2031,30 @@ class SpreadsheetDialog(QDialog):
         QMessageBox.information(self, "Export Successful", f"Data exported to {file_path}")
 
     def apply_changes(self):
-        """Apply changes to the dataframe and close the dialog"""
-        new_df = self._collect_table_data()
-        if new_df.empty:
-            return
+        if self.table_df is None:
+            self.reject()
+            return None
 
-        # Update data manager
-        self.data_manager.df_raw = new_df
-        column_map = self.data_manager.chart_data['column_map']
-
-        # Update plot columns
-        plot_column_keys_except_floor = [v for k, v in column_map.items() if k not in ['d', 'm']]
-
-        for user_col in plot_column_keys_except_floor:
-            if user_col not in self.data_manager.plot_columns:
-                sys_col = next((k for k, v in column_map.items() if v == user_col), None)
-                if sys_col:
-                    self.data_manager.plot_columns[user_col] = self.event_bus.emit(
-                        'get_data_point_column', {'sys_col': sys_col, 'user_col': user_col})
+        result = self.table_df.copy(deep=True)
+        self.data_manager.df_raw = result
 
         # Refresh all plot columns
         for user_col in self.data_manager.plot_columns.keys():
             self.data_manager.plot_columns[user_col].refresh_view()
 
-        # Handle minute column for minute charts
-        if self.is_minute_chart:
-            minute_col_name = column_map.get('m', 'minutes')
-            if minute_col_name not in self.data_manager.plot_columns:
-                self.data_manager.plot_columns[minute_col_name] = self.event_bus.emit(
-                    'get_data_point_column', {'sys_col': 'm', 'user_col': minute_col_name})
-            self.data_manager.plot_columns[minute_col_name].refresh_view()
-
         # Refresh chart and save
         self.event_bus.emit('update_legend')
         self.event_bus.emit('refresh_chart')
-        # self.data_manager.handle_data_saving()
-        self.dataChanged.emit()
+
+        # Will change the chart data hash, thus triggering autosave or save-ask
+        last_modified = int(time.time())
+        self.event_bus.emit("update_chart_data", ['data_modified', last_modified])
+
         self.accept()
 
+        return result
+
     def create_numeric_delegate(self):
-        """Create a numeric delegate for table cells"""
 
         class NumericDelegate(QItemDelegate):
             def createEditor(self, parent, option, index):

@@ -1854,50 +1854,45 @@ class PlotModeWidget(ModeWidget):
         parent_layout.addLayout(date_layout)
 
     def _setup_action_buttons(self, parent_layout):
-        # Action buttons
         button_layout = QHBoxLayout()
 
-        # Add data button (plus icon)
         self.add_data_btn = QPushButton()
         self.add_data_btn.clicked.connect(self.add_data)
         self.add_data_btn.setIcon(QIcon(':/images/plus-solid.svg'))
 
-        # Create remove data button (minus icon) with double-click requirement
         self.remove_data_btn = QPushButton()
         self.remove_data_btn.setIcon(QIcon(':/images/minus-solid.svg'))
         self.register_double_click_button(self.remove_data_btn, self.remove_data)
 
-        # Create configure columns button (cog icon)
         configure_columns_btn = QPushButton()
         configure_columns_btn.setToolTip('Modify columns')
         configure_columns_btn.setIcon(QIcon(':/images/gear-solid.svg'))
         configure_columns_btn.clicked.connect(self.show_modify_columns_dialog)
 
+        # Spreadsheet icon button (no text)
+        self.open_spreadsheet_btn = QPushButton()
+        self.open_spreadsheet_btn.setToolTip('Spreadsheet')
+        self.open_spreadsheet_btn.setIcon(QIcon(':/images/table-solid-full.svg'))
+        self.open_spreadsheet_btn.clicked.connect(self.open_spreadsheet)
+
         button_layout.addWidget(self.add_data_btn)
         button_layout.addWidget(self.remove_data_btn)
         button_layout.addWidget(configure_columns_btn)
+        button_layout.addWidget(self.open_spreadsheet_btn)
         parent_layout.addLayout(button_layout)
 
     def _setup_data_info_section(self, parent_layout):
-        # Data points label
         data_label_layout = QVBoxLayout()
         self.data_label = QLabel('')
         data_label_layout.addWidget(self.data_label)
 
-        # Add file path label
         self.file_path_label = QLabel('')
-        self.file_path_label.setAlignment(Qt.AlignmentFlag.AlignCenter)  # Center the label
+        self.file_path_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         data_label_layout.addWidget(self.file_path_label)
 
-        # Add stretch to push everything to the bottom
+        # Keep the stretch if you still want the labels packed at the top
         data_label_layout.addStretch()
 
-        # Add spreadsheet button
-        self.open_spreadsheet_btn = QPushButton("Spreadsheet")
-        self.open_spreadsheet_btn.clicked.connect(self.open_spreadsheet)
-        data_label_layout.addWidget(self.open_spreadsheet_btn)
-
-        # Remove parent_layout.addStretch() since we want the data_label_layout to anchor at the bottom
         parent_layout.addLayout(data_label_layout)
 
     def show_modify_columns_dialog(self):
@@ -2218,10 +2213,6 @@ class PlotModeWidget(ModeWidget):
         return user_cols, count_strs, sys_cols
 
     def open_spreadsheet(self):
-        """
-        Opens a spreadsheet-like dialog for viewing and editing chart data.
-        Provides a better user experience than exporting to an external file.
-        """
         if self.data_manager.df_raw is None or self.data_manager.df_raw.empty:
             QMessageBox.warning(self, "No Data", "There is no data to display.")
             return
@@ -2229,14 +2220,10 @@ class PlotModeWidget(ModeWidget):
         # Create and show the dialog
         dialog = SpreadsheetDialog(self)
 
-        # Connect to the dataChanged signal
-        dialog.dataChanged.connect(self.on_spreadsheet_data_changed)
-
         # Show the dialog
         dialog.exec()
 
     def on_spreadsheet_data_changed(self):
-        """Handle data changes from the spreadsheet dialog"""
         # Refresh the plot mode UI
         self.event_bus.emit('refresh_plot_mode_widget')
 
@@ -2247,12 +2234,9 @@ class PlotModeWidget(ModeWidget):
         self.update_date_button()
 
     def update_spreadsheet_button_visibility(self):
-        # Temporarily disabled until I've fixed stuff here
-        self.open_spreadsheet_btn.setVisible(False)
-
-        # df = self.data_manager.df_raw
-        # has_data = df is not None and not df.empty
-        # self.open_spreadsheet_btn.setVisible(has_data)
+        df = self.data_manager.df_raw
+        has_data = df is not None and not df.empty
+        self.open_spreadsheet_btn.setVisible(has_data)
 
 
 class ChartDateHandler:
